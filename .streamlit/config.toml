@@ -1,0 +1,13 @@
+[theme]
+base="light"
+primaryColor="#0088cc"
+backgroundColor="#f5f8fb"
+secondaryBackgroundColor="#ffffff"
+textColor="#102a3f"
+dataframeHeaderBackgroundColor="#e8f7fc"
+font="sans serif"
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false

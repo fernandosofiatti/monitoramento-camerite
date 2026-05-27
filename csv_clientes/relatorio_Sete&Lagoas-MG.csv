@@ -1,0 +1,182 @@
+﻿Status,ID,UID,Título,Usuário,Observações,Plano,RTSP
+online,818576,e42b0c30-21e1-11f0-868a-3d22f3d6db32.stream,LPR - RUA SÃO JOSÉ 455,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9231/h264/ch1/main/av_stream
+online,818582,0c47b4b0-21f7-11f0-a8c5-7dd698ece33b.stream,LPR - AV GETULIO VARGAS,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9230/h264/ch1/main/av_stream
+online,818583,3ddac980-21f8-11f0-b72c-ff0b2f88f3a3.stream,LPR - AV NORTE SUL 275,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9232/h264/ch1/main/av_stream
+online,818584,9cbb8140-21fa-11f0-bf37-89ca76396fc1.stream,LPR - ORLA -GINASIO POLIESPORTIVO,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9233/h264/ch1/main/av_stream
+online,818585,7e35fa60-21fb-11f0-868a-3d22f3d6db32.stream,LPR - AV. DR. RENATO 1423,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9234/h264/ch1/main/av_stream
+online,818586,4e9750a0-21fc-11f0-8e63-8dc568d4757d.stream,"LPR - AV. MAURILIO DE JESUS, 1400",Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9235/h264/ch1/main/av_stream
+online,824497,DNF0001942851,TORRE - Praça Tiradentes A,Prefeitura Sete Lagoas,,30dias,
+online,824507,DGT0001942818,TORRE - Praça Tiradentes B,Prefeitura Sete Lagoas,,30dias,
+online,824508,DHP0001942827,TORRE - Praça Tiradentes C,Prefeitura Sete Lagoas,,30dias,
+online,824509,DWS0001677880,TORRE - Praça Tiradentes D,Prefeitura Sete Lagoas,,30dias,
+online,824514,DUE0000628601,TORRE - Terminal - Antonio Olindo A,Prefeitura Sete Lagoas,,30dias,
+online,824515,DSA0000628492,TORRE - Terminal - Antonio Olindo B,Prefeitura Sete Lagoas,,30dias,
+online,824516,DKH0001677824,TORRE - Terminal - Antonio Olindo C,Prefeitura Sete Lagoas,,30dias,
+online,824517,DVL0001678093,TORRE - Terminal - Antonio Olindo D,Prefeitura Sete Lagoas,,30dias,
+online,824544,DAV0001942747,TORRE - Praça Canaã A,Prefeitura Sete Lagoas,,30dias,
+online,824545,DGM0002737615,TORRE - Praça Canaã B,Prefeitura Sete Lagoas,,30dias,
+online,824546,DYA0001942828,TORRE - Praça Canaã C,Prefeitura Sete Lagoas,,30dias,
+online,824547,DEW0002737613,TORRE - Praça Canaã D,Prefeitura Sete Lagoas,,30dias,
+online,824650,DUI0001800787,TORRE - Praça do Carmo A,Prefeitura Sete Lagoas,,30dias,
+online,824651,DSS0001800816,TORRE - Praça do Carmo B,Prefeitura Sete Lagoas,,30dias,
+online,824652,DDZ0001800780,TORRE - Praça do Carmo C,Prefeitura Sete Lagoas,,30dias,
+online,824653,DHT0001800793,TORRE - Praça do Carmo D,Prefeitura Sete Lagoas,,30dias,
+online,825020,DVS0001800777,"PORTAL - Av Carmem Kilesse, 860 A",Prefeitura Sete Lagoas,,30dias,
+online,825032,ebd56fe0-7955-11f0-b5b5-19ddd184c658.stream,"LPR - PORTAL - Av. Carmem Kilesse, 860 A - Sent Bairro",Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.191.129:9150/cam/realmonitor?channel=1&subtype=0
+online,825033,4b123c40-7956-11f0-8409-57f91d75e49e.stream,"LPR - PORTAL - Av, Carmem Kilesse, 860 B - Senti Centro",Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.191.129:9151/cam/realmonitor?channel=1&subtype=0
+online,825168,DGL0002653353,TORRE - Nova Cidade A,Prefeitura Sete Lagoas,,30dias,
+online,825170,DAN0002653368,TORRE - Nova Cidade C,Prefeitura Sete Lagoas,,30dias,
+online,825171,DRD0001800785,TORRE - Nova Cidade D,Prefeitura Sete Lagoas,,30dias,
+online,825306,DFG0001678060,TORRE - IPORANGA A,Prefeitura Sete Lagoas,"""Sobre essa conexão, a ONT está online, mas não está realizando a discagem PPPoE... última vez que ficou online de fato foi ontem às 14h50. Dei uns 2 reboots nela, sem sucesso. Pedi a turma aqui para abrir uma OS e enviar uma equipe para verificá-la.""",30dias,
+online,825307,DYG0000497574,TORRE - IPORANGA B,Prefeitura Sete Lagoas,"""Sobre essa conexão, a ONT está online, mas não está realizando a discagem PPPoE... última vez que ficou online de fato foi ontem às 14h50. Dei uns 2 reboots nela, sem sucesso. Pedi a turma aqui para abrir uma OS e enviar uma equipe para verificá-la.""",30dias,
+online,825309,DJL0001678066,TORRE - IPORANGA C,Prefeitura Sete Lagoas,"""Sobre essa conexão, a ONT está online, mas não está realizando a discagem PPPoE... última vez que ficou online de fato foi ontem às 14h50. Dei uns 2 reboots nela, sem sucesso. Pedi a turma aqui para abrir uma OS e enviar uma equipe para verificá-la.""",30dias,
+online,825310,DZG0001677748,TORRE - IPORANGA D,Prefeitura Sete Lagoas,"""Sobre essa conexão, a ONT está online, mas não está realizando a discagem PPPoE... última vez que ficou online de fato foi ontem às 14h50. Dei uns 2 reboots nela, sem sucesso. Pedi a turma aqui para abrir uma OS e enviar uma equipe para verificá-la.""",30dias,
+online,825448,DFW0002737621,TORRE - Barreiro - Praça do Milito A,Prefeitura Sete Lagoas,,30dias,
+online,825450,DPT0002629297,TORRE - Barreiro - Praça do Milito B,Prefeitura Sete Lagoas,,30dias,
+online,825452,DRQ0002737617,TORRE - Barreiro - Praça do Milito C,Prefeitura Sete Lagoas,,30dias,
+online,825453,DOM0002737612,TORRE - Barreiro - Praça do Milito D,Prefeitura Sete Lagoas,,30dias,
+online,825728,DZC0000497430,TORRE - Cidade de Deus A,Prefeitura Sete Lagoas,,30dias,
+online,825729,DTF0000497412,TORRE - Cidade de Deus B,Prefeitura Sete Lagoas,,30dias,
+online,825730,DBC0000497239,TORRE - Cidade de Deus C,Prefeitura Sete Lagoas,,30dias,
+online,825731,DGD0000497244,TORRE - Cidade de Deus D,Prefeitura Sete Lagoas,,30dias,
+online,825732,DAN0001800798,TORRE - Praça do Escorrega A,Prefeitura Sete Lagoas,,30dias,
+online,825733,DXW0001800815,TORRE - Praça do Escorrega B,Prefeitura Sete Lagoas,,30dias,
+online,825734,DPH0001800872,TORRE - Praça do Escorrega C,Prefeitura Sete Lagoas,,30dias,
+online,825735,DWU0001800812,TORRE - Praça do Escorrega D,Prefeitura Sete Lagoas,,30dias,
+online,825737,DKI0001800632,TORRE - Feirinha Centro A,Prefeitura Sete Lagoas,,30dias,
+online,825738,DAE0001800618,TORRE - Feirinha Centro B,Prefeitura Sete Lagoas,,30dias,
+online,825739,DFR0001800592,TORRE - Feirinha Centro C,Prefeitura Sete Lagoas,,30dias,
+online,825740,DDS0001800687,TORRE - Feirinha Centro D,Prefeitura Sete Lagoas,,30dias,
+online,825845,DSM0000497203,TORRE - Lagoa Boa Vista Skate A,Prefeitura Sete Lagoas,,30dias,
+online,825847,DVP0000497351,TORRE - Lagoa Boa Vista Skate B,Prefeitura Sete Lagoas,,30dias,
+online,825848,DIN0000497591,TORRE - Lagoa Boa Vista Skate C,Prefeitura Sete Lagoas,,30dias,
+online,825849,DRA0000497224,TORRE - Lagoa Boa Vista Skate D,Prefeitura Sete Lagoas,,30dias,
+online,825850,DVI0001942842,TORRE - Lagoa Boa Vista Palco A,Prefeitura Sete Lagoas,,30dias,
+online,825856,DKJ0001942644,TORRE - Lagoa Boa Vista Palco C,Prefeitura Sete Lagoas,,30dias,
+online,825857,DPK0001942791,TORRE - Lagoa Boa Vista Palco D,Prefeitura Sete Lagoas,,30dias,
+online,825859,DQM0001942792,TORRE - Lagoa Boa Vista Palco B,Prefeitura Sete Lagoas,,30dias,
+online,825917,DKB0001677902,PORTAL - Av. Castelo Branco Saida 040 A - Sent BR,Prefeitura Sete Lagoas,,30dias,
+online,825918,DIZ0001677886,PORTAL - Av. Castelo Branco Saída 040 B Sent Centro,Prefeitura Sete Lagoas,,30dias,
+online,825928,DIY0002653337,PORTAL - Serra Santa Helena A,Prefeitura Sete Lagoas,,30dias,
+online,825929,DCM0002653377,PORTAL - Serra Santa Helena B,Prefeitura Sete Lagoas,,30dias,
+online,825933,A4406545,LPR - PORTAL - Av. Castelo Branco saída 040 B Sent Centro,Prefeitura Sete Lagoas,Local sem energia,30dias,
+online,825934,A4406501,LPR - PORTAL - Av. Castelo Branco Saída 040 A Sent BR,Prefeitura Sete Lagoas,Local sem energia,30dias,
+online,826028,DGK0002653366,TORRE - Praça José Lucídio Avelar A,Prefeitura Sete Lagoas,,30dias,
+online,826030,DUI0002653342,TORRE - Praça José Lucídio Avelar B,Prefeitura Sete Lagoas,,30dias,
+online,826032,DXE0002653349,TORRE - Praça José Lucídio Avelar C,Prefeitura Sete Lagoas,,30dias,
+online,826033,DTJ0002653336,TORRE - Praça José Lucídio Avelar D,Prefeitura Sete Lagoas,,30dias,
+online,826036,DTO0001800635,TORRE - Praça Progresso B,Prefeitura Sete Lagoas,,30dias,
+online,826041,DEQ0001800675,TORRE - Praça Progresso D,Prefeitura Sete Lagoas,,30dias,
+online,826050,DSH0001800633,TORRE - Praça Progresso A,Prefeitura Sete Lagoas,,30dias,
+online,826061,DTA0001800642,TORRE - Praça Progresso C,Prefeitura Sete Lagoas,,30dias,
+online,826094,DVU0001800664,TORRE - Serra Santa Helena A,Prefeitura Sete Lagoas,,30dias,
+online,826095,DBI0002656618,TORRE - Serra Santa Helena B,Prefeitura Sete Lagoas,,30dias,
+online,826096,DDX0001800773,TORRE - Serra Santa Helena C,Prefeitura Sete Lagoas,,30dias,
+online,826097,DNI0001800779,TORRE - Serra Santa Helena D,Prefeitura Sete Lagoas,,30dias,
+online,826098,DFD0002737627,TORRE - Praça JK A,Prefeitura Sete Lagoas,,30dias,
+online,826099,DMS0001800778,TORRE - Praça JK B,Prefeitura Sete Lagoas,,30dias,
+online,826100,DDR0002656815,TORRE - Praça JK C,Prefeitura Sete Lagoas,,30dias,
+online,826101,DMG0001800625,TORRE - Praça JK D,Prefeitura Sete Lagoas,,30dias,
+online,826322,DQI0000497318,TORRE - Barbosa Melo B,Prefeitura Sete Lagoas,,30dias,
+online,826323,DJM0001800848,TORRE - Barbosa Melo C,Prefeitura Sete Lagoas,,30dias,
+online,826325,DCO0001800835,TORRE - Barbosa Melo D,Prefeitura Sete Lagoas,,30dias,
+online,826710,DPU0001677890,TORRE - UPA A,Prefeitura Sete Lagoas,,30dias,
+online,826711,DXZ0001677889,TORRE - UPA B,Prefeitura Sete Lagoas,,30dias,
+online,826712,DXP0001677686,TORRE - UPA C,Prefeitura Sete Lagoas,,30dias,
+online,826715,DMD0001677855,PORTAL - JK A - Saída Araçai,Prefeitura Sete Lagoas,"o local está com defeito na rede elétrica, foi acionado o pessoal da CEMIG para manutenção.",30dias,
+online,826716,DST0001677727,PORTAL - JK B - Saída Araçai,Prefeitura Sete Lagoas,"o local está com defeito na rede elétrica, foi acionado o pessoal da CEMIG para manutenção.",30dias,
+online,826717,A4406510,LPR - PORTAL - JK A - Saída Araçai,Prefeitura Sete Lagoas,"o local está com defeito na rede elétrica, foi acionado o pessoal da CEMIG para manutenção.",30dias,
+online,826718,A4406504,LPR - PORTAL - JK B - Saída Araçai,Prefeitura Sete Lagoas,"o local está com defeito na rede elétrica, foi acionado o pessoal da CEMIG para manutenção.",30dias,
+online,826833,A4406517,LPR - PORTAL - Eldorado A,Prefeitura Sete Lagoas,,30dias,
+online,826834,A4406530,LPR - PORTAL - Eldorado B,Prefeitura Sete Lagoas,,30dias,
+online,826852,DLX0001677719,TORRE - UPA D,Prefeitura Sete Lagoas,,30dias,
+online,826853,DPD0001677324,PORTAL - Eldorado A,Prefeitura Sete Lagoas,,30dias,
+online,826854,DFT0001677332,PORTAL - Eldorado B,Prefeitura Sete Lagoas,,30dias,
+online,827149,A4406538,LPR - PORTAL - Major Romano A,Prefeitura Sete Lagoas,"Serial: GA4406538
+177.129.186.76:8161
+admin:Camerite0701",30dias,
+online,827151,DXQ0001677478,PORTAL - Major Romano A,Prefeitura Sete Lagoas,,30dias,
+online,827152,DVW0001677521,PORTAL - Major Romano B,Prefeitura Sete Lagoas,,30dias,
+online,827153,df3f0460-97b1-11f0-a011-dfbc5f972218.stream,"LPR - R. RANDOLFO SIMOES, 419",Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9236/h264/ch1/main/av_stream
+online,827154,153b0e10-97b2-11f0-81ea-5b48e2c057b1.stream,LPR - RUA TEOFILO MARQUES 467,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9237/h264/ch1/main/av_stream
+online,827155,3b420280-97b2-11f0-86e0-fd3dbfb5e5f3.stream,LPR - AV. ANTONIO OLINTO 523,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9238/h264/ch1/main/av_stream
+online,827156,619b83c0-97b2-11f0-a011-dfbc5f972218.stream,LPR - RUA PAULO FRONTIN 899,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Abc12345@177.128.224.159:9239/h264/ch1/main/av_stream
+online,827573,cd93cdd0-9e0b-11f0-a670-871d9f4e82e1.stream,SPEED - Rampa Voo Livre - Serra Santa Helena,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.77:9162/h264/ch1/main/av_stream
+online,827721,DBB0001677515,PORTAL - CATERPILAR A,Prefeitura Sete Lagoas,,30dias,
+online,827724,DOI0001677317,PORTAL - Dona Silvia A,Prefeitura Sete Lagoas,,30dias,
+online,827726,DWG0001677301,PORTAL - Dona Silvia B,Prefeitura Sete Lagoas,,30dias,
+online,827833,GA4406516,LPR - PORTAL - Serra Santa Helena A,Prefeitura Sete Lagoas,,30dias,
+online,827834,GA4406500,LPR - PORTAL - Serra Santa Helena B,Prefeitura Sete Lagoas,,30dias,
+online,828017,DEV0000628319,PORTAL - Planalto A,Prefeitura Sete Lagoas,,30dias,
+online,828018,DTU0002629258,PORTAL - Planalto B,Prefeitura Sete Lagoas,,30dias,
+online,828092,DRI0001678084,PORTAL - Otavio Campelo A,Prefeitura Sete Lagoas,,30dias,
+online,828094,DWC0002629347,PORTAL - Otavio Campelo B,Prefeitura Sete Lagoas,,30dias,
+online,828168,DVM0001677308,PORTAL - Av. Mucio José A,Prefeitura Sete Lagoas,,30dias,
+online,828169,DJE0002823667,PORTAL - Av. Mucio Jose B,Prefeitura Sete Lagoas,,30dias,
+online,828171,DCH0002629327,PORTAL - Av. Mucio Jose C,Prefeitura Sete Lagoas,,30dias,
+online,828172,DRR0002823635,PORTAL - Av. Mucio José D,Prefeitura Sete Lagoas,,30dias,
+online,828174,b6409f50-a86f-11f0-8fe1-95baa7a5aca6.stream,LPR - PORTAL - Av. Mucio José A,Prefeitura Sete Lagoas,"GA4406588
+177.129.186.80:8171
+admin:Camerite0701",30dias,rtsp://admin:Camerite0701@177.129.186.80:9171/h264/ch1/main/av_stream
+online,828175,152f24a0-a870-11f0-8fe1-95baa7a5aca6.stream,LPR - PORTAL - Av. Mucio José B,Prefeitura Sete Lagoas,"GA4406567
+177.129.186.80:8172
+admin:Camerite0701",30dias,rtsp://admin:Camerite0701@177.129.186.80:9172/h264/ch1/main/av_stream
+online,828177,707226c0-a873-11f0-a19e-d93dab294f77.stream,LPR - PORTAL - Av. Mucio José C,Prefeitura Sete Lagoas,"GA4406565
+177.129.186.80:8173
+admin:Camerite0701",30dias,rtsp://admin:Camerite0701@177.129.186.80:9173/h264/ch1/main/av_stream
+online,828178,3958d0c0-a874-11f0-897e-a5717ec4f523.stream,LPR - PORTAL - Av. Mucio José D,Prefeitura Sete Lagoas,"GA4406587
+177.129.186.80:8174
+admin:Camerite0701",30dias,rtsp://admin:Camerite0701@177.129.186.80:9174/h264/ch1/main/av_stream
+online,828182,b31ffa30-a876-11f0-8fe1-95baa7a5aca6.stream,LPR - PORTAL - Av. Otavio Campelo A,Prefeitura Sete Lagoas,"GA4406620
+177.129.186.82:8169
+admin:Camerite0701",30dias,rtsp://admin:Camerite0701@177.129.186.82:9169/h264/ch1/main/av_stream
+online,828183,0e940950-a878-11f0-897e-a5717ec4f523.stream,LPR - PORTAL - Av. Otavio Campelo B,Prefeitura Sete Lagoas,"GA4406613
+177.129.186.82:8170
+admin:Camerite0701",30dias,rtsp://admin:Camerite0701@177.129.186.82:9170/h264/ch1/main/av_stream
+online,829069,DPM0002629340,PORTAL - MG 424 - B Sent Prudente,Prefeitura Sete Lagoas,,30dias,
+online,829070,DXB0002823648,PORTAL - MG 424 - A Sent Centro,Prefeitura Sete Lagoas,,30dias,
+online,829071,GA4406576,LPR - PORTAL - MG 424 A Sent Prudente,Prefeitura Sete Lagoas,"Efetuado testes, offline, abrir chamado para o Técnico local.",30dias,
+online,829072,GA4406618,LPR - PORTAL - MG 424 B - Sent Centro,Prefeitura Sete Lagoas,,30dias,
+online,829221,5116dbe0-b9e4-11f0-878b-9fe5a6bb3f63.stream,LPR - PORTAL - CATERPILAR A,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.79:8158/cam/realmonitor?channel=1&subtype=0
+online,829516,d6851a90-c415-11f0-8d7b-074047bfac0a.stream,LPR - Portal Dona Silvia A,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.78:9163/h264/ch1/main/av_stream
+online,829517,36fbc680-c416-11f0-b4a7-e1fe1255ce4f.stream,LPR - Portal Dona Silvia B,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.78:9164/h264/ch1/main/av_stream
+online,829518,ad96c830-c416-11f0-b217-433b741c7137.stream,LPR - PORTAL Planalto B,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.81:9168/h264/ch1/main/av_stream
+online,829721,63b3b280-c71f-11f0-8d7b-074047bfac0a.stream,LPR - PORTAL MG-238 Jardim Primavera II A,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.84:8177/cam/realmonitor?channel=1&subtype=0
+online,830188,7f8bd140-d061-11f0-bfaf-fde36e48f071.stream,LPR - PORTAL MG-238 Jardim Primavera II B,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.84:8178/cam/realmonitor?channel=1&subtype=0
+online,830193,DRK0000628596,PORTAL - CATERPILAR B,Prefeitura Sete Lagoas,,30dias,
+online,830194,e0a99c30-d06d-11f0-bfaf-fde36e48f071.stream,LPR - PORTAL - CATERPILAR B - SENT CENTRO,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.85:8159/cam/realmonitor?channel=1&subtype=0
+online,830601,0002628643CONT,PORTAL - MG 238 - Jardim Primavera II A,Prefeitura Sete Lagoas,,30dias,
+online,831770,DSR0003239541,Rodoviária A,Prefeitura Sete Lagoas,,30dias,
+online,831773,DPW0004203370,Rodoviária B,Prefeitura Sete Lagoas,,30dias,
+online,831883,DEV0001800826,TORRE - Barbosa Melo A,Prefeitura Sete Lagoas,,30dias,
+online,832082,DYZ0003239538,Rodoviaria C,Prefeitura Sete Lagoas,,30dias,
+online,832083,DIY0004203218,Rodoviaria D,Prefeitura Sete Lagoas,,30dias,
+online,832350,AG5699351,FACIAL A - Rodoviaria,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.88:9180/h264/ch1/main/av_stream
+online,832351,AG4526072,FACIAL B - Rodoviaria,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.88:9181/h264/ch1/main/av_stream
+online,832447,AG4526073,FACIAL A - R. Lassance x Emilio Vasconcelos 44,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.90:9183/h264/ch1/main/av_stream
+online,832448,AG5699352,FACIAL B - R. Lassance x Emilio Vasconcelos 44,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.90:9184/h264/ch1/main/av_stream
+online,832457,AG4526076,FACIAL D - Rodoviaria,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.87:9179/h264/ch1/main/av_stream
+online,833152,180df3d0-1e5f-11f1-ad35-67b14f31ba29.stream,LPR - PORTAL Planalto A,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.81:9167/h264/ch1/main/av_stream
+online,834365,DMN0008042118,PORTAL - Policenas Mascarenhas196 A,Prefeitura Sete Lagoas,,30dias,
+online,834366,DJC0008042308,PORTAL - Policenas Mascarenhas196 B,Prefeitura Sete Lagoas,,30dias,
+online,834367,e395a3a0-3a9c-11f1-8f78-abdaa526f88c.stream,LPR - PORTAL - Rua Policenas Mascarenhas 196 A,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.92:9187/cam/realmonitor?channel=1&subtype=0
+online,834369,6f0f3f30-3a9e-11f1-9c6e-7b06c5beb22f.stream,LPR - PORTAL - Rua Policenas Mascarenhas 196 B,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.92:9188/cam/realmonitor?channel=1&subtype=0
+online,834605,DXO0007580299,TORRE - Nova Cidade B,Prefeitura Sete Lagoas,,30dias,
+online,834606,aa226bf0-429c-11f1-a470-91147be8d33e.stream,LPR - PORTAL - Av. Castelo Branco saída 040 C - Sent Centro,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.66:9185/cam/realmonitor?channel=1&subtype=0
+online,834607,ffd1d8b0-429c-11f1-a470-91147be8d33e.stream,LPR - PORTAL - Av. Castelo Branco saída 040 D - Sent BR,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.66:9186/cam/realmonitor?channel=1&subtype=0
+online,834938,DRT0010017141,PORTAL - AmBev A - Av. Vanda Bastos,Prefeitura Sete Lagoas,,30dias,
+online,834939,DPU0010017225,PORTAL - AmBev B - Av. Vanda Bastos,Prefeitura Sete Lagoas,,30dias,
+online,834940,1a2b7dd0-4a6b-11f1-b64c-c53d6148f249.stream,LPR - PORTAL - AmBev A - Sent. Bairro - AvVandaBastos,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.97:9189/cam/realmonitor?channel=1&subtype=0
+online,834941,6cb567a0-4a6b-11f1-b64c-c53d6148f249.stream,LPR - PORTAL - AmBev B - Sent. Centro - AvVandaBastos,Prefeitura Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.97:9190/cam/realmonitor?channel=1&subtype=0
+online,832374,AG5699353,FACIAL C - Rodoviaria,Camerite Sete Lagoas,,30dias,rtsp://admin:Camerite0701@177.129.186.88:9182/h264/ch1/main/av_stream
+offline,824398,DCJ0001677676,TORRE - Terminal - Av. Eurico Souza A,Prefeitura Sete Lagoas,,30dias,
+offline,824405,DDQ0002629359,TORRE - Terminal - Av. Eurico Souza B,Prefeitura Sete Lagoas,,30dias,
+offline,824406,DLP0002653351,TORRE - Terminal - Av. Eurico Souza C,Prefeitura Sete Lagoas,,30dias,
+offline,824408,DPL0002737609,TORRE - Terminal - Av. Eurico Souza D,Prefeitura Sete Lagoas,,30dias,
+offline,825021,DGI0001800783,"PORTAL - Av Carmem Kilesse, 860 B",Prefeitura Sete Lagoas,"Testes no local Cabo de rede que cruza a pista com defeito nos cabos 6, 7 e 8, solicitado a troca do cabo pelo suporte.",30dias,
+offline,825895,DYJ0002653347,TORRE - Montreal A,Prefeitura Sete Lagoas,,30dias,
+offline,825896,DBH0002628973,TORRE - Montreal B,Prefeitura Sete Lagoas,,30dias,
+offline,825897,DZY0002629353,TORRE - Montreal C,Prefeitura Sete Lagoas,,30dias,
+offline,825898,DAD0002629331,TORRE - Montreal D,Prefeitura Sete Lagoas,,30dias,
+offline,827148,B4934596,LPR - PORTAL - Major Romano B,Prefeitura Sete Lagoas,,30dias,
+offline,830189,DIH0001677822,PORTAL MG-238 Jardim Primavera II B,Prefeitura Sete Lagoas,"Um dos cabos de rede que cruza a rodovia está em curto, então essa camera foi deixada Offline para manter ativa a LPR",30dias,

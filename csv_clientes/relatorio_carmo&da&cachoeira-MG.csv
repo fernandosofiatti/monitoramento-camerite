@@ -1,0 +1,21 @@
+﻿Status,ID,UID,Título,Usuário,Observações,Plano,RTSP
+online,661513,f48b1850-5f8c-11ed-a913-bf8dc39f8ee5.stream,LPR Saida Tres Pontas,Otavio,,30dias,rtsp://admin:Risco022@187.109.49.204:554/chID=1&streamType=main&linkType=tcpa
+online,806467,C0AJ12033975O,Praça Central3,Francisco Otavio Botrel Campos,,30dias,
+online,806462,C0AJ13016218Q,Praça Central0,Francisco Otavio Botrel Campos,,30dias,
+online,806460,C0AJ1302821UG,Praça Central2,Francisco Otavio Botrel Campos,,30dias,
+online,806457,C0AJ1301834IG,Praça Central1,Francisco Otavio Botrel Campos,,30dias,
+online,806453,C0AJ1302074JL,Praca do Carmo 453 A,Francisco Otavio Botrel Campos,,30dias,
+online,674477,C0AJ13019731L,Entrada Secundaria 2,Otavio,,30dias,
+online,674460,C0AJ1301974VY,Entrada Secundaria,Otavio,,30dias,
+online,661445,C0AJ1301977H6,Praca do Carmo 432 B,Otavio,,30dias,
+online,661443,C0AJ1300504S8,Praca do Carmo 432 A,Otavio,,30dias,
+online,654859,C0AJ13004343F,Rua Benedito Alves Costa 295,Otavio,,30dias,
+offline,661512,C0AJ1301982S7,Jose Junqueira Reis,Otavio,,30dias,
+offline,654324,8c8af780-440b-11ed-9148-058ad89eedc5.stream,LPR Rua Antonio Justiniano dos Reis 927,Otavio,,30dias,rtsp://admin:Risco022@131.72.47.177:554/chID=1&streamType=main&linkType=tcpa
+offline,674439,C0AJ1302831UA,Calçadão,Otavio,,30dias,
+offline,655518,C0AJ1301978MB,Rua Antonio Justiniano dos Reis 927 Cemiterio,Otavio,,30dias,
+offline,654860,ffed2520-45a7-11ed-a99b-3b54db8e923f.stream,LPR Entrada Cidade,Otavio,,30dias,rtsp://admin:Risco022@131.72.47.142:553/chID=1&streamType=main&linkType=tcpa
+offline,806455,C0AJ1301053UR,Praca do Carmo 453 B,Francisco Otavio Botrel Campos,,30dias,
+offline,654854,5facf770-4598-11ed-a0fa-9539bc27402e.stream,LPR Saida Rotatoria,Otavio,,30dias,rtsp://admin:Risco022@131.72.47.142:554/chID=1&streamType=main&linkType=tcpa@
+offline,654794,C0AJ1302137ON,Entrada Carmo da Cachoeira,Otavio,,30dias,
+offline,654791,C0AJ130204111,Entrada Rotatoria,Otavio,,30dias,
