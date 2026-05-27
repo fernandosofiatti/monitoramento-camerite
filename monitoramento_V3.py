@@ -458,10 +458,16 @@ hr { border-color:#dbe8f2 !important; margin:1.5rem 0 !important; }
 # ─────────────────────────────────────────────
 # CONSTANTES
 # ─────────────────────────────────────────────
-PASTA                     = os.getenv("CAMERITE_MONITORAMENTO_PASTA", r"C:\Users\FernandoHenriqueSofi\Desktop\Monitoramento")
+# Caminhos preparados para publicação no Streamlit Cloud/GitHub.
+# Por padrão, o app usa a própria pasta do arquivo monitoramento_V3.py.
+# Se precisar rodar localmente em outra pasta, ainda é possível usar a variável
+# de ambiente CAMERITE_MONITORAMENTO_PASTA.
+BASE_DIR                  = os.path.dirname(os.path.abspath(__file__))
+PASTA                     = os.getenv("CAMERITE_MONITORAMENTO_PASTA", BASE_DIR)
+
 CSV_GOV                   = os.path.join(PASTA, "GOV_extracao_cameras.csv")
 XLSX_CLIENTES             = os.path.join(PASTA, "nome_clientes.xlsx")
-IMPORTACAO_INDIVIDUAL_DIR = os.path.join(PASTA, "importacao_individual")
+IMPORTACAO_INDIVIDUAL_DIR = os.path.join(PASTA, "_BKPS_importacao_individual")
 DB_PATH                   = os.path.join(PASTA, "historico.db")
 GEO_CACHE_PATH            = os.path.join(PASTA, "geocode_cache.json")
 BRAZIL_STATES_GEOJSON_URL = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson"
@@ -3732,7 +3738,7 @@ def main():
                 row_b = df_snaps_filtrado[df_snaps_filtrado["id"] == id_b].iloc[0]
                 if str(row_b.get("notas","")).strip():
                     st.markdown("---")
-                    st.markdown(f"📝 **Observações do snapshot B:** {row_b['notas']}")
+                    st.markdown(f"📝 **Observações do snapshot B TESTE:** {row_b['notas']}")
 
             st.markdown("---")
             with st.expander("🗑️  Gerenciar snapshots gravados"):
