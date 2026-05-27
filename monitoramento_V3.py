@@ -3732,7 +3732,7 @@ def main():
                 row_b = df_snaps_filtrado[df_snaps_filtrado["id"] == id_b].iloc[0]
                 if str(row_b.get("notas","")).strip():
                     st.markdown("---")
-                    st.markdown(f"📝 **Observações do snapshot B:** {row_b['notas']}")
+                    st.markdown(f"📝 **Observações do snapshot B TESTE:** {row_b['notas']}")
 
             st.markdown("---")
             with st.expander("🗑️  Gerenciar snapshots gravados"):
