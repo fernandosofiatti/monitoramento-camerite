@@ -2666,6 +2666,118 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
 # ─────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
+# DETALHE RÁPIDO DE CLIENTE
+# ─────────────────────────────────────────────
+def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
+    """Renderiza somente o detalhe do cliente aberto, sem montar todos os cards/tabs."""
+    v = dados.get(wl_id, {"nome_cliente": "?", "nome_empresa": "", "offline": pd.DataFrame(), "total": 0})
+    df_det = v.get("offline", pd.DataFrame()).copy()
+    total_u = int(v.get("total", 0) or 0)
+    offline_u = int(len(df_det))
+    pct_d = round(offline_u / total_u * 100, 1) if total_u else 0
+    cor_d = cor_hex(pct_d)
+
+    nome_cliente_html = escape_html(v.get("cidade_estado") or v.get("nome_cliente", "?"))
+    nome_empresa_html = escape_html(v.get("nome_empresa", ""))
+    wl_id_html = escape_html(wl_id)
+
+    topo_voltar, topo_titulo = st.columns([1, 5])
+    with topo_voltar:
+        if st.button("← Voltar", key="voltar_cliente_top", use_container_width=True):
+            st.session_state.pop("detalhe", None)
+            st.rerun()
+
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.2rem;flex-wrap:wrap">'
+        '<div style="background:rgba(0,136,204,.12);border:1px solid rgba(0,136,204,.22);'
+        'border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;'
+        'color:#007ab8;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento rápido</div>'
+        '<div>'
+        + f'<div style="font-size:20px;font-weight:700;color:#0088cc">{nome_cliente_html}</div>'
+        + f'<div style="font-size:12px;color:#6b8496">{nome_empresa_html} · ID: {wl_id_html}</div>'
+        + '</div>'
+        + f'<div style="margin-left:auto;font-size:13px;font-weight:700;color:{cor_d}">'
+        + f'{offline_u} offline de {total_u} câmeras ({pct_d}%)'
+        + '</div>'
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total", total_u)
+    m2.metric("Offline", offline_u)
+    m3.metric("% Offline", f"{pct_d:.1f}%")
+
+    maior_tempo_txt = "N/D"
+    if not df_det.empty and "_tempo_off" in df_det.columns:
+        try:
+            validos = df_det["_tempo_off"][df_det["_tempo_off"].dt.total_seconds() >= 0]
+            if not validos.empty:
+                maior_tempo_txt = fmt_tempo(validos.max())
+        except Exception:
+            maior_tempo_txt = "N/D"
+    m4.metric("Maior tempo", maior_tempo_txt)
+
+    if df_det.empty:
+        st.success("Nenhuma câmera offline.")
+        return
+
+    col_map = {
+        COL_ID_CAM: "ID da Câmera",
+        COL_NOME_CAM: "Nome da Câmera",
+        COL_ULT_ATU: "Última vez Online",
+        COL_OBS: "Observações",
+    }
+    internal_cols = {COL_WL, COL_EMPRESA, COL_STATUS, "_tempo_off"}
+    base_cols = [COL_ID_CAM, COL_NOME_CAM, COL_ULT_ATU, COL_OBS]
+    cols_ex = [c for c in base_cols if c in df_det.columns] + [c for c in df_det.columns if c not in internal_cols and c not in base_cols]
+
+    df_show = df_det[cols_ex].copy().rename(columns=col_map)
+
+    if "_tempo_off" in df_det.columns and "Última vez Online" in df_show.columns:
+        df_show.insert(
+            df_show.columns.get_loc("Última vez Online") + 1,
+            "Tempo Offline",
+            df_det["_tempo_off"].apply(lambda td: fmt_tempo(td) if hasattr(td, "total_seconds") and td.total_seconds() >= 0 else "N/D").values,
+        )
+
+    if "Última vez Online" in df_show.columns:
+        df_show["Última vez Online"] = formatar_ultima_atualizacao(df_show["Última vez Online"])
+
+    df_show = df_show.reset_index(drop=True)
+    df_show.index += 1
+    st.caption("⬆ Ordenado por tempo offline — quem está há mais tempo sem sinal aparece primeiro")
+    render_dataframe(df_show, height=min(520, (len(df_show) + 1) * 35 + 3))
+
+    buf_xlsx = io.BytesIO()
+    df_show.to_excel(buf_xlsx, index=True, engine="openpyxl")
+    buf_xlsx.seek(0)
+
+    buf_csv = io.StringIO()
+    df_show.to_csv(buf_csv, index=True)
+    buf_csv.seek(0)
+
+    dl_col1, dl_col2 = st.columns([1, 1])
+    with dl_col1:
+        st.download_button(
+            label="⬇ Exportar detalhe (.xlsx)",
+            data=buf_xlsx.getvalue(),
+            file_name=f"detalhe_cliente_{wl_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    with dl_col2:
+        st.download_button(
+            label="⬇ Exportar detalhe (.csv)",
+            data=buf_csv.getvalue(),
+            file_name=f"detalhe_cliente_{wl_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+
 def main():
     init_db()
 
@@ -2784,6 +2896,22 @@ def main():
     acao_curta, acao_detalhe = recomendacao_auditoria(n_critico, n_atencao, saude)
     pct_clientes_criticos = round(n_critico / total_clientes * 100, 1) if total_clientes else 0
     pct_clientes_atencao = round(n_atencao / total_clientes * 100, 1) if total_clientes else 0
+
+
+    # Modo detalhe rápido: evita carregar comparativos, gráficos e todas as abas ao abrir um cliente.
+    # Isso reduz bastante o tempo de resposta do botão "Ver detalhes do cliente".
+    if "detalhe" in st.session_state:
+        render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem)
+        st.markdown(f"""
+        <div class="page-header">
+            <div>
+                <div class="page-title">Detalhe do Cliente</div>
+                <div class="page-sub">Consulta direta sem carregar todos os dashboards</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        render_cliente_detalhe_rapido(str(st.session_state["detalhe"]), dados)
+        return
 
     # Comparar os snapshots escolhidos no Histórico quando houver seleção.
     # Se ainda não houver seleção, usa os dois últimos snapshots manuais.
@@ -3005,8 +3133,9 @@ def main():
                 <div class="audit-card-value">{saude.get("linhas_processadas",0)}</div>
             </div>
             <div class="audit-card">
-                <div class="audit-card-label">Data Última Atualização</div>
+                <div class="audit-card-label">Data CSV</div>
                 <div class="audit-card-value" style="font-size:20px;color:#102a3f">{saude.get("ultima_data","N/D")}</div>
+                <div class="audit-card-note">Arquivo: {saude.get("arquivo_atualizado","N/D")}</div>
             </div>
         </div>
         <div class="audit-riskbar">
