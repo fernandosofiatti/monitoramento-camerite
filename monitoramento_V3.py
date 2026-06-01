@@ -2603,7 +2603,6 @@ def render_card(col, wl_id, v, tendencia, delta_off):
         if count > 0:
             if st.button("🔎 Ver detalhes do cliente", key=f"btn_{wl_id}"):
                 st.session_state["detalhe"] = wl_id
-                st.rerun()
         else:
             st.button("✓ Operacional", key=f"btn_{wl_id}", disabled=True)
 
@@ -3425,124 +3424,127 @@ def main():
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
     with tabs[1]:
-        # Filtros vetorizados.
-        # Agora a aba renderiza todos os clientes do recorte na mesma tela, sem paginação.
-        df_clientes_view = df_clientes_ops.copy()
-        if "ID" in df_clientes_view.columns:
-            df_clientes_view["ID"] = df_clientes_view["ID"].astype(str)
-        for col_txt in ["Cliente", "Franqueado", "Status"]:
-            if col_txt in df_clientes_view.columns:
-                df_clientes_view[col_txt] = df_clientes_view[col_txt].fillna("").astype(str)
-
-        franqueados = ["Todos"] + sorted([
-            x for x in df_clientes_view["Franqueado"].dropna().unique().tolist()
-            if str(x).strip()
-        ])
-
-        if "status_filter" not in st.session_state:
-            st.session_state["status_filter"] = "Todos"
-
-        st.caption("Clique no grupo para filtrar os clientes conforme a faixa de % offline.")
-        btns = st.columns([1, 1, 1, 1])
-        status_anterior = st.session_state.get("status_filter", "Todos")
-        if btns[0].button("Todos", key="clientes_status_todos"):
-            st.session_state["status_filter"] = "Todos"
-        if btns[1].button("Saudável (0-5%)", key="clientes_status_saudavel"):
-            st.session_state["status_filter"] = "Saudável (0-5%)"
-        if btns[2].button("Atenção (5-10%)", key="clientes_status_atencao"):
-            st.session_state["status_filter"] = "Atenção (5-10%)"
-        if btns[3].button("Crítico (>10%)", key="clientes_status_critico"):
-            st.session_state["status_filter"] = "Crítico (>10%)"
-
-        # Os filtros abaixo ficam dentro de um form para evitar recarregar a aba a cada tecla digitada.
-        with st.form("form_filtros_clientes", clear_on_submit=False):
-            col_search, col_franq, col_min = st.columns([2, 2, 1])
-            with col_search:
-                busca_input = st.text_input(
-                    "Buscar",
-                    value=st.session_state.get("clientes_busca", ""),
-                    placeholder="Buscar cliente, franqueado ou ID…",
+        # Quando um cliente está aberto, não renderiza todos os cards novamente.
+        # Isso deixa o clique em "Ver detalhes" muito mais rápido.
+        if "detalhe" not in st.session_state:
+            # Filtros vetorizados.
+            # Agora a aba renderiza todos os clientes do recorte na mesma tela, sem paginação.
+            df_clientes_view = df_clientes_ops.copy()
+            if "ID" in df_clientes_view.columns:
+                df_clientes_view["ID"] = df_clientes_view["ID"].astype(str)
+            for col_txt in ["Cliente", "Franqueado", "Status"]:
+                if col_txt in df_clientes_view.columns:
+                    df_clientes_view[col_txt] = df_clientes_view[col_txt].fillna("").astype(str)
+    
+            franqueados = ["Todos"] + sorted([
+                x for x in df_clientes_view["Franqueado"].dropna().unique().tolist()
+                if str(x).strip()
+            ])
+    
+            if "status_filter" not in st.session_state:
+                st.session_state["status_filter"] = "Todos"
+    
+            st.caption("Clique no grupo para filtrar os clientes conforme a faixa de % offline.")
+            btns = st.columns([1, 1, 1, 1])
+            status_anterior = st.session_state.get("status_filter", "Todos")
+            if btns[0].button("Todos", key="clientes_status_todos"):
+                st.session_state["status_filter"] = "Todos"
+            if btns[1].button("Saudável (0-5%)", key="clientes_status_saudavel"):
+                st.session_state["status_filter"] = "Saudável (0-5%)"
+            if btns[2].button("Atenção (5-10%)", key="clientes_status_atencao"):
+                st.session_state["status_filter"] = "Atenção (5-10%)"
+            if btns[3].button("Crítico (>10%)", key="clientes_status_critico"):
+                st.session_state["status_filter"] = "Crítico (>10%)"
+    
+            # Os filtros abaixo ficam dentro de um form para evitar recarregar a aba a cada tecla digitada.
+            with st.form("form_filtros_clientes", clear_on_submit=False):
+                col_search, col_franq, col_min = st.columns([2, 2, 1])
+                with col_search:
+                    busca_input = st.text_input(
+                        "Buscar",
+                        value=st.session_state.get("clientes_busca", ""),
+                        placeholder="Buscar cliente, franqueado ou ID…",
+                    )
+                with col_franq:
+                    filtro_franq_input = st.selectbox(
+                        "Franqueado",
+                        franqueados,
+                        index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
+                        if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
+                    )
+                with col_min:
+                    min_opcoes = [0, 10, 50, 100, 200]
+                    min_cameras_input = st.selectbox(
+                        "Min. câmeras",
+                        min_opcoes,
+                        index=min_opcoes.index(st.session_state.get("clientes_min", 0))
+                        if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
+                    )
+                aplicar_filtros = st.form_submit_button("Aplicar filtros", use_container_width=True)
+    
+            if aplicar_filtros:
+                st.session_state["clientes_busca"] = busca_input
+                st.session_state["clientes_franq"] = filtro_franq_input
+                st.session_state["clientes_min"] = min_cameras_input
+    
+            busca = st.session_state.get("clientes_busca", "").strip()
+            filtro_franq = st.session_state.get("clientes_franq", "Todos")
+            min_cameras = st.session_state.get("clientes_min", 0)
+            filtro = st.session_state.get("status_filter", "Todos")
+    
+            # Filtro vetorizado: evita loop com df_clientes_ops[df_clientes_ops['ID'] == wl_id].iloc[0].
+            mask = pd.Series(True, index=df_clientes_view.index)
+            if busca:
+                termo = busca.upper()
+                texto_busca = (
+                    df_clientes_view.get("Cliente", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                    + " " + df_clientes_view.get("Franqueado", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                    + " " + df_clientes_view.get("ID", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
                 )
-            with col_franq:
-                filtro_franq_input = st.selectbox(
-                    "Franqueado",
-                    franqueados,
-                    index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
-                    if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
+                mask &= texto_busca.str.contains(re.escape(termo), na=False)
+            if filtro_franq != "Todos":
+                mask &= df_clientes_view["Franqueado"].eq(filtro_franq)
+            if filtro != "Todos":
+                mask &= df_clientes_view["Status"].eq(filtro)
+            if min_cameras:
+                mask &= pd.to_numeric(df_clientes_view["Total"], errors="coerce").fillna(0).ge(min_cameras)
+    
+            df_filtrado = df_clientes_view.loc[mask].copy()
+            if not df_filtrado.empty:
+                df_filtrado = df_filtrado.sort_values("% Offline", ascending=False).reset_index(drop=True)
+    
+            if df_filtrado.empty:
+                st.info("Nenhum cliente encontrado com os filtros aplicados.")
+            else:
+                total_clientes_recorte = len(df_filtrado)
+    
+                c_res, c_dl = st.columns([4, 1.4])
+                c_res.caption(
+                    f"{total_clientes_recorte} clientes no recorte · "
+                    f"{int(df_filtrado['Offline'].sum())} câmeras offline · "
+                    f"exibindo todos os clientes"
                 )
-            with col_min:
-                min_opcoes = [0, 10, 50, 100, 200]
-                min_cameras_input = st.selectbox(
-                    "Min. câmeras",
-                    min_opcoes,
-                    index=min_opcoes.index(st.session_state.get("clientes_min", 0))
-                    if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
+    
+                buf_filtro = io.BytesIO()
+                df_filtrado.drop(columns=["_score", "_max_horas"], errors="ignore").to_excel(
+                    buf_filtro, index=False, engine="openpyxl"
                 )
-            aplicar_filtros = st.form_submit_button("Aplicar filtros", use_container_width=True)
-
-        if aplicar_filtros:
-            st.session_state["clientes_busca"] = busca_input
-            st.session_state["clientes_franq"] = filtro_franq_input
-            st.session_state["clientes_min"] = min_cameras_input
-
-        busca = st.session_state.get("clientes_busca", "").strip()
-        filtro_franq = st.session_state.get("clientes_franq", "Todos")
-        min_cameras = st.session_state.get("clientes_min", 0)
-        filtro = st.session_state.get("status_filter", "Todos")
-
-        # Filtro vetorizado: evita loop com df_clientes_ops[df_clientes_ops['ID'] == wl_id].iloc[0].
-        mask = pd.Series(True, index=df_clientes_view.index)
-        if busca:
-            termo = busca.upper()
-            texto_busca = (
-                df_clientes_view.get("Cliente", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                + " " + df_clientes_view.get("Franqueado", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                + " " + df_clientes_view.get("ID", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-            )
-            mask &= texto_busca.str.contains(re.escape(termo), na=False)
-        if filtro_franq != "Todos":
-            mask &= df_clientes_view["Franqueado"].eq(filtro_franq)
-        if filtro != "Todos":
-            mask &= df_clientes_view["Status"].eq(filtro)
-        if min_cameras:
-            mask &= pd.to_numeric(df_clientes_view["Total"], errors="coerce").fillna(0).ge(min_cameras)
-
-        df_filtrado = df_clientes_view.loc[mask].copy()
-        if not df_filtrado.empty:
-            df_filtrado = df_filtrado.sort_values("% Offline", ascending=False).reset_index(drop=True)
-
-        if df_filtrado.empty:
-            st.info("Nenhum cliente encontrado com os filtros aplicados.")
-        else:
-            total_clientes_recorte = len(df_filtrado)
-
-            c_res, c_dl = st.columns([4, 1.4])
-            c_res.caption(
-                f"{total_clientes_recorte} clientes no recorte · "
-                f"{int(df_filtrado['Offline'].sum())} câmeras offline · "
-                f"exibindo todos os clientes"
-            )
-
-            buf_filtro = io.BytesIO()
-            df_filtrado.drop(columns=["_score", "_max_horas"], errors="ignore").to_excel(
-                buf_filtro, index=False, engine="openpyxl"
-            )
-            c_dl.download_button(
-                "⬇ Exportar recorte",
-                data=buf_filtro.getvalue(),
-                file_name=f"clientes_filtrados_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-
-            ids_f = df_filtrado["ID"].astype(str).tolist()
-
-            for linha in [ids_f[i:i + COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
-                cols = st.columns(COLUNAS_PAINEL)
-                for col, wl_id in zip(cols, linha):
-                    if wl_id in dados:
-                        render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
-
+                c_dl.download_button(
+                    "⬇ Exportar recorte",
+                    data=buf_filtro.getvalue(),
+                    file_name=f"clientes_filtrados_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+    
+                ids_f = df_filtrado["ID"].astype(str).tolist()
+    
+                for linha in [ids_f[i:i + COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
+                    cols = st.columns(COLUNAS_PAINEL)
+                    for col, wl_id in zip(cols, linha):
+                        if wl_id in dados:
+                            render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
+    
         # ── Detalhe de um cliente ──
         if "detalhe" in st.session_state:
             wl_id  = st.session_state["detalhe"]
