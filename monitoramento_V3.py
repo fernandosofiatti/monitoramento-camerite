@@ -790,6 +790,44 @@ def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
     out = out.drop_duplicates(subset=["id_camera"], keep="last")
     return out
 
+
+def limpar_valor_json(valor):
+    """Converte valores que JSON/Supabase não aceitam, como NaN/NaT/pd.NA, para None."""
+    try:
+        if pd.isna(valor):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(valor, float):
+        try:
+            if math.isnan(valor) or math.isinf(valor):
+                return None
+        except Exception:
+            pass
+
+    if isinstance(valor, (pd.Timestamp, datetime)):
+        if pd.isna(valor):
+            return None
+        return valor.strftime("%Y-%m-%d %H:%M:%S")
+
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if texto.lower() in ("nan", "nat", "none", "null", "<na>"):
+            return None
+        return texto
+
+    return valor
+
+
+def df_para_registros_json(df: pd.DataFrame) -> list[dict]:
+    """Gera registros 100% compatíveis com JSON, removendo NaN antes do request."""
+    df_limpo = df.astype(object).where(pd.notna(df), None)
+    registros = []
+    for row in df_limpo.to_dict(orient="records"):
+        registros.append({k: limpar_valor_json(v) for k, v in row.items()})
+    return registros
+
 def converter_supabase_para_df_gov(df: pd.DataFrame) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
@@ -868,7 +906,7 @@ def enviar_df_supabase(df_csv: pd.DataFrame) -> tuple[bool, str, int]:
     if df_envio.empty:
         return False, "Nenhuma linha válida para importar. Verifique ID_Whitelabel e ID_da_Camera.", 0
 
-    registros = df_envio.where(pd.notna(df_envio), None).to_dict(orient="records")
+    registros = df_para_registros_json(df_envio)
     total = 0
     try:
         for i in range(0, len(registros), 500):
