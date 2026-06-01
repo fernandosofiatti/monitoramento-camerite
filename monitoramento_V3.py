@@ -4155,17 +4155,66 @@ def main():
                 </div>
                 """, unsafe_allow_html=True)
 
-                col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-                col_m1.metric("Clientes analisados", int(clientes_analisados))
-                col_m2.metric("Com variação offline", int(clientes_com_variacao_offline))
-                col_m3.metric("Melhoraram", int(melhoraram))
-                col_m4.metric("Pioraram", int(pioraram))
-                col_m5.metric("Estáveis", int(estaveis))
+                # Resumo visual da carteira — substitui métricas soltas por cards executivos
+                pct_movimento = (clientes_com_variacao_offline / clientes_analisados * 100) if clientes_analisados else 0
+                pct_melhoraram = (melhoraram / clientes_analisados * 100) if clientes_analisados else 0
+                pct_pioraram = (pioraram / clientes_analisados * 100) if clientes_analisados else 0
+                pct_estaveis = (estaveis / clientes_analisados * 100) if clientes_analisados else 0
+                pct_base_alterada = (clientes_com_variacao_base / clientes_analisados * 100) if clientes_analisados else 0
 
-                col_b1, col_b2, col_b3 = st.columns(3)
-                col_b1.metric("Novos clientes", int(novos_clientes))
-                col_b2.metric("Clientes removidos", int(removidos_clientes))
-                col_b3.metric("Clientes com base alterada", int(clientes_com_variacao_base))
+                st.markdown("#### Resumo da carteira")
+                st.markdown(f"""
+                <div class="compare-grid">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">📈 Movimento</div>
+                        <div class="compare-value">{clientes_com_variacao_offline}</div>
+                        <div class="compare-note">{pct_movimento:.1f}% da carteira · {clientes_analisados} clientes analisados</div>
+                    </div>
+                    <div class="compare-card good">
+                        <div class="compare-label">🟢 Melhoraram</div>
+                        <div class="compare-value" style="color:#059669">{melhoraram}</div>
+                        <div class="compare-note">{pct_melhoraram:.1f}% da carteira reduziu offline</div>
+                    </div>
+                    <div class="compare-card bad">
+                        <div class="compare-label">🔴 Pioraram</div>
+                        <div class="compare-value" style="color:#dc2626">{pioraram}</div>
+                        <div class="compare-note">{pct_pioraram:.1f}% da carteira aumentou offline</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">📊 Estabilidade</div>
+                        <div class="compare-value">{pct_estaveis:.1f}%</div>
+                        <div class="compare-note">{estaveis} clientes sem alteração offline</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="compare-status-box" style="margin-top:-4px;margin-bottom:16px">
+                    <div class="compare-status-text">
+                        <b>Carteira analisada:</b> {clientes_analisados} clientes · 
+                        <b>Com variação offline:</b> {clientes_com_variacao_offline} · 
+                        <b>Estáveis:</b> {estaveis}
+                    </div>
+                    <div class="compare-status-tag" style="color:#007ab8">Resumo executivo</div>
+                </div>
+                <div class="compare-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">🆕 Novos clientes</div>
+                        <div class="compare-value" style="font-size:26px">{novos_clientes}</div>
+                        <div class="compare-note">Entraram no snapshot recente</div>
+                    </div>
+                    <div class="compare-card warn">
+                        <div class="compare-label">🚫 Clientes removidos</div>
+                        <div class="compare-value" style="font-size:26px">{removidos_clientes}</div>
+                        <div class="compare-note">Existiam na base anterior e não aparecem na recente</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">🔄 Base alterada</div>
+                        <div class="compare-value" style="font-size:26px">{clientes_com_variacao_base}</div>
+                        <div class="compare-note">{pct_base_alterada:.1f}% da carteira teve mudança no total de câmeras</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
                 df_top_piora = df_comp[df_comp["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
                 df_top_melhora = df_comp[df_comp["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
