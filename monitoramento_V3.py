@@ -1883,52 +1883,95 @@ def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) ->
 
 
 # ─────────────────────────────────────────────
-# BANCO SQLite
+# SNAPSHOTS ONLINE - SUPABASE
 # ─────────────────────────────────────────────
-def abrir_conexao():
-    con = sqlite3.connect(DB_PATH)
-    con.execute("PRAGMA foreign_keys = ON")
-    return con
+SNAPSHOT_TABLE = os.getenv("SUPABASE_SNAPSHOT_TABLE", "snapshot_cameras")
 
 
 def init_db():
-    with abrir_conexao() as con:
-        con.executescript("""
-            CREATE TABLE IF NOT EXISTS snapshots (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                label      TEXT NOT NULL,
-                gravado_em TEXT NOT NULL,
-                notas      TEXT DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS snapshot_clientes (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                snapshot_id INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
-                wl_id       TEXT NOT NULL,
-                nome_cliente TEXT NOT NULL,
-                total       INTEGER NOT NULL,
-                offline     INTEGER NOT NULL,
-                pct_offline REAL NOT NULL
-            );
+    """Mantido para compatibilidade com o fluxo antigo do app.
 
-            CREATE TABLE IF NOT EXISTS snapshot_cameras (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                snapshot_id          INTEGER NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
-                wl_id                TEXT NOT NULL,
-                nome_cliente         TEXT DEFAULT '',
-                nome_empresa         TEXT DEFAULT '',
-                id_camera            TEXT NOT NULL,
-                nome_camera          TEXT DEFAULT '',
-                ultima_atualizacao   TEXT DEFAULT '',
-                status_camera        TEXT DEFAULT ''
-            );
+    Nesta versão, os snapshots não usam mais SQLite/historico.db.
+    Eles são gravados no Supabase, na tabela snapshot_cameras.
+    """
+    return None
 
-            CREATE INDEX IF NOT EXISTS idx_snapshot_cameras_snap_wl_cam
-                ON snapshot_cameras(snapshot_id, wl_id, id_camera);
-        """)
+
+def _supabase_select_all(tabela: str, params: dict | None = None, page_size: int = 1000) -> tuple[pd.DataFrame, str]:
+    if not supabase_configurado():
+        return pd.DataFrame(), "Supabase não configurado."
+
+    todos = []
+    offset = 0
+    try:
+        while True:
+            headers = supabase_headers()
+            headers["Range"] = f"{offset}-{offset + page_size - 1}"
+            resp = requests.get(
+                supabase_table_url(tabela),
+                headers=headers,
+                params=params or {},
+                timeout=60,
+            )
+            if resp.status_code not in (200, 206):
+                return pd.DataFrame(), f"Erro ao consultar {tabela}: {resp.status_code} - {resp.text[:500]}"
+            lote = resp.json()
+            if not lote:
+                break
+            todos.extend(lote)
+            if len(lote) < page_size:
+                break
+            offset += page_size
+    except Exception as e:
+        return pd.DataFrame(), f"Erro ao consultar {tabela}: {e}"
+
+    return pd.DataFrame(todos), ""
+
+
+def _snapshot_datas_df() -> pd.DataFrame:
+    """Lista datas distintas da tabela snapshot_cameras e cria um ID artificial estável por ordenação."""
+    df, erro = _supabase_select_all(
+        SNAPSHOT_TABLE,
+        params={"select": "data_snapshot", "order": "data_snapshot.desc"},
+        page_size=2000,
+    )
+    if erro or df.empty or "data_snapshot" not in df.columns:
+        return pd.DataFrame(columns=["id", "label", "gravado_em", "notas"])
+
+    datas = (
+        df["data_snapshot"]
+        .dropna()
+        .astype(str)
+        .drop_duplicates()
+        .tolist()
+    )
+
+    rows = []
+    for idx, data in enumerate(datas, start=1):
+        try:
+            dt = pd.to_datetime(data, errors="coerce")
+            gravado_em = dt.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(dt) else str(data)[:19]
+            label = f"Snapshot {dt.strftime('%d/%m %H:%M')}" if pd.notna(dt) else f"Snapshot {idx}"
+        except Exception:
+            gravado_em = str(data)[:19]
+            label = f"Snapshot {idx}"
+        rows.append({"id": idx, "label": label, "gravado_em": gravado_em, "notas": ""})
+
+    return pd.DataFrame(rows, columns=["id", "label", "gravado_em", "notas"])
+
+
+def _snapshot_data_por_id(sid: int):
+    df = _snapshot_datas_df()
+    if df.empty:
+        return None
+    row = df[df["id"].astype(int) == int(sid)]
+    if row.empty:
+        return None
+    return str(row.iloc[0]["gravado_em"])
 
 
 def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> pd.DataFrame:
-    """Monta a base de câmeras do snapshot atual para permitir identificar novas câmeras no futuro."""
+    """Monta a base de câmeras do snapshot atual para identificar novas câmeras futuramente."""
     if df_origem is None or df_origem.empty:
         return pd.DataFrame(columns=[
             "wl_id", "nome_cliente", "nome_empresa", "id_camera",
@@ -1948,11 +1991,7 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
     df_cam[COL_ID_CAM] = df_cam[COL_ID_CAM].astype(str).str.strip()
     df_cam = df_cam[df_cam[COL_ID_CAM].notna() & (df_cam[COL_ID_CAM] != "") & (df_cam[COL_ID_CAM].str.lower() != "nan")].copy()
 
-    if not dados:
-        ids_validos = set(df_cam[COL_WL].astype(str).str.strip())
-    else:
-        ids_validos = set(str(k).strip() for k in dados.keys())
-
+    ids_validos = set(str(k).strip() for k in (dados or {}).keys()) or set(df_cam[COL_WL].astype(str).str.strip())
     df_cam = df_cam[df_cam[COL_WL].isin(ids_validos)].copy()
 
     if df_cam.empty:
@@ -1961,18 +2000,12 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
             "nome_camera", "ultima_atualizacao", "status_camera"
         ])
 
-    if COL_NOME_CAM not in df_cam.columns:
-        df_cam[COL_NOME_CAM] = ""
-    if COL_ULT_ATU not in df_cam.columns:
-        df_cam[COL_ULT_ATU] = ""
-    if COL_STATUS not in df_cam.columns:
-        df_cam[COL_STATUS] = ""
-    if COL_EMPRESA not in df_cam.columns:
-        df_cam[COL_EMPRESA] = ""
+    for col in [COL_NOME_CAM, COL_ULT_ATU, COL_STATUS, COL_EMPRESA]:
+        if col not in df_cam.columns:
+            df_cam[col] = ""
 
-    # Formata a última atualização com segurança.
     try:
-        ultima_fmt = formatar_ultima_atualizacao(df_cam[COL_ULT_ATU])
+        ultima_fmt = parse_ultima_atualizacao(df_cam[COL_ULT_ATU]).dt.strftime("%Y-%m-%d %H:%M:%S").fillna("")
     except Exception:
         ultima_fmt = df_cam[COL_ULT_ATU].astype(str).fillna("")
 
@@ -1987,7 +2020,7 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
             "id_camera": str(row.get(COL_ID_CAM, "")).strip(),
             "nome_camera": str(row.get(COL_NOME_CAM, "") or ""),
             "ultima_atualizacao": str(ultima_fmt.loc[idx_row] if idx_row in ultima_fmt.index else ""),
-            "status_camera": str(row.get(COL_STATUS, "") or ""),
+            "status_camera": str(row.get(COL_STATUS, "") or "").upper(),
         })
 
     df_out = pd.DataFrame(rows)
@@ -1995,88 +2028,102 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
 
 
 def carregar_snapshot_cameras(sid: int) -> pd.DataFrame:
-    with abrir_conexao() as con:
-        try:
-            return pd.read_sql_query(
-                """
-                SELECT wl_id, nome_cliente, nome_empresa, id_camera, nome_camera,
-                       ultima_atualizacao, status_camera
-                FROM snapshot_cameras
-                WHERE snapshot_id=?
-                """,
-                con,
-                params=(sid,),
-            )
-        except Exception:
-            return pd.DataFrame(columns=[
-                "wl_id", "nome_cliente", "nome_empresa", "id_camera",
-                "nome_camera", "ultima_atualizacao", "status_camera"
-            ])
+    data_snapshot = _snapshot_data_por_id(int(sid))
+    if not data_snapshot:
+        return pd.DataFrame(columns=[
+            "wl_id", "nome_cliente", "nome_empresa", "id_camera",
+            "nome_camera", "ultima_atualizacao", "status_camera"
+        ])
+
+    df, erro = _supabase_select_all(
+        SNAPSHOT_TABLE,
+        params={"select": "*", "data_snapshot": f"eq.{data_snapshot}", "order": "id_camera.asc"},
+        page_size=2000,
+    )
+    if erro or df.empty:
+        return pd.DataFrame(columns=[
+            "wl_id", "nome_cliente", "nome_empresa", "id_camera",
+            "nome_camera", "ultima_atualizacao", "status_camera"
+        ])
+
+    clientes_map = carregar_clientes()
+    out = pd.DataFrame()
+    out["wl_id"] = df.get("id_whitelabel", "").astype(str)
+    out["nome_cliente"] = out["wl_id"].map(clientes_map).fillna("ID " + out["wl_id"].astype(str))
+    out["nome_empresa"] = df.get("nome_empresa", "").astype(str)
+    out["id_camera"] = df.get("id_camera", "").astype(str)
+    out["nome_camera"] = df.get("nome_camera", "").astype(str)
+    out["ultima_atualizacao"] = df.get("ultima_atualizacao", "").astype(str)
+    out["status_camera"] = df.get("status_camera", "").astype(str)
+    return out
 
 
 def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame | None = None) -> str:
+    """Salva snapshot completo no Supabase, sem usar historico.db."""
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with abrir_conexao() as con:
-        cur = con.cursor()
-        cur.execute("INSERT INTO snapshots (label,gravado_em,notas) VALUES (?,?,?)", (label, agora, notas))
-        sid = cur.lastrowid
+    df_cameras_snap = montar_df_cameras_snapshot(df_origem, dados)
+    if df_cameras_snap.empty:
+        return agora
 
-        for wl_id, v in dados.items():
-            total = v["total"]
-            off = len(v["offline"])
-            pct = round(off / total * 100, 2) if total else 0
-            cur.execute(
-                "INSERT INTO snapshot_clientes (snapshot_id,wl_id,nome_cliente,total,offline,pct_offline) VALUES (?,?,?,?,?,?)",
-                (sid, wl_id, v["nome_cliente"], total, off, pct)
-            )
+    registros = []
+    for _, r in df_cameras_snap.iterrows():
+        id_camera = limpar_valor_json(r.get("id_camera"))
+        try:
+            id_camera = int(float(str(id_camera))) if id_camera not in (None, "") else None
+        except Exception:
+            id_camera = None
+        if id_camera is None:
+            continue
+        registros.append({
+            "data_snapshot": agora,
+            "id_camera": id_camera,
+            "id_whitelabel": limpar_valor_json(r.get("wl_id")),
+            "nome_empresa": limpar_valor_json(r.get("nome_empresa")),
+            "nome_camera": limpar_valor_json(r.get("nome_camera")),
+            "status_camera": limpar_valor_json(str(r.get("status_camera", "")).upper()),
+            "ultima_atualizacao": limpar_valor_json(r.get("ultima_atualizacao")),
+        })
 
-        df_cameras_snap = montar_df_cameras_snapshot(df_origem, dados)
-        if not df_cameras_snap.empty:
-            cur.executemany(
-                """
-                INSERT INTO snapshot_cameras
-                    (snapshot_id, wl_id, nome_cliente, nome_empresa, id_camera,
-                     nome_camera, ultima_atualizacao, status_camera)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        sid,
-                        str(r["wl_id"]),
-                        str(r.get("nome_cliente", "")),
-                        str(r.get("nome_empresa", "")),
-                        str(r.get("id_camera", "")),
-                        str(r.get("nome_camera", "")),
-                        str(r.get("ultima_atualizacao", "")),
-                        str(r.get("status_camera", "")),
-                    )
-                    for _, r in df_cameras_snap.iterrows()
-                ]
-            )
+    for i in range(0, len(registros), 500):
+        lote = registros[i:i + 500]
+        resp = requests.post(
+            supabase_table_url(SNAPSHOT_TABLE),
+            headers=supabase_headers("return=minimal"),
+            json=lote,
+            timeout=60,
+        )
+        if resp.status_code not in (200, 201, 204):
+            raise RuntimeError(f"Erro ao salvar snapshot no Supabase: {resp.status_code} - {resp.text[:500]}")
+
     return agora
 
+
 def listar_snapshots() -> pd.DataFrame:
-    with abrir_conexao() as con:
-        return pd.read_sql_query(
-            "SELECT id,label,gravado_em,notas FROM snapshots WHERE label NOT LIKE 'Auto %' ORDER BY id DESC",
-            con,
-        )
+    return _snapshot_datas_df()
+
 
 def carregar_snapshot(sid: int) -> pd.DataFrame:
-    with abrir_conexao() as con:
-        return pd.read_sql_query(
-            "SELECT wl_id,nome_cliente,total,offline,pct_offline FROM snapshot_clientes WHERE snapshot_id=?",
-            con, params=(sid,)
-        )
+    df_cams = carregar_snapshot_cameras(int(sid))
+    if df_cams.empty:
+        return pd.DataFrame(columns=["wl_id", "nome_cliente", "total", "offline", "pct_offline"])
 
+    rows = []
+    for wl_id, grupo in df_cams.groupby(df_cams["wl_id"].astype(str)):
+        total = int(len(grupo))
+        offline = int((grupo["status_camera"].astype(str).str.upper() == "OFFLINE").sum())
+        pct = round(offline / total * 100, 2) if total else 0.0
+        nome_cliente = str(grupo["nome_cliente"].iloc[0]) if "nome_cliente" in grupo.columns and len(grupo) else f"ID {wl_id}"
+        rows.append({
+            "wl_id": str(wl_id),
+            "nome_cliente": nome_cliente,
+            "total": total,
+            "offline": offline,
+            "pct_offline": pct,
+        })
+    return pd.DataFrame(rows, columns=["wl_id", "nome_cliente", "total", "offline", "pct_offline"])
 
 
 def montar_snapshot_atual_df(dados: dict) -> pd.DataFrame:
-    """Monta um DataFrame com o estado atual carregado em tela.
-
-    Usado para comparar a base selecionada contra a realidade atual do arquivo,
-    evitando divergência entre os cards globais e o card Snapshot B/Recente.
-    """
     linhas = []
     for wl_id, info in (dados or {}).items():
         total = int(info.get("total", 0) or 0)
@@ -2091,49 +2138,71 @@ def montar_snapshot_atual_df(dados: dict) -> pd.DataFrame:
         })
     return pd.DataFrame(linhas, columns=["wl_id", "nome_cliente", "total", "offline", "pct_offline"])
 
+
 def deletar_snapshot(sid: int):
-    with abrir_conexao() as con:
-        con.execute("DELETE FROM snapshot_cameras WHERE snapshot_id=?", (sid,))
-        con.execute("DELETE FROM snapshot_clientes WHERE snapshot_id=?", (sid,))
-        con.execute("DELETE FROM snapshots WHERE id=?", (sid,))
+    data_snapshot = _snapshot_data_por_id(int(sid))
+    if not data_snapshot:
+        return
+    resp = requests.delete(
+        supabase_table_url(SNAPSHOT_TABLE),
+        headers=supabase_headers("return=minimal"),
+        params={"data_snapshot": f"eq.{data_snapshot}"},
+        timeout=60,
+    )
+    if resp.status_code not in (200, 202, 204):
+        raise RuntimeError(f"Erro ao excluir snapshot: {resp.status_code} - {resp.text[:500]}")
+
 
 def snapshot_referencia() -> pd.DataFrame | None:
-    with abrir_conexao() as con:
-        df_s = pd.read_sql_query(
-            "SELECT id FROM snapshots WHERE label NOT LIKE 'Auto %' ORDER BY id DESC LIMIT 1",
-            con,
-        )
-    if df_s.empty:
+    ids = carregar_ultimos_snapshots_ids(1)
+    if not ids:
         return None
-    return carregar_snapshot(int(df_s.iloc[0]["id"]))
+    return carregar_snapshot(int(ids[0]))
+
 
 def carregar_ultimos_snapshots_ids(limit: int = 2) -> list[int]:
-    with abrir_conexao() as con:
-        df_s = pd.read_sql_query(
-            "SELECT id FROM snapshots WHERE label NOT LIKE 'Auto %' ORDER BY id DESC LIMIT ?",
-            con,
-            params=(limit,),
-        )
-    return df_s["id"].astype(int).tolist()
+    df = listar_snapshots()
+    if df.empty:
+        return []
+    return df["id"].astype(int).head(limit).tolist()
+
 
 def salvar_snapshot_automatico(dados: dict) -> str:
     return ""
 
+
 def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
-    limite = (datetime.now() - timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
-    with abrir_conexao() as con:
-        return pd.read_sql_query(
-            """
-            SELECT s.id AS snapshot_id, s.label, s.gravado_em,
-                   sc.wl_id, sc.nome_cliente, sc.total, sc.offline, sc.pct_offline
-            FROM snapshots s
-            JOIN snapshot_clientes sc ON sc.snapshot_id = s.id
-            WHERE s.gravado_em >= ? AND s.label NOT LIKE 'Auto %'
-            ORDER BY s.gravado_em DESC
-            """,
-            con,
-            params=(limite,),
-        )
+    limite = datetime.now() - timedelta(days=dias)
+    df_snaps = listar_snapshots()
+    if df_snaps.empty:
+        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "wl_id", "nome_cliente", "total", "offline", "pct_offline"])
+
+    df_snaps["gravado_dt"] = pd.to_datetime(df_snaps["gravado_em"], errors="coerce")
+    df_snaps = df_snaps[df_snaps["gravado_dt"] >= limite].copy()
+
+    rows = []
+    for _, snap in df_snaps.iterrows():
+        df_cli = carregar_snapshot(int(snap["id"]))
+        for _, r in df_cli.iterrows():
+            rows.append({
+                "snapshot_id": int(snap["id"]),
+                "label": snap["label"],
+                "gravado_em": snap["gravado_em"],
+                "wl_id": r["wl_id"],
+                "nome_cliente": r["nome_cliente"],
+                "total": int(r["total"]),
+                "offline": int(r["offline"]),
+                "pct_offline": float(r["pct_offline"]),
+            })
+    return pd.DataFrame(rows)
+
+
+def obter_datas_snapshots(snapshot_ids: list[int]) -> pd.DataFrame:
+    df = listar_snapshots()
+    if df.empty:
+        return pd.DataFrame(columns=["id", "gravado_em"])
+    ids = [int(x) for x in snapshot_ids]
+    return df[df["id"].astype(int).isin(ids)][["id", "gravado_em"]].copy()
 
 def calcular_recorrencia(dias: int = 30) -> dict:
     df_hist = carregar_historico_clientes(dias)
@@ -2548,14 +2617,10 @@ def main():
     datas_comparativo_txt = st.session_state.get("comparativo_datas_txt", "Comparativo: snapshots insuficientes")
     if len(snapshot_ids) == 2:
         try:
-            with abrir_conexao() as con:
-                df_datas_comp = pd.read_sql_query(
-                    "SELECT id, gravado_em FROM snapshots WHERE id IN (?, ?)",
-                    con, params=(snapshot_ids[0], snapshot_ids[1])
-                )
+            df_datas_comp = obter_datas_snapshots(snapshot_ids)
             data_map_comp = dict(zip(df_datas_comp["id"].astype(int), df_datas_comp["gravado_em"].astype(str)))
-            data_atual_comp = datetime.strptime(data_map_comp.get(snapshot_ids[0], ""), "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
-            data_ant_comp = datetime.strptime(data_map_comp.get(snapshot_ids[1], ""), "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
+            data_atual_comp = pd.to_datetime(data_map_comp.get(snapshot_ids[0], ""), errors="coerce").strftime("%d/%m/%Y %H:%M")
+            data_ant_comp = pd.to_datetime(data_map_comp.get(snapshot_ids[1], ""), errors="coerce").strftime("%d/%m/%Y %H:%M")
             datas_comparativo_txt = f"Comparando {data_ant_comp} → {data_atual_comp}"
         except Exception:
             datas_comparativo_txt = "Comparativo: não foi possível identificar as datas dos snapshots"
