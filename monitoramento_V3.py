@@ -545,6 +545,16 @@ COL_NOME_CAM   = "Nome_da_Camera"
 COL_ULT_ATU    = "Ultima_Atualizacao"
 COL_OBS        = "Observacoes"
 
+# ─────────────────────────────────────────────
+# SUPABASE / BD ONLINE
+# ─────────────────────────────────────────────
+# Configure no Streamlit Cloud em Settings > Secrets:
+# SUPABASE_URL = "https://xxxx.supabase.co"
+# SUPABASE_KEY = "sua-chave-publishable"
+# Também aceita SUPABASE_ANON_KEY, caso você prefira esse nome.
+SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "cameras_origem")
+SUPABASE_PAGE_SIZE = 1000
+
 FAIXAS_TEMPO = [
     "Todas",
     "Menos de 1h",
@@ -690,6 +700,311 @@ def recomendacao_auditoria(n_critico: int, n_atencao: int, saude: dict) -> tuple
         return "Acompanhar", "Monitorar clientes em atenção e cobrar prevenção de reincidência"
     return "Manter rotina", "Registrar evidência e seguir acompanhamento periódico"
 
+
+
+# ─────────────────────────────────────────────
+# HELPERS SUPABASE / BD ONLINE
+# ─────────────────────────────────────────────
+def get_secret_value(nome: str, default: str = "") -> str:
+    """Lê configuração por variável de ambiente ou Streamlit Secrets."""
+    valor = os.getenv(nome, default)
+    if valor:
+        return str(valor).strip()
+    try:
+        return str(st.secrets.get(nome, default)).strip()
+    except Exception:
+        return default
+
+
+def supabase_configurado() -> bool:
+    return bool(get_secret_value("SUPABASE_URL") and get_supabase_key())
+
+
+def get_supabase_key() -> str:
+    """Aceita SUPABASE_KEY, SUPABASE_ANON_KEY ou SUPABASE_PUBLISHABLE_KEY."""
+    return (
+        get_secret_value("SUPABASE_KEY")
+        or get_secret_value("SUPABASE_ANON_KEY")
+        or get_secret_value("SUPABASE_PUBLISHABLE_KEY")
+    )
+
+
+def supabase_headers(prefer: str | None = None) -> dict:
+    key = get_supabase_key()
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def supabase_table_url(tabela: str | None = None) -> str:
+    tabela = tabela or SUPABASE_TABLE
+    return get_secret_value("SUPABASE_URL").rstrip("/") + f"/rest/v1/{tabela}"
+
+
+def supabase_base_url() -> str:
+    return supabase_table_url(SUPABASE_TABLE)
+
+
+def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza o CSV para a tabela cameras_origem criada no Supabase."""
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+
+    colunas_padrao = [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU, COL_OBS]
+    for col in colunas_padrao:
+        if col not in df.columns:
+            df[col] = ""
+
+    city_col = encontrar_coluna_por_chaves(df, ("cidade", "municipio", "city", "prefeitura"), default="Cidade")
+    estado_col = encontrar_coluna_por_chaves(df, ("estado", "uf", "state"), default="Estado")
+    if city_col not in df.columns:
+        df[city_col] = ""
+    if estado_col not in df.columns:
+        df[estado_col] = ""
+
+    out = pd.DataFrame()
+    out["id_camera"] = pd.to_numeric(df[COL_ID_CAM].astype(str).str.strip(), errors="coerce")
+    out = out[out["id_camera"].notna()].copy()
+    out["id_camera"] = out["id_camera"].astype("int64")
+
+    # Reindexa o df original para manter apenas as linhas válidas de id_camera.
+    df_valid = df.loc[out.index].copy()
+
+    out["id_whitelabel"] = df_valid[COL_WL].astype(str).str.strip()
+    out["nome_empresa"] = df_valid[COL_EMPRESA].astype(str).replace({"nan": ""}).str.strip()
+    out["nome_camera"] = df_valid[COL_NOME_CAM].astype(str).replace({"nan": ""}).str.strip()
+    out["status_camera"] = df_valid[COL_STATUS].astype(str).str.strip().str.upper()
+    out["ultima_atualizacao"] = parse_ultima_atualizacao(df_valid[COL_ULT_ATU]).dt.strftime("%Y-%m-%d %H:%M:%S")
+    out["ultima_atualizacao"] = out["ultima_atualizacao"].where(out["ultima_atualizacao"].notna(), None)
+    out["observacoes"] = df_valid[COL_OBS].astype(str).replace({"nan": ""}).str.strip()
+    out["cidade"] = df_valid[city_col].astype(str).replace({"nan": ""}).str.strip()
+    out["estado"] = df_valid[estado_col].astype(str).replace({"nan": ""}).str.strip()
+    out["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    out = out[(out["id_whitelabel"] != "") & (out["status_camera"] != "")].copy()
+    out = out.drop_duplicates(subset=["id_camera"], keep="last")
+    return out
+
+def converter_supabase_para_df_gov(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame()
+    out[COL_WL] = df.get("id_whitelabel", "").astype(str)
+    out[COL_EMPRESA] = df.get("nome_empresa", "").astype(str)
+    out[COL_ID_CAM] = df.get("id_camera", "").astype(str)
+    out[COL_NOME_CAM] = df.get("nome_camera", "").astype(str)
+    out[COL_STATUS] = df.get("status_camera", "").astype(str)
+    out[COL_ULT_ATU] = df.get("ultima_atualizacao", "").astype(str)
+    out[COL_OBS] = df.get("observacoes", "").astype(str)
+    out["Cidade"] = df.get("cidade", "").astype(str)
+    out["UF"] = df.get("estado", "").astype(str)
+    return out
+
+
+@st.cache_data(ttl=60)
+def carregar_cameras_supabase() -> tuple[pd.DataFrame | None, str]:
+    if not supabase_configurado():
+        return None, "Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets."
+
+    todos = []
+    offset = 0
+    try:
+        while True:
+            headers = supabase_headers()
+            headers["Range"] = f"{offset}-{offset + SUPABASE_PAGE_SIZE - 1}"
+            resp = requests.get(
+                supabase_base_url(),
+                headers=headers,
+                params={"select": "*", "order": "id_whitelabel.asc,id_camera.asc"},
+                timeout=30,
+            )
+            if resp.status_code not in (200, 206):
+                return None, f"Erro ao consultar Supabase: {resp.status_code} - {resp.text[:300]}"
+            lote = resp.json()
+            if not lote:
+                break
+            todos.extend(lote)
+            if len(lote) < SUPABASE_PAGE_SIZE:
+                break
+            offset += SUPABASE_PAGE_SIZE
+    except Exception as e:
+        return None, f"Erro ao conectar no Supabase: {e}"
+
+    return pd.DataFrame(todos), ""
+
+
+def registrar_historico_importacao(df_envio: pd.DataFrame, arquivo_nome: str = "upload_streamlit") -> None:
+    """Registra um resumo da importação. Se falhar, não bloqueia a atualização principal."""
+    try:
+        qtd_registros = int(len(df_envio))
+        status = df_envio.get("status_camera", pd.Series(dtype=str)).astype(str).str.upper()
+        payload = {
+            "arquivo_nome": arquivo_nome,
+            "qtd_registros": qtd_registros,
+            "qtd_online": int((status == "ONLINE").sum()),
+            "qtd_offline": int((status == "OFFLINE").sum()),
+            "observacao": "Importação realizada pelo Streamlit",
+        }
+        requests.post(
+            supabase_table_url("historico_importacoes"),
+            headers=supabase_headers("return=minimal"),
+            json=payload,
+            timeout=20,
+        )
+    except Exception:
+        pass
+
+
+def enviar_df_supabase(df_csv: pd.DataFrame) -> tuple[bool, str, int]:
+    if not supabase_configurado():
+        return False, "Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.", 0
+
+    df_envio = preparar_df_para_supabase(df_csv)
+    if df_envio.empty:
+        return False, "Nenhuma linha válida para importar. Verifique ID_Whitelabel e ID_da_Camera.", 0
+
+    registros = df_envio.where(pd.notna(df_envio), None).to_dict(orient="records")
+    total = 0
+    try:
+        for i in range(0, len(registros), 500):
+            lote = registros[i:i + 500]
+            resp = requests.post(
+                supabase_base_url(),
+                headers=supabase_headers("resolution=merge-duplicates"),
+                params={"on_conflict": "id_camera"},
+                json=lote,
+                timeout=60,
+            )
+            if resp.status_code not in (200, 201, 204):
+                return False, f"Erro ao importar para o Supabase: {resp.status_code} - {resp.text[:500]}", total
+            total += len(lote)
+    except Exception as e:
+        return False, f"Erro ao enviar dados ao Supabase: {e}", total
+
+    registrar_historico_importacao(df_envio)
+
+    carregar_cameras_supabase.clear()
+    carregar_dados.clear()
+    calcular_saude_dados.clear()
+    return True, "Base online atualizada com sucesso.", total
+
+
+def sql_criacao_supabase() -> str:
+    return f"""
+create table if not exists public.{SUPABASE_TABLE} (
+    id_camera bigint primary key,
+    id_whitelabel text,
+    nome_empresa text,
+    nome_camera text,
+    status_camera text,
+    ultima_atualizacao timestamp,
+    observacoes text,
+    cidade text,
+    estado text,
+    created_at timestamp default now(),
+    updated_at timestamp default now()
+);
+
+create table if not exists public.historico_importacoes (
+    id bigint generated by default as identity primary key,
+    data_importacao timestamp default now(),
+    arquivo_nome text,
+    qtd_registros integer default 0,
+    qtd_online integer default 0,
+    qtd_offline integer default 0,
+    qtd_novas integer default 0,
+    qtd_atualizadas integer default 0,
+    observacao text
+);
+
+create index if not exists idx_cameras_origem_whitelabel
+    on public.{SUPABASE_TABLE} (id_whitelabel);
+
+create index if not exists idx_cameras_origem_status
+    on public.{SUPABASE_TABLE} (status_camera);
+
+create index if not exists idx_cameras_origem_ultima_atualizacao
+    on public.{SUPABASE_TABLE} (ultima_atualizacao);
+""".strip()
+
+def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
+    st.markdown("### Atualizar base online")
+    st.caption("Importe o CSV novo para o Supabase. A importação atualiza câmeras existentes e insere câmeras novas, sem duplicar pelo ID_da_Camera.")
+
+    if supabase_configurado():
+        st.success(f"Supabase configurado · tabela `{SUPABASE_TABLE}`")
+    else:
+        st.warning("Supabase ainda não configurado nos Secrets do Streamlit Cloud.")
+        with st.expander("SQL para criar a tabela no Supabase", expanded=True):
+            st.code(sql_criacao_supabase(), language="sql")
+        st.info("Depois de criar a tabela, configure SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit Cloud.")
+
+    arq = st.file_uploader("CSV de câmeras", type=["csv"], key="csv_supabase_upload")
+    if arq is not None:
+        df_csv = None
+        for enc in ("utf-8", "latin-1", "cp1252"):
+            for sep in (",", ";", "\t"):
+                try:
+                    arq.seek(0)
+                    tmp = pd.read_csv(arq, encoding=enc, sep=sep, on_bad_lines="skip", engine="python", quoting=0)
+                    tmp.columns = [str(c).strip() for c in tmp.columns]
+                    if {COL_STATUS, COL_WL}.issubset(tmp.columns):
+                        df_csv = tmp
+                        break
+                    if df_csv is None and len(tmp.columns) > 2:
+                        df_csv = tmp
+                except UnicodeDecodeError:
+                    break
+                except Exception:
+                    continue
+            if df_csv is not None and {COL_STATUS, COL_WL}.issubset(df_csv.columns):
+                break
+
+        if df_csv is None:
+            st.error("Não consegui ler o CSV. Tente salvar como CSV UTF-8.")
+            return
+
+        faltando = [c for c in [COL_STATUS, COL_WL] if c not in df_csv.columns]
+        if faltando:
+            st.error(f"Colunas obrigatórias ausentes: {', '.join(faltando)}")
+            st.caption(f"Colunas encontradas: {', '.join(df_csv.columns.astype(str))}")
+            return
+
+        df_preview = preparar_df_para_supabase(df_csv)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Linhas no CSV", len(df_csv))
+        col2.metric("Câmeras válidas", len(df_preview))
+        col3.metric("Offline", int((df_preview["status_camera"] == "OFFLINE").sum()) if not df_preview.empty else 0)
+
+        st.markdown("#### Prévia da importação")
+        render_dataframe(df_preview.head(100), height=320)
+
+        if st.button("🚀 Atualizar base online", type="primary", use_container_width=True):
+            ok, msg, total = enviar_df_supabase(df_csv)
+            if ok:
+                st.success(f"{msg} {total} registros enviados/atualizados.")
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error(msg)
+
+    st.markdown("---")
+    st.markdown("#### Status da base online")
+    if supabase_configurado():
+        df_online, erro_online = carregar_cameras_supabase()
+        if erro_online:
+            st.error(erro_online)
+        elif df_online is not None:
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Registros no BD", len(df_online))
+            col_b.metric("Clientes", df_online["id_whitelabel"].nunique() if "id_whitelabel" in df_online.columns else 0)
+            col_c.metric("Offline", int((df_online.get("status_camera", pd.Series(dtype=str)).astype(str).str.upper() == "OFFLINE").sum()))
+            render_dataframe(converter_supabase_para_df_gov(df_online).head(200), height=360)
 
 # ─────────────────────────────────────────────
 # LEITURA DO CSV + CLIENTES
@@ -1379,8 +1694,9 @@ def carregar_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> tuple
 
     """
     Prioridade:
-    1 - GOV_extracao_cameras.csv
-    2 - XLSX individuais
+    1 - Supabase / BD online, quando configurado e com dados
+    2 - GOV_extracao_cameras.csv local
+    3 - XLSX individuais
     """
 
     if not os.path.exists(pasta):
@@ -1390,7 +1706,20 @@ def carregar_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> tuple
     clientes_prefeitura = carregar_clientes_prefeitura()
 
     # ============================================================
-    # 1) CSV PRINCIPAL
+    # 1) BD ONLINE - SUPABASE
+    # ============================================================
+    if supabase_configurado():
+        df_supabase, erro_supabase = carregar_cameras_supabase()
+        if df_supabase is not None and not df_supabase.empty:
+            df = converter_supabase_para_df_gov(df_supabase)
+            df = preencher_cidade_estado_por_clientes(df, clientes_prefeitura)
+            return processar_df_gov(df, clientes_map), "", df
+        elif erro_supabase:
+            # Não bloqueia o app: mantém fallback local para facilitar manutenção.
+            pass
+
+    # ============================================================
+    # 2) CSV PRINCIPAL
     # ============================================================
     if os.path.exists(CSV_GOV):
 
@@ -1501,6 +1830,10 @@ def calcular_saude_dataframe(df: pd.DataFrame | None, clientes_map: dict, origem
 @st.cache_data(ttl=60)
 def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> dict:
     clientes_map = carregar_clientes()
+    if supabase_configurado():
+        df_supabase, erro_supabase = carregar_cameras_supabase()
+        if df_supabase is not None and not df_supabase.empty:
+            return calcular_saude_dataframe(converter_supabase_para_df_gov(df_supabase), clientes_map, "Supabase / BD online")
     if os.path.exists(CSV_GOV):
         return calcular_saude_dataframe(ler_csv_gov(CSV_GOV), clientes_map, "Arquivo local")
 
@@ -2336,6 +2669,7 @@ def main():
         "Tempo offline",
         "% por cliente",
         "Evidências",
+        "Atualizar Base",
     ])
 
     # ════════════════════════════════════════════
@@ -3748,6 +4082,13 @@ def main():
                     c1.markdown(f"**{row['label']}** · `{row['gravado_em']}`{notas_txt}")
                     if c2.button("Excluir", key=f"del_{row['id']}"):
                         deletar_snapshot(row["id"]); st.rerun()
+
+
+    # ════════════════════════════════════════════
+    # ABA 5 — ATUALIZAR BASE ONLINE
+    # ════════════════════════════════════════════
+    with tabs[5]:
+        render_aba_atualizar_base(df_origem)
 
 
 if __name__ == "__main__":
