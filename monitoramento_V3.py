@@ -1887,6 +1887,7 @@ def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) ->
 # SNAPSHOTS ONLINE - SUPABASE
 # ─────────────────────────────────────────────
 SNAPSHOT_TABLE = os.getenv("SUPABASE_SNAPSHOT_TABLE", "snapshot_cameras")
+SNAPSHOT_MASTER_TABLE = os.getenv("SUPABASE_SNAPSHOT_MASTER_TABLE", "snapshots")
 
 
 def init_db():
@@ -1930,54 +1931,34 @@ def _supabase_select_all(tabela: str, params: dict | None = None, page_size: int
 
 
 def _snapshot_datas_df() -> pd.DataFrame:
-    """Lista snapshots distintos do Supabase.
+    """Lista snapshots a partir da tabela mestre public.snapshots.
 
-    A versão nova usa snapshot_uuid para identificar cada lote de snapshot.
-    Para compatibilidade, snapshots antigos sem snapshot_uuid continuam aparecendo
-    pelo agrupamento de data_snapshot.
+    Cada clique no botão Salvar snapshot cria 1 linha aqui e N linhas em
+    snapshot_cameras. Isso evita sobrescrever ou confundir lotes.
     """
     df, erro = _supabase_select_all(
-        SNAPSHOT_TABLE,
+        SNAPSHOT_MASTER_TABLE,
         params={
-            "select": "snapshot_uuid,data_snapshot,label,notas",
-            "order": "data_snapshot.desc",
+            "select": "id,label,gravado_em,notas",
+            "order": "id.desc",
         },
-        page_size=5000,
+        page_size=1000,
     )
-    if erro or df.empty or "data_snapshot" not in df.columns:
+    if erro or df.empty:
         return pd.DataFrame(columns=["id", "snapshot_uuid", "label", "gravado_em", "notas"])
 
-    if "snapshot_uuid" not in df.columns:
-        df["snapshot_uuid"] = None
-    if "label" not in df.columns:
-        df["label"] = ""
-    if "notas" not in df.columns:
-        df["notas"] = ""
+    for col in ["id", "label", "gravado_em", "notas"]:
+        if col not in df.columns:
+            df[col] = ""
 
-    df["data_snapshot_str"] = df["data_snapshot"].astype(str)
-    df["snapshot_key"] = df["snapshot_uuid"].fillna("").astype(str).str.strip()
-    df.loc[df["snapshot_key"] == "", "snapshot_key"] = "legacy|" + df.loc[df["snapshot_key"] == "", "data_snapshot_str"]
-
-    df = df.drop_duplicates(subset=["snapshot_key"], keep="first").copy()
-    df["gravado_dt"] = pd.to_datetime(df["data_snapshot"], errors="coerce")
-    df = df.sort_values("gravado_dt", ascending=False, na_position="last").reset_index(drop=True)
-
-    rows = []
-    for idx, row in df.iterrows():
-        data = str(row.get("data_snapshot", ""))[:19]
-        dt = pd.to_datetime(row.get("data_snapshot"), errors="coerce")
-        gravado_em = dt.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(dt) else data
-        label_raw = str(row.get("label") or "").strip()
-        label = label_raw or (f"Snapshot {dt.strftime('%d/%m/%Y %H:%M:%S')}" if pd.notna(dt) else f"Snapshot {idx + 1}")
-        rows.append({
-            "id": idx + 1,
-            "snapshot_uuid": str(row.get("snapshot_key", "")),
-            "label": label,
-            "gravado_em": gravado_em,
-            "notas": str(row.get("notas") or ""),
-        })
-
-    return pd.DataFrame(rows, columns=["id", "snapshot_uuid", "label", "gravado_em", "notas"])
+    df["id"] = pd.to_numeric(df["id"], errors="coerce")
+    df = df[df["id"].notna()].copy()
+    df["id"] = df["id"].astype(int)
+    df["snapshot_uuid"] = df["id"].astype(str)
+    df["gravado_em"] = pd.to_datetime(df["gravado_em"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S").fillna(df["gravado_em"].astype(str))
+    df["label"] = df["label"].astype(str).replace({"nan": ""})
+    df["notas"] = df["notas"].astype(str).replace({"nan": ""})
+    return df[["id", "snapshot_uuid", "label", "gravado_em", "notas"]].sort_values("id", ascending=False).reset_index(drop=True)
 
 
 def _snapshot_ref_por_id(sid: int) -> dict | None:
@@ -2048,22 +2029,11 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
 
 
 def carregar_snapshot_cameras(sid: int) -> pd.DataFrame:
-    snap_ref = _snapshot_ref_por_id(int(sid))
-    if not snap_ref:
-        return pd.DataFrame(columns=[
-            "wl_id", "nome_cliente", "nome_empresa", "id_camera",
-            "nome_camera", "ultima_atualizacao", "status_camera"
-        ])
-
-    snapshot_uuid = str(snap_ref.get("snapshot_uuid", "") or "")
-    params = {"select": "*", "order": "id_camera.asc"}
-
-    if snapshot_uuid.startswith("legacy|"):
-        data_snapshot = snapshot_uuid.replace("legacy|", "", 1)
-        params["data_snapshot"] = f"eq.{data_snapshot}"
-    else:
-        params["snapshot_uuid"] = f"eq.{snapshot_uuid}"
-
+    params = {
+        "select": "*",
+        "snapshot_id": f"eq.{int(sid)}",
+        "order": "id_camera.asc",
+    }
     df, erro = _supabase_select_all(
         SNAPSHOT_TABLE,
         params=params,
@@ -2087,20 +2057,35 @@ def carregar_snapshot_cameras(sid: int) -> pd.DataFrame:
     return out
 
 
-
 def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame | None = None) -> str:
-    """Salva snapshot completo no Supabase.
+    """Salva snapshot acumulado no Supabase: 1 cabeçalho + N câmeras.
 
-    Importante: esta função sempre faz INSERT puro, com snapshot_uuid novo.
-    Não usa UPSERT e não reaproveita ID de câmera, então os snapshots não são sobrescritos.
+    Não usa UPSERT. Não apaga snapshot anterior. Cada clique cria um novo ID.
     """
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    snapshot_uuid = str(uuid.uuid4())
 
+    # 1) Cria o cabeçalho do snapshot e pega o ID gerado.
+    payload_master = {
+        "label": limpar_valor_json(label),
+        "gravado_em": agora,
+        "notas": limpar_valor_json(notas),
+    }
+    resp_master = requests.post(
+        supabase_table_url(SNAPSHOT_MASTER_TABLE),
+        headers=supabase_headers("return=representation"),
+        json=payload_master,
+        timeout=30,
+    )
+    if resp_master.status_code not in (200, 201):
+        raise RuntimeError(f"Erro ao criar cabeçalho do snapshot no Supabase: {resp_master.status_code} - {resp_master.text[:500]}")
+
+    data_master = resp_master.json()
+    if not data_master or "id" not in data_master[0]:
+        raise RuntimeError("Snapshot criado, mas o Supabase não retornou o ID do cabeçalho.")
+    snapshot_id = int(data_master[0]["id"])
+
+    # 2) Grava as câmeras vinculadas ao snapshot_id.
     df_cameras_snap = montar_df_cameras_snapshot(df_origem, dados)
-    if df_cameras_snap.empty:
-        return agora
-
     registros = []
     for _, r in df_cameras_snap.iterrows():
         id_camera = limpar_valor_json(r.get("id_camera"))
@@ -2112,8 +2097,9 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
             continue
 
         registros.append({
-            "snapshot_uuid": snapshot_uuid,
+            "snapshot_id": snapshot_id,
             "data_snapshot": agora,
+            "snapshot_uuid": str(snapshot_id),
             "label": limpar_valor_json(label),
             "notas": limpar_valor_json(notas),
             "id_camera": id_camera,
@@ -2133,7 +2119,7 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
             timeout=60,
         )
         if resp.status_code not in (200, 201, 204):
-            raise RuntimeError(f"Erro ao salvar snapshot no Supabase: {resp.status_code} - {resp.text[:500]}")
+            raise RuntimeError(f"Erro ao salvar câmeras do snapshot no Supabase: {resp.status_code} - {resp.text[:500]}")
 
     try:
         st.cache_data.clear()
@@ -2141,7 +2127,6 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
         pass
 
     return agora
-
 
 
 def listar_snapshots() -> pd.DataFrame:
@@ -2186,33 +2171,32 @@ def montar_snapshot_atual_df(dados: dict) -> pd.DataFrame:
 
 
 def deletar_snapshot(sid: int):
-    snap_ref = _snapshot_ref_por_id(int(sid))
-    if not snap_ref:
-        return
+    sid = int(sid)
 
-    snapshot_uuid = str(snap_ref.get("snapshot_uuid", "") or "")
-    params = {}
-
-    if snapshot_uuid.startswith("legacy|"):
-        params["data_snapshot"] = f"eq.{snapshot_uuid.replace('legacy|', '', 1)}"
-    else:
-        params["snapshot_uuid"] = f"eq.{snapshot_uuid}"
-
-    resp = requests.delete(
+    resp_cam = requests.delete(
         supabase_table_url(SNAPSHOT_TABLE),
         headers=supabase_headers("return=minimal"),
-        params=params,
+        params={"snapshot_id": f"eq.{sid}"},
         timeout=60,
     )
-    if resp.status_code not in (200, 202, 204):
-        st.error(f"Erro ao excluir snapshot no Supabase: {resp.status_code} - {resp.text[:500]}")
+    if resp_cam.status_code not in (200, 202, 204):
+        st.error(f"Erro ao excluir câmeras do snapshot: {resp_cam.status_code} - {resp_cam.text[:500]}")
+        return
+
+    resp_snap = requests.delete(
+        supabase_table_url(SNAPSHOT_MASTER_TABLE),
+        headers=supabase_headers("return=minimal"),
+        params={"id": f"eq.{sid}"},
+        timeout=60,
+    )
+    if resp_snap.status_code not in (200, 202, 204):
+        st.error(f"Erro ao excluir cabeçalho do snapshot: {resp_snap.status_code} - {resp_snap.text[:500]}")
         return
 
     try:
         st.cache_data.clear()
     except Exception:
         pass
-
 
 
 def snapshot_referencia() -> pd.DataFrame | None:
