@@ -2676,11 +2676,11 @@ def main():
         except Exception:
             datas_comparativo_txt = "Comparativo: não foi possível identificar as datas dos snapshots"
     if len(snapshot_ids) == 2:
-        # Na visão executiva/evidências, o "recente" precisa representar a realidade
-        # carregada na tela. O snapshot B do banco pode estar defasado se o CSV mudou
-        # depois da gravação do histórico. Por isso usamos o estado atual carregado
-        # como B/Recente e mantemos o snapshot A como base histórica.
-        df_new = montar_snapshot_atual_df(dados)
+        # Comparativo correto: quando o usuário seleciona dois snapshots,
+        # os dois lados precisam vir do histórico salvo no Supabase.
+        # Não usamos a base atual carregada em tela aqui, porque isso gera
+        # divergência quando a base atual é diferente do snapshot B selecionado.
+        df_new = carregar_snapshot(snapshot_ids[0])
         df_old = carregar_snapshot(snapshot_ids[1])
 
         new_map = df_new.set_index("wl_id")[['offline','pct_offline','total']].to_dict(orient='index')
@@ -2703,12 +2703,10 @@ def main():
             delta_offs[wl] = off_new - off_old
             delta_totais[wl] = total_new - total_old
 
-        # Importante: os cards do comparativo devem usar o snapshot B selecionado
-        # como "recente", e não o CSV atual carregado em tela. Isso evita divergência
-        # quando o usuário altera a data do comparativo/histórico.
+        # Cards do comparativo usam o snapshot B selecionado como recente.
         total_cameras_anterior = int(df_old["total"].sum()) if "total" in df_old.columns else 0
-        total_cameras_recente_comparativo = int(df_new["total"].sum()) if "total" in df_new.columns else total_cameras
-        total_offline_recente_comparativo = int(df_new["offline"].sum()) if "offline" in df_new.columns else total_offline
+        total_cameras_recente_comparativo = int(df_new["total"].sum()) if "total" in df_new.columns else 0
+        total_offline_recente_comparativo = int(df_new["offline"].sum()) if "offline" in df_new.columns else 0
         delta_total_cameras = total_cameras_recente_comparativo - total_cameras_anterior
 
         linhas_base_delta = []
@@ -3911,11 +3909,9 @@ def main():
                 leg_a = fmt_dt(datas_snap.get(id_a, ""))
                 leg_b = fmt_dt(datas_snap.get(id_b, ""))
 
-                # Snapshot A é a base histórica selecionada.
-                # Snapshot B/Recente usa o estado atual carregado em tela para bater com
-                # os cards principais de Offline/Total da auditoria.
+                # Comparativo histórico real: A e B vêm dos snapshots salvos.
                 df_a = carregar_snapshot(id_a).rename(columns={"offline":"off_a","total":"tot_a","pct_offline":"pct_a","nome_cliente":"nc_a"})
-                df_b = montar_snapshot_atual_df(dados).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
+                df_b = carregar_snapshot(id_b).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
                 df_comp = pd.merge(df_a, df_b, on="wl_id", how="outer").fillna(0)
                 # Usar nome do snapshot B como display
                 df_comp["cliente"] = df_comp["nc_b"].where(df_comp["nc_b"] != 0, df_comp["nc_a"])
