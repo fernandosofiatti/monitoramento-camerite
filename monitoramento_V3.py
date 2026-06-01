@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import glob
 import html
 import time
+import uuid
 
 THEME_OPTIONS = {
     "theme.base": "light",
@@ -1929,45 +1930,64 @@ def _supabase_select_all(tabela: str, params: dict | None = None, page_size: int
 
 
 def _snapshot_datas_df() -> pd.DataFrame:
-    """Lista datas distintas da tabela snapshot_cameras e cria um ID artificial estável por ordenação."""
+    """Lista snapshots distintos do Supabase.
+
+    A versão nova usa snapshot_uuid para identificar cada lote de snapshot.
+    Para compatibilidade, snapshots antigos sem snapshot_uuid continuam aparecendo
+    pelo agrupamento de data_snapshot.
+    """
     df, erro = _supabase_select_all(
         SNAPSHOT_TABLE,
-        params={"select": "data_snapshot", "order": "data_snapshot.desc"},
-        page_size=2000,
+        params={
+            "select": "snapshot_uuid,data_snapshot,label,notas",
+            "order": "data_snapshot.desc",
+        },
+        page_size=5000,
     )
     if erro or df.empty or "data_snapshot" not in df.columns:
-        return pd.DataFrame(columns=["id", "label", "gravado_em", "notas"])
+        return pd.DataFrame(columns=["id", "snapshot_uuid", "label", "gravado_em", "notas"])
 
-    datas = (
-        df["data_snapshot"]
-        .dropna()
-        .astype(str)
-        .drop_duplicates()
-        .tolist()
-    )
+    if "snapshot_uuid" not in df.columns:
+        df["snapshot_uuid"] = None
+    if "label" not in df.columns:
+        df["label"] = ""
+    if "notas" not in df.columns:
+        df["notas"] = ""
+
+    df["data_snapshot_str"] = df["data_snapshot"].astype(str)
+    df["snapshot_key"] = df["snapshot_uuid"].fillna("").astype(str).str.strip()
+    df.loc[df["snapshot_key"] == "", "snapshot_key"] = "legacy|" + df.loc[df["snapshot_key"] == "", "data_snapshot_str"]
+
+    df = df.drop_duplicates(subset=["snapshot_key"], keep="first").copy()
+    df["gravado_dt"] = pd.to_datetime(df["data_snapshot"], errors="coerce")
+    df = df.sort_values("gravado_dt", ascending=False, na_position="last").reset_index(drop=True)
 
     rows = []
-    for idx, data in enumerate(datas, start=1):
-        try:
-            dt = pd.to_datetime(data, errors="coerce")
-            gravado_em = dt.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(dt) else str(data)[:19]
-            label = f"Snapshot {dt.strftime('%d/%m %H:%M')}" if pd.notna(dt) else f"Snapshot {idx}"
-        except Exception:
-            gravado_em = str(data)[:19]
-            label = f"Snapshot {idx}"
-        rows.append({"id": idx, "label": label, "gravado_em": gravado_em, "notas": ""})
+    for idx, row in df.iterrows():
+        data = str(row.get("data_snapshot", ""))[:19]
+        dt = pd.to_datetime(row.get("data_snapshot"), errors="coerce")
+        gravado_em = dt.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(dt) else data
+        label_raw = str(row.get("label") or "").strip()
+        label = label_raw or (f"Snapshot {dt.strftime('%d/%m/%Y %H:%M:%S')}" if pd.notna(dt) else f"Snapshot {idx + 1}")
+        rows.append({
+            "id": idx + 1,
+            "snapshot_uuid": str(row.get("snapshot_key", "")),
+            "label": label,
+            "gravado_em": gravado_em,
+            "notas": str(row.get("notas") or ""),
+        })
 
-    return pd.DataFrame(rows, columns=["id", "label", "gravado_em", "notas"])
+    return pd.DataFrame(rows, columns=["id", "snapshot_uuid", "label", "gravado_em", "notas"])
 
 
-def _snapshot_data_por_id(sid: int):
+def _snapshot_ref_por_id(sid: int) -> dict | None:
     df = _snapshot_datas_df()
     if df.empty:
         return None
     row = df[df["id"].astype(int) == int(sid)]
     if row.empty:
         return None
-    return str(row.iloc[0]["gravado_em"])
+    return row.iloc[0].to_dict()
 
 
 def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> pd.DataFrame:
@@ -2028,17 +2048,26 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
 
 
 def carregar_snapshot_cameras(sid: int) -> pd.DataFrame:
-    data_snapshot = _snapshot_data_por_id(int(sid))
-    if not data_snapshot:
+    snap_ref = _snapshot_ref_por_id(int(sid))
+    if not snap_ref:
         return pd.DataFrame(columns=[
             "wl_id", "nome_cliente", "nome_empresa", "id_camera",
             "nome_camera", "ultima_atualizacao", "status_camera"
         ])
 
+    snapshot_uuid = str(snap_ref.get("snapshot_uuid", "") or "")
+    params = {"select": "*", "order": "id_camera.asc"}
+
+    if snapshot_uuid.startswith("legacy|"):
+        data_snapshot = snapshot_uuid.replace("legacy|", "", 1)
+        params["data_snapshot"] = f"eq.{data_snapshot}"
+    else:
+        params["snapshot_uuid"] = f"eq.{snapshot_uuid}"
+
     df, erro = _supabase_select_all(
         SNAPSHOT_TABLE,
-        params={"select": "*", "data_snapshot": f"eq.{data_snapshot}", "order": "id_camera.asc"},
-        page_size=2000,
+        params=params,
+        page_size=5000,
     )
     if erro or df.empty:
         return pd.DataFrame(columns=[
@@ -2058,9 +2087,16 @@ def carregar_snapshot_cameras(sid: int) -> pd.DataFrame:
     return out
 
 
+
 def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame | None = None) -> str:
-    """Salva snapshot completo no Supabase, sem usar historico.db."""
+    """Salva snapshot completo no Supabase.
+
+    Importante: esta função sempre faz INSERT puro, com snapshot_uuid novo.
+    Não usa UPSERT e não reaproveita ID de câmera, então os snapshots não são sobrescritos.
+    """
     agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    snapshot_uuid = str(uuid.uuid4())
+
     df_cameras_snap = montar_df_cameras_snapshot(df_origem, dados)
     if df_cameras_snap.empty:
         return agora
@@ -2074,8 +2110,12 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
             id_camera = None
         if id_camera is None:
             continue
+
         registros.append({
+            "snapshot_uuid": snapshot_uuid,
             "data_snapshot": agora,
+            "label": limpar_valor_json(label),
+            "notas": limpar_valor_json(notas),
             "id_camera": id_camera,
             "id_whitelabel": limpar_valor_json(r.get("wl_id")),
             "nome_empresa": limpar_valor_json(r.get("nome_empresa")),
@@ -2095,7 +2135,13 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
         if resp.status_code not in (200, 201, 204):
             raise RuntimeError(f"Erro ao salvar snapshot no Supabase: {resp.status_code} - {resp.text[:500]}")
 
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
     return agora
+
 
 
 def listar_snapshots() -> pd.DataFrame:
@@ -2140,17 +2186,33 @@ def montar_snapshot_atual_df(dados: dict) -> pd.DataFrame:
 
 
 def deletar_snapshot(sid: int):
-    data_snapshot = _snapshot_data_por_id(int(sid))
-    if not data_snapshot:
+    snap_ref = _snapshot_ref_por_id(int(sid))
+    if not snap_ref:
         return
+
+    snapshot_uuid = str(snap_ref.get("snapshot_uuid", "") or "")
+    params = {}
+
+    if snapshot_uuid.startswith("legacy|"):
+        params["data_snapshot"] = f"eq.{snapshot_uuid.replace('legacy|', '', 1)}"
+    else:
+        params["snapshot_uuid"] = f"eq.{snapshot_uuid}"
+
     resp = requests.delete(
         supabase_table_url(SNAPSHOT_TABLE),
         headers=supabase_headers("return=minimal"),
-        params={"data_snapshot": f"eq.{data_snapshot}"},
+        params=params,
         timeout=60,
     )
     if resp.status_code not in (200, 202, 204):
-        raise RuntimeError(f"Erro ao excluir snapshot: {resp.status_code} - {resp.text[:500]}")
+        st.error(f"Erro ao excluir snapshot no Supabase: {resp.status_code} - {resp.text[:500]}")
+        return
+
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+
 
 
 def snapshot_referencia() -> pd.DataFrame | None:
@@ -2455,8 +2517,13 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
         lbl  = st.text_input("Rótulo", value=f"Snapshot {datetime.now().strftime('%d/%m %H:%M')}", key="snap_lbl")
         nota = st.text_area("Observações (opcional)", key="snap_nota", height=60)
         if st.button("💾 Salvar snapshot"):
-            salvar_snapshot(lbl, nota, dados, df_origem)
-            st.success("Snapshot salvo!")
+            try:
+                salvar_snapshot(lbl, nota, dados, df_origem)
+                st.success("Snapshot salvo!")
+                st.cache_data.clear()
+            except Exception as e:
+                st.error(f"Erro ao salvar snapshot no Supabase: {e}")
+                st.info("Confira se a tabela snapshot_cameras existe e se o RLS dela está desativado.")
 
         st.markdown("---")
         if st.download_button(
