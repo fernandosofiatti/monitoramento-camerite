@@ -2967,6 +2967,7 @@ def main():
         "Tempo offline",
         "% por cliente",
         "Evidências",
+        "LPRs Offline",
         "Atualizar Base",
     ])
 
@@ -4529,9 +4530,168 @@ def main():
 
 
     # ════════════════════════════════════════════
-    # ABA 5 — ATUALIZAR BASE ONLINE
+    # ABA 5 — LPRS OFFLINE
     # ════════════════════════════════════════════
     with tabs[5]:
+        st.markdown("### LPRs Offline")
+        st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
+
+        df_lpr_base = df_origem.copy() if df_origem is not None else pd.DataFrame()
+        if df_lpr_base.empty:
+            st.info("Sem dados carregados para validar LPRs offline.")
+        else:
+            for col in [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU]:
+                if col not in df_lpr_base.columns:
+                    df_lpr_base[col] = ""
+
+            df_lpr_base[COL_WL] = df_lpr_base[COL_WL].astype(str).str.strip()
+            df_lpr_base[COL_STATUS] = df_lpr_base[COL_STATUS].astype(str).str.strip().str.upper()
+            df_lpr_base[COL_NOME_CAM] = df_lpr_base[COL_NOME_CAM].astype(str).fillna("")
+
+            # Garante o mesmo universo do dashboard: se existir mapa de clientes, considera apenas esses IDs.
+            clientes_map_lpr = carregar_clientes()
+            if clientes_map_lpr:
+                df_lpr_base = df_lpr_base[df_lpr_base[COL_WL].isin(set(clientes_map_lpr.keys()))].copy()
+
+            mask_lpr = df_lpr_base[COL_NOME_CAM].str.contains("LPR", case=False, na=False)
+            mask_off = df_lpr_base[COL_STATUS].eq("OFFLINE")
+            df_lprs_total = df_lpr_base[mask_lpr].copy()
+            df_lprs_off = df_lpr_base[mask_lpr & mask_off].copy()
+
+            total_lprs = int(len(df_lprs_total))
+            total_lprs_off = int(len(df_lprs_off))
+            clientes_lpr_total = int(df_lprs_total[COL_WL].nunique()) if not df_lprs_total.empty else 0
+            clientes_lpr_off = int(df_lprs_off[COL_WL].nunique()) if not df_lprs_off.empty else 0
+            pct_lpr_off = (total_lprs_off / total_lprs * 100) if total_lprs else 0
+
+            if not df_lprs_off.empty:
+                df_lprs_off["Cliente"] = df_lprs_off[COL_WL].map(clientes_map_lpr).fillna(df_lprs_off[COL_WL].apply(lambda x: f"ID {x}"))
+                df_lprs_off["Franqueado"] = df_lprs_off[COL_EMPRESA].astype(str).replace({"nan": ""}).str.strip()
+                df_lprs_off["Última atualização"] = formatar_ultima_atualizacao(df_lprs_off[COL_ULT_ATU])
+                df_lprs_off["Tempo offline"] = parse_ultima_atualizacao(df_lprs_off[COL_ULT_ATU]).apply(
+                    lambda x: fmt_tempo(datetime.now() - x) if pd.notna(x) else "N/D"
+                )
+
+            st.markdown(f"""
+            <div class="compare-hero">
+                <div class="compare-title">🚘 Radar LPR Offline</div>
+                <div class="compare-sub">Validação operacional das câmeras LPR desconectadas na carteira filtrada.</div>
+            </div>
+            <div class="compare-grid">
+                <div class="compare-card neutral">
+                    <div class="compare-label">Total de LPRs</div>
+                    <div class="compare-value">{total_lprs}</div>
+                    <div class="compare-note">câmeras LPR encontradas na base</div>
+                </div>
+                <div class="compare-card bad">
+                    <div class="compare-label">LPRs offline</div>
+                    <div class="compare-value" style="color:#dc2626">{total_lprs_off}</div>
+                    <div class="compare-note">{pct_lpr_off:.1f}% das LPRs estão offline</div>
+                </div>
+                <div class="compare-card warn">
+                    <div class="compare-label">Clientes afetados</div>
+                    <div class="compare-value" style="color:#d97706">{clientes_lpr_off}</div>
+                    <div class="compare-note">de {clientes_lpr_total} clientes com LPR</div>
+                </div>
+                <div class="compare-card good">
+                    <div class="compare-label">LPRs online</div>
+                    <div class="compare-value" style="color:#059669">{max(total_lprs - total_lprs_off, 0)}</div>
+                    <div class="compare-note">câmeras LPR sem alerta offline</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if df_lprs_off.empty:
+                st.success("Nenhuma câmera LPR offline encontrada na carteira filtrada.")
+            else:
+                df_lpr_cli = (
+                    df_lprs_off.groupby([COL_WL, "Cliente", "Franqueado"], as_index=False)
+                    .agg(lprs_offline=(COL_ID_CAM, "count"))
+                    .sort_values("lprs_offline", ascending=False)
+                )
+
+                col_g1, col_g2 = st.columns([1.1, 1])
+                with col_g1:
+                    st.markdown("#### Clientes com mais LPRs offline")
+                    top_lpr = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True)
+                    fig_lpr_cli = go.Figure(go.Bar(
+                        x=top_lpr["lprs_offline"],
+                        y=top_lpr["Cliente"],
+                        orientation="h",
+                        text=top_lpr["lprs_offline"],
+                        textposition="outside",
+                        hovertemplate="<b>%{y}</b><br>LPRs offline: %{x}<extra></extra>",
+                    ))
+                    fig_lpr_cli.update_layout(
+                        **pdefaults(),
+                        height=max(320, min(620, 40 * len(top_lpr) + 120)),
+                        margin=dict(l=10, r=40, t=10, b=30),
+                        xaxis=dict(title="LPRs offline", gridcolor="#dbe8f2"),
+                        yaxis=dict(title=""),
+                    )
+                    st.plotly_chart(fig_lpr_cli, use_container_width=True)
+
+                with col_g2:
+                    st.markdown("#### Distribuição por franqueado")
+                    df_lpr_franq = (
+                        df_lprs_off.assign(Franqueado=df_lprs_off["Franqueado"].replace("", "Sem franqueado"))
+                        .groupby("Franqueado", as_index=False)
+                        .agg(lprs_offline=(COL_ID_CAM, "count"))
+                        .sort_values("lprs_offline", ascending=False)
+                        .head(12)
+                        .sort_values("lprs_offline", ascending=True)
+                    )
+                    fig_lpr_franq = go.Figure(go.Bar(
+                        x=df_lpr_franq["lprs_offline"],
+                        y=df_lpr_franq["Franqueado"],
+                        orientation="h",
+                        text=df_lpr_franq["lprs_offline"],
+                        textposition="outside",
+                        hovertemplate="<b>%{y}</b><br>LPRs offline: %{x}<extra></extra>",
+                    ))
+                    fig_lpr_franq.update_layout(
+                        **pdefaults(),
+                        height=max(320, min(620, 40 * len(df_lpr_franq) + 120)),
+                        margin=dict(l=10, r=40, t=10, b=30),
+                        xaxis=dict(title="LPRs offline", gridcolor="#dbe8f2"),
+                        yaxis=dict(title=""),
+                    )
+                    st.plotly_chart(fig_lpr_franq, use_container_width=True)
+
+                st.markdown("#### Detalhamento das LPRs offline")
+                busca_lpr = st.text_input("Buscar por cliente, franqueado, ID ou nome da câmera", key="busca_lprs_offline")
+                df_lpr_lista = df_lprs_off.copy()
+                if busca_lpr.strip():
+                    termo = busca_lpr.strip().lower()
+                    texto_busca = (
+                        df_lpr_lista["Cliente"].astype(str) + " " +
+                        df_lpr_lista["Franqueado"].astype(str) + " " +
+                        df_lpr_lista[COL_ID_CAM].astype(str) + " " +
+                        df_lpr_lista[COL_NOME_CAM].astype(str)
+                    ).str.lower()
+                    df_lpr_lista = df_lpr_lista[texto_busca.str.contains(re.escape(termo), na=False)].copy()
+
+                cols_lpr = ["Cliente", "Franqueado", COL_ID_CAM, COL_NOME_CAM, "Última atualização", "Tempo offline"]
+                df_lpr_lista = df_lpr_lista[cols_lpr].rename(columns={
+                    COL_ID_CAM: "ID da Câmera",
+                    COL_NOME_CAM: "Nome da Câmera",
+                }).sort_values(["Cliente", "Nome da Câmera"])
+                render_dataframe(df_lpr_lista, height=520)
+
+                csv_lpr = df_lpr_lista.to_csv(index=False, sep=";", encoding="utf-8-sig")
+                st.download_button(
+                    "📥 Baixar LPRs offline em CSV",
+                    data=csv_lpr,
+                    file_name=f"lprs_offline_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+
+    # ════════════════════════════════════════════
+    # ABA 6 — ATUALIZAR BASE ONLINE
+    # ════════════════════════════════════════════
+    with tabs[6]:
         render_aba_atualizar_base(df_origem)
 
 
