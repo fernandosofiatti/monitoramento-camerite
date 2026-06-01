@@ -899,7 +899,7 @@ def registrar_historico_importacao(df_envio: pd.DataFrame, arquivo_nome: str = "
         pass
 
 
-def enviar_df_supabase(df_csv: pd.DataFrame) -> tuple[bool, str, int]:
+def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bool, str, int]:
     if not supabase_configurado():
         return False, "Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.", 0
 
@@ -909,9 +909,12 @@ def enviar_df_supabase(df_csv: pd.DataFrame) -> tuple[bool, str, int]:
 
     registros = df_para_registros_json(df_envio)
     total = 0
+    qtd_total = len(registros)
     try:
-        for i in range(0, len(registros), 500):
+        for i in range(0, qtd_total, 500):
             lote = registros[i:i + 500]
+            if progress_callback:
+                progress_callback(total, qtd_total, "Enviando dados para o Supabase...")
             resp = requests.post(
                 supabase_base_url(),
                 headers=supabase_headers("resolution=merge-duplicates"),
@@ -922,14 +925,20 @@ def enviar_df_supabase(df_csv: pd.DataFrame) -> tuple[bool, str, int]:
             if resp.status_code not in (200, 201, 204):
                 return False, f"Erro ao importar para o Supabase: {resp.status_code} - {resp.text[:500]}", total
             total += len(lote)
+            if progress_callback:
+                progress_callback(total, qtd_total, f"Atualizando base online... {total}/{qtd_total} registros enviados")
     except Exception as e:
         return False, f"Erro ao enviar dados ao Supabase: {e}", total
 
+    if progress_callback:
+        progress_callback(total, qtd_total, "Registrando histórico da importação...")
     registrar_historico_importacao(df_envio)
 
     carregar_cameras_supabase.clear()
     carregar_dados.clear()
     calcular_saude_dados.clear()
+    if progress_callback:
+        progress_callback(total, qtd_total, "Importação finalizada.")
     return True, "Base online atualizada com sucesso.", total
 
 
@@ -1014,22 +1023,56 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
             st.caption(f"Colunas encontradas: {', '.join(df_csv.columns.astype(str))}")
             return
 
-        df_preview = preparar_df_para_supabase(df_csv)
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Linhas no CSV", len(df_csv))
-        col2.metric("Câmeras válidas", len(df_preview))
-        col3.metric("Offline", int((df_preview["status_camera"] == "OFFLINE").sum()) if not df_preview.empty else 0)
+        clientes_map = carregar_clientes()
+        df_csv_filtrado = df_csv.copy()
+        total_csv_bruto = len(df_csv)
+        total_csv_filtro = total_csv_bruto
 
-        st.markdown("#### Prévia da importação")
+        if clientes_map and COL_WL in df_csv_filtrado.columns:
+            ids_validos = set(str(k).strip() for k in clientes_map.keys())
+            df_csv_filtrado = df_csv_filtrado[
+                df_csv_filtrado[COL_WL].astype(str).str.strip().isin(ids_validos)
+            ].copy()
+            total_csv_filtro = len(df_csv_filtrado)
+
+        df_preview = preparar_df_para_supabase(df_csv_filtrado)
+        offline_filtro = int((df_preview["status_camera"] == "OFFLINE").sum()) if not df_preview.empty else 0
+        online_filtro = int((df_preview["status_camera"] == "ONLINE").sum()) if not df_preview.empty else 0
+        ignorados_filtro = total_csv_bruto - total_csv_filtro
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Linhas no CSV", total_csv_bruto)
+        col2.metric("Linhas no filtro", total_csv_filtro)
+        col3.metric("Válidas para importar", len(df_preview))
+        col4.metric("Offline no filtro", offline_filtro)
+
+        st.caption(
+            f"Filtro aplicado pela lista de clientes do painel (`nome_clientes.xlsx`). "
+            f"Ignorados fora do filtro: {ignorados_filtro}. Online no filtro: {online_filtro}."
+        )
+
+        st.markdown("#### Prévia da importação filtrada")
         render_dataframe(df_preview.head(100), height=320)
 
         if st.button("🚀 Atualizar base online", type="primary", use_container_width=True):
-            ok, msg, total = enviar_df_supabase(df_csv)
+            status_box = st.empty()
+            progress_bar = st.progress(0)
+
+            def atualizar_progresso(enviados: int, total_registros: int, mensagem: str):
+                pct = 1.0 if total_registros <= 0 else min(max(enviados / total_registros, 0), 1)
+                progress_bar.progress(pct)
+                status_box.info(f"⏳ {mensagem}")
+
+            atualizar_progresso(0, len(df_preview), "Atualizando base online. Não feche esta página.")
+            ok, msg, total = enviar_df_supabase(df_csv_filtrado, progress_callback=atualizar_progresso)
             if ok:
-                st.success(f"{msg} {total} registros enviados/atualizados.")
+                progress_bar.progress(1.0)
+                status_box.success(f"✅ Importação finalizada: {total} registros enviados/atualizados no Supabase.")
+                st.success(f"{msg} {total} registros enviados/atualizados. Offline no filtro: {offline_filtro}.")
                 st.cache_data.clear()
-                st.rerun()
+                st.info("A base foi atualizada. Use o botão 🔄 Atualizar dados no menu lateral para recarregar o painel quando quiser.")
             else:
+                status_box.error("❌ A importação não foi concluída.")
                 st.error(msg)
 
     st.markdown("---")
@@ -4048,6 +4091,9 @@ def main():
                 delta_base_global = total_cam_b - total_cam_a
                 novos_clientes = int(((df_comp["tot_a"] == 0) & (df_comp["tot_b"] > 0)).sum())
                 removidos_clientes = int(((df_comp["tot_a"] > 0) & (df_comp["tot_b"] == 0)).sum())
+                clientes_analisados = int(len(df_comp))
+                clientes_com_variacao_offline = int((df_comp["delta_off"] != 0).sum())
+                clientes_com_variacao_base = int((df_comp["tot_b"] - df_comp["tot_a"] != 0).sum())
 
                 if delta_off_global > 0:
                     resumo_cor = "#dc2626"
@@ -4102,19 +4148,24 @@ def main():
                         <div class="compare-note">{delta_pct_global:+.1f} p.p. em relação ao snapshot A</div>
                     </div>
                     <div class="compare-card neutral">
-                        <div class="compare-label">Movimento da carteira</div>
-                        <div class="compare-value" style="font-size:30px">{melhoraram}/{pioraram}</div>
-                        <div class="compare-note">melhoraram / pioraram · novos {novos_clientes} · removidos {removidos_clientes}</div>
+                        <div class="compare-label">Carteira analisada</div>
+                        <div class="compare-value" style="font-size:30px">{clientes_analisados}</div>
+                        <div class="compare-note">{clientes_com_variacao_offline} com variação offline · {melhoraram} melhoraram · {pioraram} pioraram</div>
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
 
                 col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
-                col_m1.metric("Clientes melhoraram", int(melhoraram))
-                col_m2.metric("Clientes pioraram", int(pioraram))
-                col_m3.metric("Clientes estáveis", int(estaveis))
-                col_m4.metric("Novos clientes", int(novos_clientes))
-                col_m5.metric("Clientes removidos", int(removidos_clientes))
+                col_m1.metric("Clientes analisados", int(clientes_analisados))
+                col_m2.metric("Com variação offline", int(clientes_com_variacao_offline))
+                col_m3.metric("Melhoraram", int(melhoraram))
+                col_m4.metric("Pioraram", int(pioraram))
+                col_m5.metric("Estáveis", int(estaveis))
+
+                col_b1, col_b2, col_b3 = st.columns(3)
+                col_b1.metric("Novos clientes", int(novos_clientes))
+                col_b2.metric("Clientes removidos", int(removidos_clientes))
+                col_b3.metric("Clientes com base alterada", int(clientes_com_variacao_base))
 
                 df_top_piora = df_comp[df_comp["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
                 df_top_melhora = df_comp[df_comp["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
