@@ -3006,7 +3006,7 @@ def main():
                 <div class="audit-card-value">{saude.get("linhas_processadas",0)}</div>
             </div>
             <div class="audit-card">
-                <div class="audit-card-label">Data Última Informação</div>
+                <div class="audit-card-label">Data Última Atualização</div>
                 <div class="audit-card-value" style="font-size:20px;color:#102a3f">{saude.get("ultima_data","N/D")}</div>
             </div>
         </div>
