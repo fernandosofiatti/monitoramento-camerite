@@ -3425,55 +3425,138 @@ def main():
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
     with tabs[1]:
-        franqueados = ["Todos"] + sorted([x for x in df_clientes_ops["Franqueado"].dropna().unique().tolist() if str(x).strip()])
+        # Otimização: filtros vetorizados + paginação.
+        # Antes, a aba renderizava todos os cards e fazia lookup linha a linha no DataFrame,
+        # o que deixava qualquer clique muito pesado no Streamlit.
+        df_clientes_view = df_clientes_ops.copy()
+        if "ID" in df_clientes_view.columns:
+            df_clientes_view["ID"] = df_clientes_view["ID"].astype(str)
+        for col_txt in ["Cliente", "Franqueado", "Status"]:
+            if col_txt in df_clientes_view.columns:
+                df_clientes_view[col_txt] = df_clientes_view[col_txt].fillna("").astype(str)
+
+        franqueados = ["Todos"] + sorted([
+            x for x in df_clientes_view["Franqueado"].dropna().unique().tolist()
+            if str(x).strip()
+        ])
+
         if "status_filter" not in st.session_state:
             st.session_state["status_filter"] = "Todos"
+        if "clientes_page" not in st.session_state:
+            st.session_state["clientes_page"] = 1
 
         st.caption("Clique no grupo para filtrar os clientes conforme a faixa de % offline.")
-        btns = st.columns([1,1,1,1])
-        if btns[0].button("Todos"):
+        btns = st.columns([1, 1, 1, 1])
+        status_anterior = st.session_state.get("status_filter", "Todos")
+        if btns[0].button("Todos", key="clientes_status_todos"):
             st.session_state["status_filter"] = "Todos"
-        if btns[1].button("Saudável (0-5%)"):
+        if btns[1].button("Saudável (0-5%)", key="clientes_status_saudavel"):
             st.session_state["status_filter"] = "Saudável (0-5%)"
-        if btns[2].button("Atenção (5-10%)"):
+        if btns[2].button("Atenção (5-10%)", key="clientes_status_atencao"):
             st.session_state["status_filter"] = "Atenção (5-10%)"
-        if btns[3].button("Crítico (>10%)"):
+        if btns[3].button("Crítico (>10%)", key="clientes_status_critico"):
             st.session_state["status_filter"] = "Crítico (>10%)"
+        if status_anterior != st.session_state.get("status_filter"):
+            st.session_state["clientes_page"] = 1
 
-        col_search, col_franq, col_min = st.columns([2,2,1])
-        with col_search:
-            busca = st.text_input("Buscar", placeholder="Buscar cliente ou franqueado…")
-        with col_franq:
-            filtro_franq = st.selectbox("Franqueado", franqueados)
-        with col_min:
-            min_cameras = st.selectbox("Min. câmeras", [0, 10, 50, 100, 200])
+        # Os filtros abaixo ficam dentro de um form para evitar recarregar a aba a cada tecla digitada.
+        with st.form("form_filtros_clientes", clear_on_submit=False):
+            col_search, col_franq, col_min, col_page_size = st.columns([2, 2, 1, 1])
+            with col_search:
+                busca_input = st.text_input(
+                    "Buscar",
+                    value=st.session_state.get("clientes_busca", ""),
+                    placeholder="Buscar cliente, franqueado ou ID…",
+                )
+            with col_franq:
+                filtro_franq_input = st.selectbox(
+                    "Franqueado",
+                    franqueados,
+                    index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
+                    if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
+                )
+            with col_min:
+                min_opcoes = [0, 10, 50, 100, 200]
+                min_cameras_input = st.selectbox(
+                    "Min. câmeras",
+                    min_opcoes,
+                    index=min_opcoes.index(st.session_state.get("clientes_min", 0))
+                    if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
+                )
+            with col_page_size:
+                page_opcoes = [12, 24, 48, 96]
+                page_size_input = st.selectbox(
+                    "Cards/página",
+                    page_opcoes,
+                    index=page_opcoes.index(st.session_state.get("clientes_page_size", 24))
+                    if st.session_state.get("clientes_page_size", 24) in page_opcoes else 1,
+                )
+            aplicar_filtros = st.form_submit_button("Aplicar filtros", use_container_width=True)
 
-        filtro = st.session_state["status_filter"]
+        if aplicar_filtros:
+            st.session_state["clientes_busca"] = busca_input
+            st.session_state["clientes_franq"] = filtro_franq_input
+            st.session_state["clientes_min"] = min_cameras_input
+            st.session_state["clientes_page_size"] = page_size_input
+            st.session_state["clientes_page"] = 1
 
-        def passa_filtro(wl_id, v):
-            row = df_clientes_ops[df_clientes_ops["ID"] == wl_id].iloc[0]
+        busca = st.session_state.get("clientes_busca", "").strip()
+        filtro_franq = st.session_state.get("clientes_franq", "Todos")
+        min_cameras = st.session_state.get("clientes_min", 0)
+        page_size = int(st.session_state.get("clientes_page_size", 24))
+        filtro = st.session_state.get("status_filter", "Todos")
+
+        # Filtro vetorizado: evita loop com df_clientes_ops[df_clientes_ops['ID'] == wl_id].iloc[0].
+        mask = pd.Series(True, index=df_clientes_view.index)
+        if busca:
             termo = busca.upper()
-            if busca and termo not in v["nome_cliente"].upper() and termo not in v["nome_empresa"].upper() and termo not in wl_id.upper():
-                return False
-            if filtro_franq != "Todos" and row["Franqueado"] != filtro_franq:
-                return False
-            if filtro != "Todos" and row["Status"] != filtro:
-                return False
-            if row["Total"] < min_cameras:
-                return False
-            return True
+            texto_busca = (
+                df_clientes_view.get("Cliente", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                + " " + df_clientes_view.get("Franqueado", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                + " " + df_clientes_view.get("ID", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+            )
+            mask &= texto_busca.str.contains(re.escape(termo), na=False)
+        if filtro_franq != "Todos":
+            mask &= df_clientes_view["Franqueado"].eq(filtro_franq)
+        if filtro != "Todos":
+            mask &= df_clientes_view["Status"].eq(filtro)
+        if min_cameras:
+            mask &= pd.to_numeric(df_clientes_view["Total"], errors="coerce").fillna(0).ge(min_cameras)
 
-        ids_ord = df_clientes_ops.sort_values("% Offline", ascending=False)["ID"].tolist()
-        ids_f = [wl for wl in ids_ord if passa_filtro(wl, dados[wl])]
+        df_filtrado = df_clientes_view.loc[mask].copy()
+        if not df_filtrado.empty:
+            df_filtrado = df_filtrado.sort_values("% Offline", ascending=False).reset_index(drop=True)
 
-        if not ids_f:
+        if df_filtrado.empty:
             st.info("Nenhum cliente encontrado com os filtros aplicados.")
         else:
-            df_filtrado = df_clientes_ops[df_clientes_ops["ID"].isin(ids_f)].copy()
-            c_res, c_dl = st.columns([4,1])
-            c_res.caption(f"{len(ids_f)} clientes no recorte · {int(df_filtrado['Offline'].sum())} câmeras offline")
+            total_clientes_recorte = len(df_filtrado)
+            total_paginas = max(1, math.ceil(total_clientes_recorte / page_size))
+            st.session_state["clientes_page"] = min(max(1, int(st.session_state.get("clientes_page", 1))), total_paginas)
+            pagina_atual = st.session_state["clientes_page"]
+
+            c_res, c_prev, c_page, c_next, c_dl = st.columns([4, 1, 1, 1, 1.4])
+            c_res.caption(
+                f"{total_clientes_recorte} clientes no recorte · "
+                f"{int(df_filtrado['Offline'].sum())} câmeras offline · "
+                f"exibindo página {pagina_atual}/{total_paginas}"
+            )
+            if c_prev.button("◀", key="clientes_prev", disabled=pagina_atual <= 1):
+                st.session_state["clientes_page"] = max(1, pagina_atual - 1)
+                st.rerun()
+            c_page.markdown(
+                f"<div style='text-align:center;font-size:12px;color:#4f6f85;padding-top:12px'>"
+                f"{pagina_atual}/{total_paginas}</div>",
+                unsafe_allow_html=True,
+            )
+            if c_next.button("▶", key="clientes_next", disabled=pagina_atual >= total_paginas):
+                st.session_state["clientes_page"] = min(total_paginas, pagina_atual + 1)
+                st.rerun()
+
             buf_filtro = io.BytesIO()
-            df_filtrado.drop(columns=["_score","_max_horas"], errors="ignore").to_excel(buf_filtro, index=False, engine="openpyxl")
+            df_filtrado.drop(columns=["_score", "_max_horas"], errors="ignore").to_excel(
+                buf_filtro, index=False, engine="openpyxl"
+            )
             c_dl.download_button(
                 "⬇ Exportar recorte",
                 data=buf_filtro.getvalue(),
@@ -3481,10 +3564,16 @@ def main():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
-            for linha in [ids_f[i:i+COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
+
+            ini = (pagina_atual - 1) * page_size
+            fim = ini + page_size
+            ids_f = df_filtrado["ID"].astype(str).iloc[ini:fim].tolist()
+
+            for linha in [ids_f[i:i + COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
                 cols = st.columns(COLUNAS_PAINEL)
                 for col, wl_id in zip(cols, linha):
-                    render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
+                    if wl_id in dados:
+                        render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
 
         # ── Detalhe de um cliente ──
         if "detalhe" in st.session_state:
