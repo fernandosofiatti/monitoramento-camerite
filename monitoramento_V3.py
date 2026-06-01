@@ -2028,7 +2028,7 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
     return df_out.drop_duplicates(subset=["wl_id", "id_camera"], keep="last").reset_index(drop=True)
 
 
-def carregar_snapshot_cameras(sid: int) -> pd.DataFrame:
+def carregar_snapshot_cameras(sid: int, wl_ids_validos: set[str] | None = None) -> pd.DataFrame:
     params = {
         "select": "*",
         "snapshot_id": f"eq.{int(sid)}",
@@ -2047,13 +2047,23 @@ def carregar_snapshot_cameras(sid: int) -> pd.DataFrame:
 
     clientes_map = carregar_clientes()
     out = pd.DataFrame()
-    out["wl_id"] = df.get("id_whitelabel", "").astype(str)
+    out["wl_id"] = df.get("id_whitelabel", "").astype(str).str.strip()
     out["nome_cliente"] = out["wl_id"].map(clientes_map).fillna("ID " + out["wl_id"].astype(str))
-    out["nome_empresa"] = df.get("nome_empresa", "").astype(str)
-    out["id_camera"] = df.get("id_camera", "").astype(str)
-    out["nome_camera"] = df.get("nome_camera", "").astype(str)
-    out["ultima_atualizacao"] = df.get("ultima_atualizacao", "").astype(str)
-    out["status_camera"] = df.get("status_camera", "").astype(str)
+    out["nome_empresa"] = df.get("nome_empresa", "").astype(str).replace({"nan": ""}).str.strip()
+    out["id_camera"] = df.get("id_camera", "").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    out["nome_camera"] = df.get("nome_camera", "").astype(str).replace({"nan": ""}).str.strip()
+    out["ultima_atualizacao"] = df.get("ultima_atualizacao", "").astype(str).replace({"nan": ""}).str.strip()
+    out["status_camera"] = df.get("status_camera", "").astype(str).str.strip().str.upper()
+
+    # Mantém o mesmo universo de clientes do painel/nome_clientes.xlsx.
+    if wl_ids_validos:
+        wl_ids_validos = {str(x).strip() for x in wl_ids_validos if str(x).strip()}
+        out = out[out["wl_id"].isin(wl_ids_validos)].copy()
+
+    # Segurança contra duplicidade dentro do mesmo snapshot.
+    # O comparativo precisa contar cada câmera uma única vez.
+    out = out[(out["wl_id"] != "") & (out["id_camera"] != "") & (out["id_camera"].str.lower() != "nan")].copy()
+    out = out.drop_duplicates(subset=["wl_id", "id_camera"], keep="last").reset_index(drop=True)
     return out
 
 
@@ -2133,19 +2143,20 @@ def listar_snapshots() -> pd.DataFrame:
     return _snapshot_datas_df()
 
 
-def carregar_snapshot(sid: int) -> pd.DataFrame:
-    df_cams = carregar_snapshot_cameras(int(sid))
+def carregar_snapshot(sid: int, wl_ids_validos: set[str] | None = None) -> pd.DataFrame:
+    df_cams = carregar_snapshot_cameras(int(sid), wl_ids_validos=wl_ids_validos)
     if df_cams.empty:
         return pd.DataFrame(columns=["wl_id", "nome_cliente", "total", "offline", "pct_offline"])
 
     rows = []
-    for wl_id, grupo in df_cams.groupby(df_cams["wl_id"].astype(str)):
+    for wl_id, grupo in df_cams.groupby(df_cams["wl_id"].astype(str).str.strip()):
+        grupo = grupo.drop_duplicates(subset=["wl_id", "id_camera"], keep="last")
         total = int(len(grupo))
-        offline = int((grupo["status_camera"].astype(str).str.upper() == "OFFLINE").sum())
+        offline = int((grupo["status_camera"].astype(str).str.strip().str.upper() == "OFFLINE").sum())
         pct = round(offline / total * 100, 2) if total else 0.0
         nome_cliente = str(grupo["nome_cliente"].iloc[0]) if "nome_cliente" in grupo.columns and len(grupo) else f"ID {wl_id}"
         rows.append({
-            "wl_id": str(wl_id),
+            "wl_id": str(wl_id).strip(),
             "nome_cliente": nome_cliente,
             "total": total,
             "offline": offline,
@@ -2680,8 +2691,9 @@ def main():
         # os dois lados precisam vir do histórico salvo no Supabase.
         # Não usamos a base atual carregada em tela aqui, porque isso gera
         # divergência quando a base atual é diferente do snapshot B selecionado.
-        df_new = carregar_snapshot(snapshot_ids[0])
-        df_old = carregar_snapshot(snapshot_ids[1])
+        wl_ids_validos_comp = {str(wl).strip() for wl in (dados or {}).keys()}
+        df_new = carregar_snapshot(snapshot_ids[0], wl_ids_validos=wl_ids_validos_comp)
+        df_old = carregar_snapshot(snapshot_ids[1], wl_ids_validos=wl_ids_validos_comp)
 
         new_map = df_new.set_index("wl_id")[['offline','pct_offline','total']].to_dict(orient='index')
         old_map = df_old.set_index("wl_id")[['offline','pct_offline','total']].to_dict(orient='index')
@@ -2734,8 +2746,8 @@ def main():
 
         # Detalhamento das câmeras novas: só fica disponível quando ambos os snapshots
         # foram salvos por esta versão ou posterior, que grava snapshot_cameras.
-        df_cams_new = carregar_snapshot_cameras(snapshot_ids[0])
-        df_cams_old = carregar_snapshot_cameras(snapshot_ids[1])
+        df_cams_new = carregar_snapshot_cameras(snapshot_ids[0], wl_ids_validos=wl_ids_validos_comp)
+        df_cams_old = carregar_snapshot_cameras(snapshot_ids[1], wl_ids_validos=wl_ids_validos_comp)
 
         if not df_cams_new.empty and not df_cams_old.empty:
             detalhe_cameras_disponivel = True
@@ -3909,9 +3921,11 @@ def main():
                 leg_a = fmt_dt(datas_snap.get(id_a, ""))
                 leg_b = fmt_dt(datas_snap.get(id_b, ""))
 
-                # Comparativo histórico real: A e B vêm dos snapshots salvos.
-                df_a = carregar_snapshot(id_a).rename(columns={"offline":"off_a","total":"tot_a","pct_offline":"pct_a","nome_cliente":"nc_a"})
-                df_b = carregar_snapshot(id_b).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
+                # Comparativo histórico real: A e B vêm dos snapshots salvos,
+                # mas respeitando o mesmo universo de clientes usado no painel.
+                wl_ids_validos_hist = {str(wl).strip() for wl in (dados or {}).keys()}
+                df_a = carregar_snapshot(id_a, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_a","total":"tot_a","pct_offline":"pct_a","nome_cliente":"nc_a"})
+                df_b = carregar_snapshot(id_b, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
                 df_comp = pd.merge(df_a, df_b, on="wl_id", how="outer").fillna(0)
                 # Usar nome do snapshot B como display
                 df_comp["cliente"] = df_comp["nc_b"].where(df_comp["nc_b"] != 0, df_comp["nc_a"])
