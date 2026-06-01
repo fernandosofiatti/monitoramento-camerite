@@ -1888,6 +1888,7 @@ def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) ->
 # ─────────────────────────────────────────────
 SNAPSHOT_TABLE = os.getenv("SUPABASE_SNAPSHOT_TABLE", "snapshot_cameras")
 SNAPSHOT_MASTER_TABLE = os.getenv("SUPABASE_SNAPSHOT_MASTER_TABLE", "snapshots")
+SNAPSHOT_CLIENTES_TABLE = os.getenv("SUPABASE_SNAPSHOT_CLIENTES_TABLE", "snapshot_clientes")
 
 
 def init_db():
@@ -1969,6 +1970,59 @@ def _snapshot_ref_por_id(sid: int) -> dict | None:
     if row.empty:
         return None
     return row.iloc[0].to_dict()
+
+
+def montar_df_clientes_snapshot(dados: dict) -> pd.DataFrame:
+    """Monta o resumo por cliente exatamente a partir dos mesmos dados usados nos cards do dashboard."""
+    rows = []
+    for wl_id, info in (dados or {}).items():
+        wl = str(wl_id).strip()
+        if not wl:
+            continue
+        total = int(info.get("total", 0) or 0)
+        df_off = info.get("offline")
+        try:
+            offline = int(len(df_off)) if df_off is not None else int(info.get("offline_count", 0) or 0)
+        except Exception:
+            offline = int(info.get("offline_count", 0) or 0)
+        pct = round((offline / total * 100), 2) if total else 0.0
+        rows.append({
+            "wl_id": wl,
+            "nome_cliente": str(info.get("cidade_estado") or info.get("nome_cliente") or f"ID {wl}"),
+            "nome_empresa": str(info.get("nome_empresa") or ""),
+            "total": total,
+            "offline": offline,
+            "pct_offline": pct,
+        })
+    return pd.DataFrame(rows, columns=["wl_id", "nome_cliente", "nome_empresa", "total", "offline", "pct_offline"])
+
+
+def carregar_snapshot_clientes(sid: int, wl_ids_validos: set[str] | None = None) -> pd.DataFrame:
+    """Lê o resumo salvo por cliente. Esta é a fonte oficial do comparativo."""
+    params = {
+        "select": "*",
+        "snapshot_id": f"eq.{int(sid)}",
+        "order": "id_whitelabel.asc",
+    }
+    df, erro = _supabase_select_all(SNAPSHOT_CLIENTES_TABLE, params=params, page_size=5000)
+    if erro or df.empty:
+        return pd.DataFrame(columns=["wl_id", "nome_cliente", "total", "offline", "pct_offline"])
+
+    out = pd.DataFrame()
+    out["wl_id"] = df.get("id_whitelabel", "").astype(str).str.strip()
+    out["nome_cliente"] = df.get("nome_cliente", "").astype(str).replace({"nan": ""}).str.strip()
+    out["total"] = pd.to_numeric(df.get("total_cameras", 0), errors="coerce").fillna(0).astype(int)
+    out["offline"] = pd.to_numeric(df.get("total_offline", 0), errors="coerce").fillna(0).astype(int)
+    out["pct_offline"] = pd.to_numeric(df.get("pct_offline", 0), errors="coerce").fillna(0.0)
+
+    if wl_ids_validos:
+        wl_ids_validos = {str(x).strip() for x in wl_ids_validos if str(x).strip()}
+        out = out[out["wl_id"].isin(wl_ids_validos)].copy()
+
+    out = out[out["wl_id"] != ""].copy()
+    # Se por qualquer motivo houver duplicidade, fica a última linha salva para aquele cliente.
+    out = out.drop_duplicates(subset=["wl_id"], keep="last").reset_index(drop=True)
+    return out[["wl_id", "nome_cliente", "total", "offline", "pct_offline"]]
 
 
 def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> pd.DataFrame:
@@ -2094,7 +2148,37 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
         raise RuntimeError("Snapshot criado, mas o Supabase não retornou o ID do cabeçalho.")
     snapshot_id = int(data_master[0]["id"])
 
-    # 2) Grava as câmeras vinculadas ao snapshot_id.
+    # 2) Grava o RESUMO POR CLIENTE, exatamente igual ao dashboard.
+    # Esta passa a ser a fonte oficial dos cards/comparativos, evitando divergência
+    # quando df_origem tiver filtros, colunas ou conversões diferentes.
+    df_clientes_snap = montar_df_clientes_snapshot(dados)
+    registros_clientes = []
+    for _, r in df_clientes_snap.iterrows():
+        registros_clientes.append({
+            "snapshot_id": snapshot_id,
+            "data_snapshot": agora,
+            "id_whitelabel": limpar_valor_json(r.get("wl_id")),
+            "nome_cliente": limpar_valor_json(r.get("nome_cliente")),
+            "nome_empresa": limpar_valor_json(r.get("nome_empresa")),
+            "total_cameras": int(r.get("total", 0) or 0),
+            "total_offline": int(r.get("offline", 0) or 0),
+            "pct_offline": float(r.get("pct_offline", 0) or 0),
+        })
+
+    for i in range(0, len(registros_clientes), 500):
+        lote_cli = registros_clientes[i:i + 500]
+        if not lote_cli:
+            continue
+        resp_cli = requests.post(
+            supabase_table_url(SNAPSHOT_CLIENTES_TABLE),
+            headers=supabase_headers("return=minimal"),
+            json=lote_cli,
+            timeout=60,
+        )
+        if resp_cli.status_code not in (200, 201, 204):
+            raise RuntimeError(f"Erro ao salvar resumo de clientes do snapshot no Supabase: {resp_cli.status_code} - {resp_cli.text[:500]}")
+
+    # 3) Grava as câmeras vinculadas ao snapshot_id para detalhamento de novas/removidas.
     df_cameras_snap = montar_df_cameras_snapshot(df_origem, dados)
     registros = []
     for _, r in df_cameras_snap.iterrows():
@@ -2144,6 +2228,13 @@ def listar_snapshots() -> pd.DataFrame:
 
 
 def carregar_snapshot(sid: int, wl_ids_validos: set[str] | None = None) -> pd.DataFrame:
+    # Fonte oficial do comparativo: resumo por cliente salvo junto com o snapshot.
+    # Assim o total offline do snapshot bate com o total que estava na tela no momento do salvamento.
+    df_clientes = carregar_snapshot_clientes(int(sid), wl_ids_validos=wl_ids_validos)
+    if not df_clientes.empty:
+        return df_clientes
+
+    # Fallback para snapshots antigos, salvos antes da tabela snapshot_clientes existir.
     df_cams = carregar_snapshot_cameras(int(sid), wl_ids_validos=wl_ids_validos)
     if df_cams.empty:
         return pd.DataFrame(columns=["wl_id", "nome_cliente", "total", "offline", "pct_offline"])
