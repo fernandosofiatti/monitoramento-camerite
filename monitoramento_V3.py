@@ -2313,7 +2313,7 @@ def render_card(col, wl_id, v, tendencia, delta_off):
 # ─────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────
-def render_sidebar(dados, total_cameras, total_offline, pct_global):
+def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=None):
     with st.sidebar:
         st.markdown("""
         <div class="sidebar-logo" style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:1rem;text-align:center;">
@@ -2650,7 +2650,7 @@ def main():
     clientes_pioraram = sum(1 for v in delta_offs.values() if isinstance(v, (int, float)) and v > 0)
 
     # ── Sidebar ──
-    render_sidebar(dados, total_cameras, total_offline, pct_global)
+    render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem)
 
     # ── Page header ──
     st.markdown(f"""
