@@ -606,6 +606,15 @@ def fmt_tempo(delta: timedelta) -> str:
     d = s // 86400; h = (s % 86400) // 3600
     return f"{d}d {h}h"
 
+
+def agora_sao_paulo() -> datetime:
+    """Retorna horário local de São Paulo, mesmo quando o app roda em servidor UTC."""
+    return datetime.utcnow() - timedelta(hours=3)
+
+
+def agora_sao_paulo_str(fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    return agora_sao_paulo().strftime(fmt)
+
 def classe_tempo(delta: timedelta) -> str:
     h = delta.total_seconds() / 3600
     if h >= 24:  return "tempo-critico"
@@ -785,7 +794,7 @@ def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
     out["observacoes"] = df_valid[COL_OBS].astype(str).replace({"nan": ""}).str.strip()
     out["cidade"] = df_valid[city_col].astype(str).replace({"nan": ""}).str.strip()
     out["estado"] = df_valid[estado_col].astype(str).replace({"nan": ""}).str.strip()
-    out["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    out["updated_at"] = agora_sao_paulo_str()
 
     out = out[(out["id_whitelabel"] != "") & (out["status_camera"] != "")].copy()
     out = out.drop_duplicates(subset=["id_camera"], keep="last")
@@ -883,6 +892,7 @@ def registrar_historico_importacao(df_envio: pd.DataFrame, arquivo_nome: str = "
         qtd_registros = int(len(df_envio))
         status = df_envio.get("status_camera", pd.Series(dtype=str)).astype(str).str.upper()
         payload = {
+            "data_importacao": agora_sao_paulo_str(),
             "arquivo_nome": arquivo_nome,
             "qtd_registros": qtd_registros,
             "qtd_online": int((status == "ONLINE").sum()),
@@ -1069,6 +1079,24 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
                 progress_bar.progress(1.0)
                 status_box.success(f"✅ Importação finalizada: {total} registros enviados/atualizados no Supabase.")
                 st.success(f"{msg} {total} registros enviados/atualizados. Offline no filtro: {offline_filtro}.")
+                try:
+                    atualizar_progresso(total, len(df_preview), "Gravando snapshot automático da nova importação...")
+                    df_snapshot = preencher_cidade_estado_por_clientes(
+                        df_csv_filtrado.copy(),
+                        carregar_clientes_prefeitura(),
+                    )
+                    dados_snapshot = processar_df_gov(df_snapshot, clientes_map)
+                    gravado_em = salvar_snapshot_automatico(
+                        dados_snapshot,
+                        df_snapshot,
+                        total_importado=total,
+                    )
+                    if gravado_em:
+                        st.success(f"Snapshot automático gravado em {pd.to_datetime(gravado_em).strftime('%d/%m/%Y %H:%M')}.")
+                    else:
+                        st.warning("A importação terminou, mas não havia dados válidos para gravar snapshot automático.")
+                except Exception as e:
+                    st.warning(f"A importação terminou, mas o snapshot automático não foi gravado: {e}")
                 st.cache_data.clear()
                 st.info("A base foi atualizada. Use o botão 🔄 Atualizar dados no menu lateral para recarregar o painel quando quiser.")
             else:
@@ -1379,7 +1407,7 @@ def processar_df_gov(df: pd.DataFrame, clientes_map: dict) -> dict:
     state_col = encontrar_coluna_por_chaves(df, ("estado", "uf", "state"), default=None)
 
     # Parsear data da última atualização
-    agora = datetime.now()
+    agora = agora_sao_paulo()
     if COL_ULT_ATU in df.columns:
         df[COL_ULT_ATU] = parse_ultima_atualizacao(df[COL_ULT_ATU])
         df["_tempo_off"] = df[COL_ULT_ATU].apply(
@@ -1887,7 +1915,7 @@ def calcular_saude_dataframe(df: pd.DataFrame | None, clientes_map: dict, origem
         parsed = parse_ultima_atualizacao(df_escopo[COL_ULT_ATU])
         sem_data = (valores.isna() | (valores == "")).sum()
         datas_invalidas = (parsed.isna() & valores.notna() & (valores != "")).sum()
-        datas_futuras = (parsed > datetime.now()).sum()
+        datas_futuras = (parsed > agora_sao_paulo()).sum()
         if parsed.notna().any():
             ultima_data = parsed.max().strftime("%d/%m/%Y %H:%M")
 
@@ -2169,7 +2197,7 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
 
     Não usa UPSERT. Não apaga snapshot anterior. Cada clique cria um novo ID.
     """
-    agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    agora = agora_sao_paulo_str()
 
     # 1) Cria o cabeçalho do snapshot e pega o ID gerado.
     payload_master = {
@@ -2358,12 +2386,25 @@ def carregar_ultimos_snapshots_ids(limit: int = 2) -> list[int]:
     return df["id"].astype(int).head(limit).tolist()
 
 
-def salvar_snapshot_automatico(dados: dict) -> str:
-    return ""
+def salvar_snapshot_automatico(
+    dados: dict,
+    df_origem: pd.DataFrame | None = None,
+    total_importado: int | None = None,
+) -> str:
+    if not dados:
+        return ""
+
+    agora = agora_sao_paulo()
+    label = f"Importação CSV {agora.strftime('%d/%m/%Y %H:%M')}"
+    notas = "Snapshot automático criado após atualização da base online por CSV."
+    if total_importado is not None:
+        notas += f" {int(total_importado)} registros enviados/atualizados."
+
+    return salvar_snapshot(label, notas, dados, df_origem)
 
 
 def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
-    limite = datetime.now() - timedelta(days=dias)
+    limite = agora_sao_paulo() - timedelta(days=dias)
     df_snaps = listar_snapshots()
     if df_snaps.empty:
         return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "wl_id", "nome_cliente", "total", "offline", "pct_offline"])
@@ -2486,7 +2527,7 @@ def montar_df_clientes(dados: dict, tendencias: dict | None = None, delta_offs: 
 def gerar_excel(dados: dict) -> bytes:
     rows_resumo = []
     rows_offline = []
-    agora = datetime.now()
+    agora = agora_sao_paulo()
 
     for wl_id, v in dados.items():
         total = v["total"]; off = len(v["offline"])
@@ -2642,7 +2683,7 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
 
         st.markdown("---")
         st.markdown('<div class="nav-section">Salvar Snapshot</div>', unsafe_allow_html=True)
-        lbl  = st.text_input("Rótulo", value=f"Snapshot {datetime.now().strftime('%d/%m %H:%M')}", key="snap_lbl")
+        lbl  = st.text_input("Rótulo", value=f"Snapshot {agora_sao_paulo_str('%d/%m %H:%M')}", key="snap_lbl")
         nota = st.text_area("Observações (opcional)", key="snap_nota", height=60)
         if st.button("💾 Salvar snapshot"):
             try:
@@ -2657,7 +2698,7 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
         if st.download_button(
             "⬇ Exportar Excel",
             data=gerar_excel(dados),
-            file_name=f"camerite_bi_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            file_name=f"camerite_bi_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ):
             pass
@@ -2764,7 +2805,7 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
         st.download_button(
             label="⬇ Exportar detalhe (.xlsx)",
             data=buf_xlsx.getvalue(),
-            file_name=f"detalhe_cliente_{wl_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
@@ -2772,7 +2813,7 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
         st.download_button(
             label="⬇ Exportar detalhe (.csv)",
             data=buf_csv.getvalue(),
-            file_name=f"detalhe_cliente_{wl_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
             mime="text/csv",
             use_container_width=True,
         )
@@ -3267,7 +3308,7 @@ def main():
                 st.download_button(
                     "⬇ Baixar câmeras novas em Excel",
                     data=buffer_cams.getvalue(),
-                    file_name=f"cameras_novas_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    file_name=f"cameras_novas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
@@ -3661,7 +3702,7 @@ def main():
                 c_dl.download_button(
                     "⬇ Exportar recorte",
                     data=buf_filtro.getvalue(),
-                    file_name=f"clientes_filtrados_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    file_name=f"clientes_filtrados_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
@@ -3682,7 +3723,7 @@ def main():
             total_u= v["total"]
             pct_d  = round(len(df_det)/total_u*100, 1) if total_u else 0
             cor_d  = cor_hex(pct_d)
-            agora  = datetime.now()
+            agora  = agora_sao_paulo()
             nome_cliente_html = escape_html(v.get("cidade_estado") or v["nome_cliente"])
             nome_empresa_html = escape_html(v["nome_empresa"])
             wl_id_html = escape_html(wl_id)
@@ -3768,7 +3809,7 @@ def main():
                     st.download_button(
                         label="⬇ Exportar detalhe (.xlsx)",
                         data=buf_xlsx.getvalue(),
-                        file_name=f"detalhe_cliente_{wl_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
@@ -3776,7 +3817,7 @@ def main():
                     st.download_button(
                         label="⬇ Exportar detalhe (.csv)",
                         data=buf_csv.getvalue(),
-                        file_name=f"detalhe_cliente_{wl_id}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                        file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
                         mime="text/csv",
                         use_container_width=True,
                     )
@@ -3805,7 +3846,7 @@ def main():
 
         # Montar DataFrame global com todas as câmeras offline
         rows_tempo = []
-        agora = datetime.now()
+        agora = agora_sao_paulo()
         for wl_id, v in dados.items():
             df_off = v["offline"]
             if df_off.empty: continue
@@ -4073,7 +4114,7 @@ def main():
                 df_tbl_t.to_excel(buf_t, index=True, engine="openpyxl")
                 st.download_button("⬇ Exportar lista",
                     data=buf_t.getvalue(),
-                    file_name=f"tempo_offline_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    file_name=f"tempo_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
                 render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
@@ -4165,7 +4206,7 @@ def main():
             buf_r = io.BytesIO()
             df_rank.to_excel(buf_r, index=True, engine="openpyxl")
             col_dl.download_button("⬇ Excel", data=buf_r.getvalue(),
-                file_name=f"ranking_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                file_name=f"ranking_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
             df_show = df_rank[["Cliente","Franqueado","Offline","Total","% Offline"]].copy()
@@ -4264,7 +4305,7 @@ def main():
                     buf_h = io.BytesIO()
                     df_comp.to_excel(buf_h, index=False, engine="openpyxl")
                     st.download_button("⬇ Comparativo", data=buf_h.getvalue(),
-                        file_name=f"comparativo_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                        file_name=f"comparativo_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True)
 
@@ -4667,7 +4708,7 @@ def main():
                 df_lprs_off["Franqueado"] = df_lprs_off[COL_EMPRESA].astype(str).replace({"nan": ""}).str.strip()
                 df_lprs_off["Última atualização"] = formatar_ultima_atualizacao(df_lprs_off[COL_ULT_ATU])
                 df_lprs_off["Tempo offline"] = parse_ultima_atualizacao(df_lprs_off[COL_ULT_ATU]).apply(
-                    lambda x: fmt_tempo(datetime.now() - x) if pd.notna(x) else "N/D"
+                    lambda x: fmt_tempo(agora_sao_paulo() - x) if pd.notna(x) else "N/D"
                 )
 
             st.markdown(f"""
@@ -4781,7 +4822,7 @@ def main():
                 st.download_button(
                     "📥 Baixar LPRs offline em CSV",
                     data=csv_lpr,
-                    file_name=f"lprs_offline_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    file_name=f"lprs_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
                     mime="text/csv",
                     use_container_width=True,
                 )
