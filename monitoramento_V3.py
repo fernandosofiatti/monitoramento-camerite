@@ -1045,16 +1045,65 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
             ].copy()
             total_csv_filtro = len(df_csv_filtrado)
 
+        df_preview_geral = preparar_df_para_supabase(df_csv)
         df_preview = preparar_df_para_supabase(df_csv_filtrado)
+        clientes_geral = int(df_preview_geral["id_whitelabel"].nunique()) if not df_preview_geral.empty else 0
+        clientes_filtro = int(df_preview["id_whitelabel"].nunique()) if not df_preview.empty else 0
+        offline_geral = int((df_preview_geral["status_camera"] == "OFFLINE").sum()) if not df_preview_geral.empty else 0
+        online_geral = int((df_preview_geral["status_camera"] == "ONLINE").sum()) if not df_preview_geral.empty else 0
         offline_filtro = int((df_preview["status_camera"] == "OFFLINE").sum()) if not df_preview.empty else 0
         online_filtro = int((df_preview["status_camera"] == "ONLINE").sum()) if not df_preview.empty else 0
         ignorados_filtro = total_csv_bruto - total_csv_filtro
 
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Linhas no CSV", total_csv_bruto)
-        col2.metric("Linhas no filtro", total_csv_filtro)
-        col3.metric("Válidas para importar", len(df_preview))
-        col4.metric("Offline no filtro", offline_filtro)
+        def fmt_card_num(valor: int) -> str:
+            return f"{int(valor):,}".replace(",", ".")
+
+        st.markdown(f"""
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-neutral">
+                <div class="kpi-label">CSV Completo</div>
+                <div class="kpi-value val-purple">{fmt_card_num(total_csv_bruto)}</div>
+                <div class="kpi-sub">linhas recebidas no arquivo</div>
+            </div>
+            <div class="kpi-card kpi-neutral">
+                <div class="kpi-label">Clientes no CSV</div>
+                <div class="kpi-value val-purple">{fmt_card_num(clientes_geral)}</div>
+                <div class="kpi-sub">IDs únicos com câmera válida</div>
+            </div>
+            <div class="kpi-card kpi-ok">
+                <div class="kpi-label">Online no CSV</div>
+                <div class="kpi-value val-ok">{fmt_card_num(online_geral)}</div>
+                <div class="kpi-sub">{fmt_card_num(len(df_preview_geral))} válidas para importar</div>
+            </div>
+            <div class="kpi-card kpi-alert">
+                <div class="kpi-label">Offline no CSV</div>
+                <div class="kpi-value val-alert">{fmt_card_num(offline_geral)}</div>
+                <div class="kpi-sub">base completa, antes do filtro</div>
+            </div>
+        </div>
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-neutral">
+                <div class="kpi-label">CSV Filtrado</div>
+                <div class="kpi-value val-purple">{fmt_card_num(total_csv_filtro)}</div>
+                <div class="kpi-sub">{fmt_card_num(ignorados_filtro)} linhas fora do filtro</div>
+            </div>
+            <div class="kpi-card kpi-neutral">
+                <div class="kpi-label">Clientes no Filtro</div>
+                <div class="kpi-value val-purple">{fmt_card_num(clientes_filtro)}</div>
+                <div class="kpi-sub">clientes da lista do painel</div>
+            </div>
+            <div class="kpi-card kpi-ok">
+                <div class="kpi-label">Online no Filtro</div>
+                <div class="kpi-value val-ok">{fmt_card_num(online_filtro)}</div>
+                <div class="kpi-sub">{fmt_card_num(len(df_preview))} válidas para importar</div>
+            </div>
+            <div class="kpi-card kpi-alert">
+                <div class="kpi-label">Offline no Filtro</div>
+                <div class="kpi-value val-alert">{fmt_card_num(offline_filtro)}</div>
+                <div class="kpi-sub">universo usado na atualização</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.caption(
             f"Filtro aplicado pela lista de clientes do painel (`nome_clientes.xlsx`). "
