@@ -4708,76 +4708,54 @@ def main():
                     .sort_values("lprs_offline", ascending=False)
                 )
 
-                col_g1, col_g2 = st.columns([1.1, 1])
-                with col_g1:
-                    st.markdown("#### Clientes com mais LPRs offline")
-                    top_lpr = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True)
-                    fig_lpr_cli = go.Figure(go.Bar(
-                        x=top_lpr["lprs_offline"],
-                        y=top_lpr["Cliente"],
-                        orientation="h",
-                        text=top_lpr["lprs_offline"],
-                        textposition="outside",
-                        hovertemplate="<b>%{y}</b><br>LPRs offline: %{x}<extra></extra>",
-                    ))
-                    fig_lpr_cli.update_layout(
-                        **pdefaults(),
-                        height=max(320, min(620, 40 * len(top_lpr) + 120)),
-                        margin=dict(l=10, r=40, t=10, b=30),
-                        xaxis=dict(title="LPRs offline", gridcolor="#dbe8f2"),
-                        yaxis=dict(title=""),
-                    )
-                    st.plotly_chart(fig_lpr_cli, use_container_width=True)
+                st.markdown("#### Clientes com mais LPRs offline")
+                top_lpr_area = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True).copy()
+                top_lpr_area["Cliente eixo"] = top_lpr_area["Cliente"].astype(str)
+                max_lpr_area = max(3, int(top_lpr_area["lprs_offline"].max()) + 1) if not top_lpr_area.empty else 3
+                altura_lpr_area = max(380, min(680, 42 * len(top_lpr_area) + 140))
 
-                with col_g2:
-                    st.markdown("#### Clientes com mais LPRs offline · área")
-                    top_lpr_area = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True).copy()
-                    top_lpr_area["Cliente eixo"] = top_lpr_area["Cliente"].astype(str)
-                    max_lpr_area = max(3, int(top_lpr_area["lprs_offline"].max()) + 1) if not top_lpr_area.empty else 3
-                    altura_lpr_area = max(320, min(620, 40 * len(top_lpr_area) + 120))
-
-                    fig_lpr_area = go.Figure()
-                    fig_lpr_area.add_trace(go.Scatter(
-                        name="LPRs offline",
-                        x=top_lpr_area["lprs_offline"],
-                        y=top_lpr_area["Cliente eixo"],
-                        mode="lines+markers+text",
-                        fill="tozerox",
-                        line=dict(color="#dc2626", width=2.8, shape="spline", smoothing=0.65),
-                        marker=dict(color="#dc2626", size=8, line=dict(color="#ffffff", width=1)),
-                        fillcolor="rgba(220, 38, 38, 0.18)",
-                        text=top_lpr_area["lprs_offline"],
-                        textposition="middle right",
-                        customdata=top_lpr_area[["Cliente", "Franqueado"]],
-                        hovertemplate=(
-                            "<b>%{customdata[0]}</b><br>"
-                            "Franqueado: %{customdata[1]}<br>"
-                            "LPRs offline: %{x}<extra></extra>"
-                        ),
-                    ))
-                    fig_lpr_area.update_layout(
-                        **pdefaults(),
-                        height=altura_lpr_area,
-                        margin=dict(l=10, r=45, t=10, b=30),
-                        xaxis=dict(
-                            title="LPRs offline",
-                            range=[0, max_lpr_area],
-                            gridcolor="#dbe8f2",
-                            tickfont=dict(color="#6b8496", size=10),
-                            zeroline=False,
-                        ),
-                        yaxis=dict(
-                            title="",
-                            type="category",
-                            categoryorder="array",
-                            categoryarray=top_lpr_area["Cliente eixo"].tolist(),
-                            tickfont=dict(color="#4f6f85", size=10),
-                            automargin=True,
-                        ),
-                        showlegend=False,
-                        hovermode="closest",
-                    )
-                    st.plotly_chart(fig_lpr_area, use_container_width=True, key="lprs_offline_top_clientes_area")
+                fig_lpr_area = go.Figure()
+                fig_lpr_area.add_trace(go.Scatter(
+                    name="LPRs offline",
+                    x=top_lpr_area["lprs_offline"],
+                    y=top_lpr_area["Cliente eixo"],
+                    mode="lines+markers+text",
+                    fill="tozerox",
+                    line=dict(color="#dc2626", width=3.0, shape="spline", smoothing=0.65),
+                    marker=dict(color="#dc2626", size=9, line=dict(color="#ffffff", width=1)),
+                    fillcolor="rgba(220, 38, 38, 0.18)",
+                    text=top_lpr_area["lprs_offline"],
+                    textposition="middle right",
+                    customdata=top_lpr_area[["Cliente", "Franqueado"]],
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "Franqueado: %{customdata[1]}<br>"
+                        "LPRs offline: %{x}<extra></extra>"
+                    ),
+                ))
+                fig_lpr_area.update_layout(
+                    **pdefaults(),
+                    height=altura_lpr_area,
+                    margin=dict(l=10, r=55, t=10, b=35),
+                    xaxis=dict(
+                        title="LPRs offline",
+                        range=[0, max_lpr_area],
+                        gridcolor="#dbe8f2",
+                        tickfont=dict(color="#6b8496", size=10),
+                        zeroline=False,
+                    ),
+                    yaxis=dict(
+                        title="",
+                        type="category",
+                        categoryorder="array",
+                        categoryarray=top_lpr_area["Cliente eixo"].tolist(),
+                        tickfont=dict(color="#4f6f85", size=11),
+                        automargin=True,
+                    ),
+                    showlegend=False,
+                    hovermode="closest",
+                )
+                st.plotly_chart(fig_lpr_area, use_container_width=True, key="lprs_offline_top_clientes_area_horizontal")
 
                 st.markdown("#### Detalhamento das LPRs offline")
                 busca_lpr = st.text_input("Buscar por cliente, franqueado, ID ou nome da câmera", key="busca_lprs_offline")
