@@ -1153,17 +1153,59 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
                 st.error(msg)
 
     st.markdown("---")
-    st.markdown("#### Status da base online")
+    st.markdown("#### Status da base online (filtrados)")
+    st.caption("Os números abaixo consideram somente os clientes existentes na lista do painel (`nome_clientes.xlsx`).")
     if supabase_configurado():
         df_online, erro_online = carregar_cameras_supabase()
         if erro_online:
             st.error(erro_online)
         elif df_online is not None:
-            col_a, col_b, col_c = st.columns(3)
-            col_a.metric("Registros no BD", len(df_online))
-            col_b.metric("Clientes", df_online["id_whitelabel"].nunique() if "id_whitelabel" in df_online.columns else 0)
-            col_c.metric("Offline", int((df_online.get("status_camera", pd.Series(dtype=str)).astype(str).str.upper() == "OFFLINE").sum()))
-            render_dataframe(converter_supabase_para_df_gov(df_online).head(200), height=360)
+            df_online_filtrado = df_online.copy()
+            clientes_map_status = carregar_clientes()
+
+            if clientes_map_status and "id_whitelabel" in df_online_filtrado.columns:
+                ids_validos_status = set(str(k).strip() for k in clientes_map_status.keys())
+                df_online_filtrado = df_online_filtrado[
+                    df_online_filtrado["id_whitelabel"].astype(str).str.strip().isin(ids_validos_status)
+                ].copy()
+
+            status_online = df_online_filtrado.get("status_camera", pd.Series(dtype=str)).astype(str).str.upper()
+            registros_bd_filtrados = int(len(df_online_filtrado))
+            clientes_bd_filtrados = int(df_online_filtrado["id_whitelabel"].nunique()) if "id_whitelabel" in df_online_filtrado.columns else 0
+            online_bd_filtrados = int((status_online == "ONLINE").sum())
+            offline_bd_filtrados = int((status_online == "OFFLINE").sum())
+            total_bd_geral = int(len(df_online))
+            fora_filtro_bd = max(total_bd_geral - registros_bd_filtrados, 0)
+
+            def fmt_card_num(valor: int) -> str:
+                return f"{int(valor):,}".replace(",", ".")
+
+            st.markdown(f"""
+            <div class="kpi-grid">
+                <div class="kpi-card kpi-ok">
+                    <div class="kpi-label">Status da base online (filtrados)</div>
+                    <div class="kpi-value val-ok">{fmt_card_num(online_bd_filtrados)}</div>
+                    <div class="kpi-sub">câmeras online dentro do filtro</div>
+                </div>
+                <div class="kpi-card kpi-neutral">
+                    <div class="kpi-label">Registros no BD (filtrados)</div>
+                    <div class="kpi-value val-purple">{fmt_card_num(registros_bd_filtrados)}</div>
+                    <div class="kpi-sub">{fmt_card_num(fora_filtro_bd)} registros fora do filtro</div>
+                </div>
+                <div class="kpi-card kpi-neutral">
+                    <div class="kpi-label">Clientes (filtrados)</div>
+                    <div class="kpi-value val-purple">{fmt_card_num(clientes_bd_filtrados)}</div>
+                    <div class="kpi-sub">clientes da lista do painel</div>
+                </div>
+                <div class="kpi-card kpi-alert">
+                    <div class="kpi-label">Offline (filtrados)</div>
+                    <div class="kpi-value val-alert">{fmt_card_num(offline_bd_filtrados)}</div>
+                    <div class="kpi-sub">câmeras offline dentro do filtro</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            render_dataframe(converter_supabase_para_df_gov(df_online_filtrado).head(200), height=360)
 
 # ─────────────────────────────────────────────
 # LEITURA DO CSV + CLIENTES
