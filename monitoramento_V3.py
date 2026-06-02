@@ -920,9 +920,10 @@ def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bo
     registros = df_para_registros_json(df_envio)
     total = 0
     qtd_total = len(registros)
+    tamanho_lote = 1000
     try:
-        for i in range(0, qtd_total, 500):
-            lote = registros[i:i + 500]
+        for i in range(0, qtd_total, tamanho_lote):
+            lote = registros[i:i + tamanho_lote]
             if progress_callback:
                 progress_callback(total, qtd_total, "Enviando dados para o Supabase...")
             resp = requests.post(
@@ -944,11 +945,8 @@ def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bo
         progress_callback(total, qtd_total, "Registrando histórico da importação...")
     registrar_historico_importacao(df_envio)
 
-    carregar_cameras_supabase.clear()
-    carregar_dados.clear()
-    calcular_saude_dados.clear()
-    if progress_callback:
-        progress_callback(total, qtd_total, "Importação finalizada.")
+    # Não limpamos os caches aqui para a barra não chegar em 100% antes da
+    # gravação do snapshot e da recarga dos dashboards. Esse controle fica na tela.
     return True, "Base online atualizada com sucesso.", total
 
 
@@ -993,6 +991,10 @@ create index if not exists idx_cameras_origem_ultima_atualizacao
 def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
     st.markdown("### Atualizar base online")
     st.caption("Importe o CSV novo para o Supabase. A importação atualiza câmeras existentes e insere câmeras novas, sem duplicar pelo ID_da_Camera.")
+
+    ultima_importacao_msg = st.session_state.pop("ultima_importacao_msg", None)
+    if ultima_importacao_msg:
+        st.success(ultima_importacao_msg)
 
     if supabase_configurado():
         st.success(f"Supabase configurado · tabela `{SUPABASE_TABLE}`")
@@ -1116,20 +1118,40 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
         if st.button("🚀 Atualizar base online", type="primary", use_container_width=True):
             status_box = st.empty()
             progress_bar = st.progress(0)
+            percent_box = st.empty()
 
-            def atualizar_progresso(enviados: int, total_registros: int, mensagem: str):
-                pct = 1.0 if total_registros <= 0 else min(max(enviados / total_registros, 0), 1)
-                progress_bar.progress(pct)
-                status_box.info(f"⏳ {mensagem}")
+            def atualizar_barra(percentual: int, mensagem: str, tipo: str = "info"):
+                percentual = int(max(0, min(100, percentual)))
+                progress_bar.progress(percentual)
+                percent_box.markdown(f"**{percentual}%** · {mensagem}")
+                if tipo == "success":
+                    status_box.success(f"✅ {mensagem}")
+                elif tipo == "warning":
+                    status_box.warning(f"⚠️ {mensagem}")
+                elif tipo == "error":
+                    status_box.error(f"❌ {mensagem}")
+                else:
+                    status_box.info(f"⏳ {mensagem}")
 
-            atualizar_progresso(0, len(df_preview), "Atualizando base online. Não feche esta página.")
-            ok, msg, total = enviar_df_supabase(df_csv_filtrado, progress_callback=atualizar_progresso)
+            def atualizar_upload(enviados: int, total_registros: int, mensagem: str):
+                # Upload ocupa somente a faixa de 15% a 80%.
+                # Assim a barra não finaliza antes de snapshot/cache/rerun.
+                if total_registros <= 0:
+                    percentual = 80
+                else:
+                    fracao = min(max(enviados / total_registros, 0), 1)
+                    percentual = 15 + int(fracao * 65)
+                atualizar_barra(percentual, mensagem)
+
+            atualizar_barra(5, "Validando CSV e filtros selecionados...")
+            atualizar_barra(10, "Preparando registros filtrados para importação...")
+            atualizar_barra(15, "Iniciando atualização da base online. Não feche esta página.")
+
+            ok, msg, total = enviar_df_supabase(df_csv_filtrado, progress_callback=atualizar_upload)
             if ok:
-                progress_bar.progress(1.0)
-                status_box.success(f"✅ Importação finalizada: {total} registros enviados/atualizados no Supabase.")
-                st.success(f"{msg} {total} registros enviados/atualizados. Offline no filtro: {offline_filtro}.")
+                atualizar_barra(85, "Base online atualizada. Registrando histórico da importação...")
                 try:
-                    atualizar_progresso(total, len(df_preview), "Gravando snapshot automático da nova importação...")
+                    atualizar_barra(90, "Gravando snapshot automático da nova importação...")
                     df_snapshot = preencher_cidade_estado_por_clientes(
                         df_csv_filtrado.copy(),
                         carregar_clientes_prefeitura(),
@@ -1146,10 +1168,41 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
                         st.warning("A importação terminou, mas não havia dados válidos para gravar snapshot automático.")
                 except Exception as e:
                     st.warning(f"A importação terminou, mas o snapshot automático não foi gravado: {e}")
+
+                atualizar_barra(95, "Limpando cache para remover dados antigos...")
+                try:
+                    carregar_cameras_supabase.clear()
+                except Exception:
+                    pass
+                try:
+                    carregar_dados.clear()
+                except Exception:
+                    pass
+                try:
+                    calcular_saude_dados.clear()
+                except Exception:
+                    pass
                 st.cache_data.clear()
-                st.info("A base foi atualizada. Use o botão 🔄 Atualizar dados no menu lateral para recarregar o painel quando quiser.")
+
+                atualizar_barra(98, "Recarregando dados usados pelos dashboards...")
+                try:
+                    carregar_cameras_supabase()
+                except Exception:
+                    pass
+                try:
+                    carregar_dados()
+                except Exception:
+                    pass
+
+                atualizar_barra(100, f"Importação concluída: {total} registros enviados/atualizados. Atualizando dashboards...", tipo="success")
+                st.session_state["ultima_importacao_msg"] = (
+                    f"Base online atualizada com sucesso: {total} registros enviados/atualizados. "
+                    f"Offline no filtro: {offline_filtro}."
+                )
+                time.sleep(0.8)
+                st.rerun()
             else:
-                status_box.error("❌ A importação não foi concluída.")
+                atualizar_barra(0, "A importação não foi concluída.", tipo="error")
                 st.error(msg)
 
     st.markdown("---")
