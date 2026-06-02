@@ -886,6 +886,81 @@ def carregar_cameras_supabase() -> tuple[pd.DataFrame | None, str]:
     return pd.DataFrame(todos), ""
 
 
+def formatar_data_hora_br(valor) -> str:
+    """Formata datas/timestamps para dd/mm/aaaa hh:mm, com fallback seguro."""
+    if valor is None:
+        return "N/D"
+    try:
+        if pd.isna(valor):
+            return "N/D"
+    except Exception:
+        pass
+
+    try:
+        dt = pd.to_datetime(valor, errors="coerce")
+        if pd.isna(dt):
+            return "N/D"
+        return dt.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return "N/D"
+
+
+@st.cache_data(ttl=60)
+def carregar_ultima_atualizacao_base() -> str:
+    """
+    Retorna quando a base foi atualizada pela última vez.
+    Prioridade:
+    1) tabela historico_importacoes.data_importacao;
+    2) maior updated_at da tabela cameras_origem;
+    3) data de modificação do CSV local.
+    """
+    if supabase_configurado():
+        try:
+            resp = requests.get(
+                supabase_table_url("historico_importacoes"),
+                headers=supabase_headers(),
+                params={
+                    "select": "data_importacao",
+                    "order": "data_importacao.desc",
+                    "limit": "1",
+                },
+                timeout=20,
+            )
+            if resp.status_code in (200, 206):
+                dados = resp.json()
+                if dados:
+                    data_hist = formatar_data_hora_br(dados[0].get("data_importacao"))
+                    if data_hist != "N/D":
+                        return data_hist
+        except Exception:
+            pass
+
+        try:
+            resp = requests.get(
+                supabase_base_url(),
+                headers=supabase_headers(),
+                params={
+                    "select": "updated_at",
+                    "order": "updated_at.desc",
+                    "limit": "1",
+                },
+                timeout=20,
+            )
+            if resp.status_code in (200, 206):
+                dados = resp.json()
+                if dados:
+                    data_updated = formatar_data_hora_br(dados[0].get("updated_at"))
+                    if data_updated != "N/D":
+                        return data_updated
+        except Exception:
+            pass
+
+    if os.path.exists(CSV_GOV):
+        return datetime.fromtimestamp(os.path.getmtime(CSV_GOV)).strftime("%d/%m/%Y %H:%M")
+
+    return "N/D"
+
+
 def registrar_historico_importacao(df_envio: pd.DataFrame, arquivo_nome: str = "upload_streamlit") -> None:
     """Registra um resumo da importação. Se falhar, não bloqueia a atualização principal."""
     try:
@@ -2032,6 +2107,7 @@ def calcular_saude_dataframe(df: pd.DataFrame | None, clientes_map: dict, origem
             "linhas_fora_escopo": 0,
             "clientes_xlsx": len(clientes_map), "datas_invalidas": 0,
             "datas_futuras": 0, "sem_data": 0, "ultima_data": "N/D", "arquivo_atualizado": "N/D",
+            "ultima_atualizacao_base": carregar_ultima_atualizacao_base(),
             "colunas_faltando": [],
         }
 
@@ -2078,6 +2154,7 @@ def calcular_saude_dataframe(df: pd.DataFrame | None, clientes_map: dict, origem
         "sem_data": int(sem_data),
         "ultima_data": ultima_data,
         "arquivo_atualizado": arquivo_atualizado,
+        "ultima_atualizacao_base": carregar_ultima_atualizacao_base(),
         "colunas_faltando": faltando,
     }
 
@@ -3318,9 +3395,9 @@ def main():
                 <div class="audit-card-value">{saude.get("linhas_processadas",0)}</div>
             </div>
             <div class="audit-card">
-                <div class="audit-card-label">Data CSV</div>
-                <div class="audit-card-value" style="font-size:20px;color:#102a3f">{saude.get("ultima_data","N/D")}</div>
-                <div class="audit-card-note">Arquivo: {saude.get("arquivo_atualizado","N/D")}</div>
+                <div class="audit-card-label">Data da Última Atualização</div>
+                <div class="audit-card-value" style="font-size:20px;color:#102a3f">{saude.get("ultima_atualizacao_base","N/D")}</div>
+                <div class="audit-card-note">Última importação/atualização registrada</div>
             </div>
         </div>
         <div class="audit-riskbar">
@@ -3372,7 +3449,7 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-        # Lower cards: novos cartões de categoria + Variação e Data CSV
+        # Lower cards: novos cartões de categoria + Variação e Data da Última Atualização
         if "audit_categoria" not in st.session_state:
             st.session_state["audit_categoria"] = None
 
