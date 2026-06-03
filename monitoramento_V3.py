@@ -17,11 +17,11 @@ import uuid
 
 THEME_OPTIONS = {
     "theme.base": "light",
-    "theme.primaryColor": "#0088cc",
-    "theme.backgroundColor": "#f5f8fb",
+    "theme.primaryColor": "#7C3AED",
+    "theme.backgroundColor": "#FAF7FF",
     "theme.secondaryBackgroundColor": "#ffffff",
-    "theme.textColor": "#102a3f",
-    "theme.dataframeHeaderBackgroundColor": "#e8f7fc",
+    "theme.textColor": "#171126",
+    "theme.dataframeHeaderBackgroundColor": "#F3E8FF",
     "theme.font": "sans serif",
 }
 
@@ -48,51 +48,51 @@ st.markdown("""
 *, *::before, *::after { box-sizing: border-box; }
 
 html, body, [data-testid="stAppViewContainer"] {
-    background-color: #f5f8fb !important;
-    color: #12263a !important;
+    background-color: #FAF7FF !important;
+    color: #171126 !important;
     font-family: 'DM Sans', sans-serif !important;
 }
 [data-testid="stHeader"]          { background: transparent !important; }
-[data-testid="stSidebar"]         { background: #ffffff !important; border-right: 1px solid #dbe8f2 !important; }
+[data-testid="stSidebar"]         { background: #ffffff !important; border-right: 1px solid #E9D5FF !important; }
 [data-testid="block-container"]   { padding: 2rem 2.5rem !important; max-width: 1600px; }
 section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 
 /* ── Sidebar ── */
 .sidebar-logo {
     display: flex; align-items: center; gap: 10px;
-    padding: 0 0 1.5rem; border-bottom: 1px solid #dbe8f2; margin-bottom: 1.5rem;
+    padding: 0 0 1.5rem; border-bottom: 1px solid #E9D5FF; margin-bottom: 1.5rem;
 }
 .sidebar-logo-icon {
     width: 36px; height: 36px;
-    background: linear-gradient(135deg, #0088cc, #00bcd4);
+    background: linear-gradient(135deg, #7C3AED, #A855F7);
     border-radius: 10px; display: flex; align-items: center;
     justify-content: center; font-size: 18px; flex-shrink: 0;
 }
 .sidebar-logo-img { height: 30px; width: auto; }
-.sidebar-logo-text { font-size: 15px; font-weight: 700; color: #102a3f; line-height: 1; }
-.sidebar-logo-sub  { font-size: 10px; color: #0088cc; margin-top: 2px; }
+.sidebar-logo-text { font-size: 15px; font-weight: 700; color: #171126; line-height: 1; }
+.sidebar-logo-sub  { font-size: 10px; color: #7C3AED; margin-top: 2px; }
 .nav-section {
     font-size: 10px; font-weight: 600; letter-spacing: 1px;
-    text-transform: uppercase; color: #0088cc; margin: 1.2rem 0 .5rem;
+    text-transform: uppercase; color: #7C3AED; margin: 1.2rem 0 .5rem;
 }
 
 /* ── Page header ── */
 .page-header {
     display: flex; align-items: flex-start; justify-content: space-between;
-    margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #dbe8f2;
+    margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #E9D5FF;
 }
-.page-title { font-size: 24px; font-weight: 700; color: #102a3f; letter-spacing: -.4px; }
-.page-sub   { font-size: 13px; color: #4f6f85; margin-top: 3px; }
+.page-title { font-size: 24px; font-weight: 700; color: #171126; letter-spacing: -.4px; }
+.page-sub   { font-size: 13px; color: #6B5A7A; margin-top: 3px; }
 .page-badge {
-    font-family: 'DM Mono', monospace; font-size: 11px; color: #007ab8;
-    background: #e8f7fc; padding: 6px 14px; border-radius: 8px;
-    border: 1px solid #b9e7f4; white-space: nowrap;
+    font-family: 'DM Mono', monospace; font-size: 11px; color: #6D28D9;
+    background: #F3E8FF; padding: 6px 14px; border-radius: 8px;
+    border: 1px solid #DDD6FE; white-space: nowrap;
 }
 
 /* ── KPI cards ── */
 .kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 1.5rem; }
 .kpi-card {
-    background: #ffffff; border: 1px solid #dbe8f2; border-radius: 8px;
+    background: #ffffff; border: 1px solid #E9D5FF; border-radius: 8px;
     padding: 20px 20px 16px; position: relative; overflow: hidden;
     box-shadow: 0 10px 28px rgba(16, 42, 63, .06);
 }
@@ -102,12 +102,12 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 .kpi-alert::after   { background: linear-gradient(90deg,#ef4444,#dc2626); }
 .kpi-warn::after    { background: linear-gradient(90deg,#f59e0b,#d97706); }
 .kpi-ok::after      { background: linear-gradient(90deg,#14b8a6,#059669); }
-.kpi-neutral::after { background: linear-gradient(90deg,#0088cc,#00bcd4); }
+.kpi-neutral::after { background: linear-gradient(90deg,#7C3AED,#A855F7); }
 
 /* SELETOR DEFINITIVO: Altera textos secundarios do card, exceto o valor principal */
 .kpi-card *:not(.kpi-value):not(.val-alert):not(.val-warn):not(.val-ok):not(.val-purple) {
-    color: #4f6f85 !important;
-    -webkit-text-fill-color: #4f6f85 !important;
+    color: #6B5A7A !important;
+    -webkit-text-fill-color: #6B5A7A !important;
     opacity: 1 !important;
 }
 
@@ -122,11 +122,11 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 .val-alert  { color: #f87171 !important; }
 .val-warn   { color: #fbbf24 !important; }
 .val-ok     { color: #14b8a6 !important; }
-.val-purple { color: #0088cc !important; }
+.val-purple { color: #7C3AED !important; }
             
 /* ── Unit cards ── */
 .unit-card {
-    background: #ffffff; border: 1px solid #dbe8f2; border-radius: 8px;
+    background: #ffffff; border: 1px solid #E9D5FF; border-radius: 8px;
     padding: 14px 12px 12px; position: relative; overflow: hidden;
     box-shadow: 0 8px 22px rgba(16, 42, 63, .05);
     display: flex; flex-direction: column; height: 100%;
@@ -140,17 +140,17 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 .card-ok::before     { background: linear-gradient(90deg,#14b8a6,#059669); }
 .unit-name {
     font-size:9px; font-weight:600; letter-spacing:.8px; text-transform:uppercase;
-    color:#007ab8; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    color:#6D28D9; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .unit-count { font-size:28px; font-weight:700; line-height:1.1; font-family:'DM Mono',monospace; margin-top:4px; margin-bottom:2px; }
 .count-red    { color:#f87171; }
 .count-yellow { color:#fbbf24; }
 .count-ok     { color:#14b8a6; }
-.unit-label { font-size:9px; margin-top:2px; margin-bottom:6px; font-weight:500; letter-spacing:.3px; color:#4f6f85; line-height:1.3; }
+.unit-label { font-size:9px; margin-top:2px; margin-bottom:6px; font-weight:500; letter-spacing:.3px; color:#6B5A7A; line-height:1.3; }
 .label-red    { color:#ff8e8e; }
 .label-yellow { color:#c98500; }
 .label-ok     { color:#0f9f8f; }
-.prog-track { margin: 6px 0 6px 0; height:3px; background:#dbe8f2; border-radius:99px; overflow:hidden; }
+.prog-track { margin: 6px 0 6px 0; height:3px; background:#E9D5FF; border-radius:99px; overflow:hidden; }
 .prog-fill  { height:100%; border-radius:99px; }
 .trend-badge {
     display:flex; align-items:center; gap:3px;
@@ -158,21 +158,21 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 }
 .trend-up   { background:rgba(248,113,113,.12); color:#f87171; }
 .trend-down { background:rgba(20,184,166,.12);  color:#0f9f8f; }
-.trend-same { background:rgba(0,136,204,.12); color:#007ab8; }
+.trend-same { background:rgba(0,136,204,.12); color:#6D28D9; }
 
 /* ── Tabelas ── */
 .stTable table { background:transparent !important; font-family:'DM Sans',sans-serif !important;
     font-size:13px !important; width:100% !important; border-collapse:collapse !important; }
-.stTable thead th { background:#f5f8fb !important; color:#007ab8 !important;
+.stTable thead th { background:#FAF7FF !important; color:#6D28D9 !important;
     font-size:10px !important; font-weight:600 !important; letter-spacing:.7px !important;
-    text-transform:uppercase !important; padding:10px 14px !important; border-bottom:1px solid #dbe8f2 !important; }
+    text-transform:uppercase !important; padding:10px 14px !important; border-bottom:1px solid #E9D5FF !important; }
 .stTable tbody tr { background:#ffffff !important; }
-.stTable tbody td { padding:10px 14px !important; border-bottom:1px solid #edf3f8 !important; color:#102a3f !important; }
+.stTable tbody td { padding:10px 14px !important; border-bottom:1px solid #F5F3FF !important; color:#171126 !important; }
 
 /* ── Botões ── */
 [data-testid="stDataFrame"] {
     background:#ffffff !important;
-    border:1px solid #dbe8f2 !important;
+    border:1px solid #E9D5FF !important;
     border-radius:8px !important;
     overflow:hidden !important;
     box-shadow:0 8px 22px rgba(16,42,63,.05) !important;
@@ -181,8 +181,8 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 [data-testid="stDataFrame"] span,
 [data-testid="stDataFrame"] button,
 [data-testid="stDataFrame"] svg {
-    color:#102a3f !important;
-    -webkit-text-fill-color:#102a3f !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
 }
 [data-testid="stDataFrame"] canvas,
 [data-testid="stDataFrame"] [role="grid"],
@@ -192,12 +192,12 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 
 .stButton > button {
     width:100% !important; margin-top:8px !important; background:#ffffff !important;
-    border:1px solid #b9d7e8 !important; color:#007ab8 !important; border-radius:8px !important;
+    border:1px solid #C4B5FD !important; color:#6D28D9 !important; border-radius:8px !important;
     font-family:'DM Sans',sans-serif !important; font-size:11px !important;
     font-weight:500 !important; padding:5px 10px !important; transition:all .2s !important;
 }
 .stButton > button:hover:not(:disabled) {
-    background:#e8f7fc !important; border-color:#00a6d6 !important; color:#005f91 !important;
+    background:#F3E8FF !important; border-color:#8B5CF6 !important; color:#5B21B6 !important;
 }
 
 /* ── Abas ── */
@@ -207,21 +207,21 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 [data-testid="stTextArea"] label,
 [data-testid="stDateInput"] label,
 [data-testid="stFileUploader"] label {
-    color:#102a3f !important;
-    -webkit-text-fill-color:#102a3f !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
     font-family:'DM Sans',sans-serif !important;
     font-size:12px !important;
     font-weight:600 !important;
 }
 [data-testid="stWidgetLabel"],
 [data-testid="stWidgetLabel"] * {
-    color:#102a3f !important;
-    -webkit-text-fill-color:#102a3f !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
 }
 [data-testid="stCaptionContainer"],
 [data-testid="stCaptionContainer"] * {
-    color:#4f6f85 !important;
-    -webkit-text-fill-color:#4f6f85 !important;
+    color:#6B5A7A !important;
+    -webkit-text-fill-color:#6B5A7A !important;
 }
 [data-testid="stWidgetLabel"] {
     min-height:22px !important;
@@ -229,7 +229,7 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 [data-testid="stTextInput"] [data-baseweb="input"] > div,
 [data-testid="stDateInput"] [data-baseweb="input"] > div {
     background:#ffffff !important;
-    border:1px solid #b9d7e8 !important;
+    border:1px solid #C4B5FD !important;
     border-radius:8px !important;
     box-shadow:none !important;
 }
@@ -237,68 +237,68 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 [data-testid="stDateInput"] input,
 [data-testid="stTextArea"] textarea {
     background:#ffffff !important;
-    border:1px solid #b9d7e8 !important;
+    border:1px solid #C4B5FD !important;
     border-radius:8px !important;
-    color:#102a3f !important;
-    -webkit-text-fill-color:#102a3f !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
     box-shadow:none !important;
-    caret-color:#0088cc !important;
+    caret-color:#7C3AED !important;
 }
 [data-testid="stTextInput"] input:focus,
 [data-testid="stDateInput"] input:focus,
 [data-testid="stTextArea"] textarea:focus {
-    border-color:#0088cc !important;
-    box-shadow:0 0 0 1px #0088cc !important;
+    border-color:#7C3AED !important;
+    box-shadow:0 0 0 1px #7C3AED !important;
 }
 [data-testid="stTextInput"] input::placeholder,
 [data-testid="stTextArea"] textarea::placeholder {
-    color:#6b8496 !important;
-    -webkit-text-fill-color:#6b8496 !important;
+    color:#8B7AA3 !important;
+    -webkit-text-fill-color:#8B7AA3 !important;
     opacity:1 !important;
 }
 [data-testid="stSelectbox"] [data-baseweb="select"] > div {
     background:#ffffff !important;
-    border:1px solid #b9d7e8 !important;
+    border:1px solid #C4B5FD !important;
     border-radius:8px !important;
     box-shadow:none !important;
 }
 [data-testid="stSelectbox"] [data-baseweb="select"] > div:hover,
 [data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
-    border-color:#0088cc !important;
-    box-shadow:0 0 0 1px #0088cc !important;
+    border-color:#7C3AED !important;
+    box-shadow:0 0 0 1px #7C3AED !important;
 }
 [data-testid="stSelectbox"] [data-baseweb="select"] span,
 [data-testid="stSelectbox"] [data-baseweb="select"] svg,
 [data-testid="stSelectbox"] [data-baseweb="select"] div {
-    color:#102a3f !important;
-    -webkit-text-fill-color:#102a3f !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
 }
 [data-testid="stFileUploader"] section {
     background:#ffffff !important;
-    border:1px dashed #b9d7e8 !important;
+    border:1px dashed #C4B5FD !important;
     border-radius:8px !important;
-    color:#102a3f !important;
+    color:#171126 !important;
 }
 [data-baseweb="popover"] [role="listbox"] {
     background:#ffffff !important;
-    border:1px solid #b9d7e8 !important;
+    border:1px solid #C4B5FD !important;
     border-radius:8px !important;
     box-shadow:0 16px 36px rgba(16,42,63,.14) !important;
 }
 [data-baseweb="popover"] [role="option"] {
     background:#ffffff !important;
-    color:#102a3f !important;
-    -webkit-text-fill-color:#102a3f !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
 }
 [data-baseweb="popover"] [role="option"]:hover,
 [data-baseweb="popover"] [aria-selected="true"] {
-    background:#e8f7fc !important;
+    background:#F3E8FF !important;
 }
 
-[data-testid="stTabs"] [role="tablist"] { border-bottom:1px solid #dbe8f2 !important; gap:2px !important; }
+[data-testid="stTabs"] [role="tablist"] { border-bottom:1px solid #E9D5FF !important; gap:2px !important; }
 [data-testid="stTabs"] [role="tab"] {
     background:transparent !important; border:1px solid transparent !important;
-    border-radius:8px 8px 0 0 !important; color:#4f6f85 !important;
+    border-radius:8px 8px 0 0 !important; color:#6B5A7A !important;
     font-family:'DM Sans',sans-serif !important; font-size:13px !important;
     font-weight:500 !important; padding:8px 18px !important; transition:all .2s !important;
 }
@@ -306,22 +306,22 @@ section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
 
 /* ── Expander ── */
 [data-testid="stExpander"] {
-    background:#ffffff !important; border:1px solid #dbe8f2 !important;
+    background:#ffffff !important; border:1px solid #E9D5FF !important;
     border-radius:8px !important; margin-bottom:8px !important;
 }
-[data-testid="stExpander"] summary { font-weight:500 !important; color:#007ab8 !important; font-size:13px !important; }
+[data-testid="stExpander"] summary { font-weight:500 !important; color:#6D28D9 !important; font-size:13px !important; }
 
 /* ── Misc ── */
-hr { border-color:#dbe8f2 !important; margin:1.5rem 0 !important; }
+hr { border-color:#E9D5FF !important; margin:1.5rem 0 !important; }
 [data-testid="stAlert"] {
-    background:#ffffff !important; border:1px solid #dbe8f2 !important;
-    border-radius:8px !important; color:#12263a !important;
+    background:#ffffff !important; border:1px solid #E9D5FF !important;
+    border-radius:8px !important; color:#171126 !important;
 }
 
 /* ── Download buttons ── */
 .stDownloadButton > button {
     background:linear-gradient(135deg,rgba(0,136,204,.12),rgba(0,188,212,.12)) !important;
-    border:1px solid rgba(0,136,204,.25) !important; color:#007ab8 !important;
+    border:1px solid rgba(0,136,204,.25) !important; color:#6D28D9 !important;
     border-radius:8px !important; font-size:12px !important; font-weight:600 !important;
     padding:8px 16px !important; width:auto !important; margin-top:0 !important; transition:all .2s !important;
 }
@@ -330,21 +330,21 @@ hr { border-color:#dbe8f2 !important; margin:1.5rem 0 !important; }
 .tempo-critico  { background:rgba(220,38,38,.10);  color:#dc2626; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }
 .tempo-atencao  { background:rgba(217,119,6,.10);  color:#d97706; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }
 .tempo-ok       { background:rgba(5,150,105,.10);  color:#059669; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }
-.tempo-nd       { background:rgba(107,132,150,.10);color:#6b8496; font-weight:600; padding:2px 8px; border-radius:6px; font-size:11px; }
+.tempo-nd       { background:rgba(107,132,150,.10);color:#8B7AA3; font-weight:600; padding:2px 8px; border-radius:6px; font-size:11px; }
 
 /* Auditoria operacional */
 .audit-hero {
-    background:#ffffff; border:1px solid #d5e3ec; border-radius:8px;
+    background:#ffffff; border:1px solid #E9D5FF; border-radius:8px;
     padding:18px 20px; margin-bottom:14px; box-shadow:0 10px 24px rgba(16,42,63,.05);
 }
 .audit-hero-top {
     display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;
 }
 .audit-title {
-    font-size:22px; font-weight:700; color:#102a3f; line-height:1.15; margin-bottom:4px;
+    font-size:22px; font-weight:700; color:#171126; line-height:1.15; margin-bottom:4px;
 }
 .audit-sub {
-    font-size:12px; color:#4f6f85; max-width:880px; line-height:1.45;
+    font-size:12px; color:#6B5A7A; max-width:880px; line-height:1.45;
 }
 .audit-badges { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
 .audit-badge {
@@ -355,29 +355,29 @@ hr { border-color:#dbe8f2 !important; margin:1.5rem 0 !important; }
     display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:12px 0 16px;
 }
 .audit-card {
-    background:#ffffff; border:1px solid #dbe8f2; border-radius:8px; padding:12px 14px;
+    background:#ffffff; border:1px solid #E9D5FF; border-radius:8px; padding:12px 14px;
     min-height:92px; box-shadow:0 8px 18px rgba(16,42,63,.04);
 }
 .audit-card-label {
-    font-size:10px; color:#60798d; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
+    font-size:10px; color:#7C6A91; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
     margin-bottom:7px;
 }
 .audit-card-value {
-    font-family:'DM Mono',monospace; font-size:24px; line-height:1.05; color:#102a3f; font-weight:700;
+    font-family:'DM Mono',monospace; font-size:24px; line-height:1.05; color:#171126; font-weight:700;
 }
-.audit-card-note { font-size:11px; color:#60798d; margin-top:7px; line-height:1.35; }
+.audit-card-note { font-size:11px; color:#7C6A91; margin-top:7px; line-height:1.35; }
 .audit-riskbar {
     display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center;
-    background:#f8fbfd; border:1px solid #dbe8f2; border-radius:8px; padding:12px 14px; margin-bottom:16px;
+    background:#FCFAFF; border:1px solid #E9D5FF; border-radius:8px; padding:12px 14px; margin-bottom:16px;
 }
-.audit-risk-track { height:10px; background:#e3edf4; border-radius:99px; overflow:hidden; }
+.audit-risk-track { height:10px; background:#EDE9FE; border-radius:99px; overflow:hidden; }
 .audit-risk-fill { height:100%; border-radius:99px; }
 .audit-risk-label { font-family:'DM Mono',monospace; font-size:12px; font-weight:700; white-space:nowrap; }
 .audit-section-title {
     display:flex; align-items:center; justify-content:space-between; gap:12px; margin:18px 0 8px;
 }
-.audit-section-title strong { font-size:14px; color:#102a3f; }
-.audit-section-title span { font-size:11px; color:#60798d; }
+.audit-section-title strong { font-size:14px; color:#171126; }
+.audit-section-title span { font-size:11px; color:#7C6A91; }
 .audit-action-note {
     background:#fffaf0; border:1px solid #fde3a7; border-radius:8px; padding:10px 12px;
     color:#7a5200; font-size:12px; margin:8px 0 12px;
@@ -397,60 +397,190 @@ hr { border-color:#dbe8f2 !important; margin:1.5rem 0 !important; }
 /* ── Ajustes finais solicitados ── */
 .sidebar-stat-card {
     background:#ffffff !important;
-    border:1px solid #dbe8f2 !important;
+    border:1px solid #E9D5FF !important;
     border-radius:8px !important;
     padding:12px 14px !important;
     box-shadow:0 6px 18px rgba(16,42,63,.04) !important;
 }
 .sidebar-stat-card.offline-card {
     background:#ffffff !important;
-    border-color:#dbe8f2 !important;
+    border-color:#E9D5FF !important;
 }
 .sidebar-stat-card .stat-label {
-    font-size:10px;color:#6b8496;font-weight:600;text-transform:uppercase;letter-spacing:.7px;
+    font-size:10px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.7px;
 }
 .sidebar-stat-card .stat-value {
-    font-size:24px;font-weight:700;color:#0088cc;font-family:'DM Mono',monospace;
+    font-size:24px;font-weight:700;color:#7C3AED;font-family:'DM Mono',monospace;
 }
 .sidebar-stat-card.offline-card .stat-value {
     color:#dc2626 !important;
     -webkit-text-fill-color:#dc2626 !important;
 }
-.sidebar-stat-card .stat-note { font-size:11px;color:#6b8496; }
+.sidebar-stat-card .stat-note { font-size:11px;color:#8B7AA3; }
 
 .compare-hero {
-    background:linear-gradient(135deg,#ffffff 0%,#f6fbff 100%);
-    border:1px solid #dbe8f2;border-radius:14px;padding:18px 20px;margin:10px 0 16px;
+    background:linear-gradient(135deg,#ffffff 0%,#FBF7FF 100%);
+    border:1px solid #E9D5FF;border-radius:14px;padding:18px 20px;margin:10px 0 16px;
     box-shadow:0 12px 30px rgba(16,42,63,.07);
 }
-.compare-title { font-size:24px;font-weight:800;color:#102a3f;letter-spacing:-.4px; }
-.compare-sub { font-size:13px;color:#4f6f85;margin-top:4px;line-height:1.45; }
+.compare-title { font-size:24px;font-weight:800;color:#171126;letter-spacing:-.4px; }
+.compare-sub { font-size:13px;color:#6B5A7A;margin-top:4px;line-height:1.45; }
 .compare-pill {
     display:inline-flex;align-items:center;gap:6px;margin-top:10px;
-    font-family:'DM Mono',monospace;font-size:11px;color:#006da3;background:#e8f7fc;
-    border:1px solid #b9e7f4;border-radius:999px;padding:6px 10px;
+    font-family:'DM Mono',monospace;font-size:11px;color:#6D28D9;background:#F3E8FF;
+    border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;
 }
 .compare-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0 18px; }
 .compare-card {
-    background:#ffffff !important;border:1px solid #dbe8f2;border-radius:12px;padding:15px 16px;
+    background:#ffffff !important;border:1px solid #E9D5FF;border-radius:12px;padding:15px 16px;
     box-shadow:0 10px 24px rgba(16,42,63,.055);position:relative;overflow:hidden;
 }
-.compare-card:before { content:'';position:absolute;left:0;right:0;top:0;height:4px;background:#0088cc; }
+.compare-card:before { content:'';position:absolute;left:0;right:0;top:0;height:4px;background:#7C3AED; }
 .compare-card.good:before { background:linear-gradient(90deg,#22c55e,#059669); }
 .compare-card.bad:before { background:linear-gradient(90deg,#ff1744,#dc2626); }
 .compare-card.warn:before { background:linear-gradient(90deg,#facc15,#f59e0b); }
-.compare-card.neutral:before { background:linear-gradient(90deg,#0088cc,#00bcd4); }
-.compare-label { font-size:10px;color:#6b8496;font-weight:800;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px; }
-.compare-value { font-family:'DM Mono',monospace;font-size:30px;font-weight:800;color:#102a3f;line-height:1; }
-.compare-note { font-size:11px;color:#60798d;margin-top:8px;line-height:1.35; }
+.compare-card.neutral:before { background:linear-gradient(90deg,#7C3AED,#A855F7); }
+.compare-label { font-size:10px;color:#8B7AA3;font-weight:800;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px; }
+.compare-value { font-family:'DM Mono',monospace;font-size:30px;font-weight:800;color:#171126;line-height:1; }
+.compare-note { font-size:11px;color:#7C6A91;margin-top:8px;line-height:1.35; }
 .compare-status-box {
-    margin-top:12px;padding:12px 14px;border-radius:10px;background:#ffffff;border:1px solid #dbe8f2;
+    margin-top:12px;padding:12px 14px;border-radius:10px;background:#ffffff;border:1px solid #E9D5FF;
     display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
 }
-.compare-status-text { font-size:13px;color:#4f6f85; }
+.compare-status-text { font-size:13px;color:#6B5A7A; }
 .compare-status-tag { font-family:'DM Mono',monospace;font-size:11px;font-weight:800;border-radius:999px;padding:6px 10px;border:1px solid currentColor; }
 @media(max-width:1100px){ .compare-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
 @media(max-width:700px){ .compare-grid{grid-template-columns:1fr;} }
+
+
+
+/* ─────────────────────────────────────────────
+   Identidade visual Camerite · Roxo
+   Somente aparência: não altera regras, filtros ou funções.
+   ───────────────────────────────────────────── */
+:root {
+    --cam-primary: #7C3AED;
+    --cam-primary-dark: #5B21B6;
+    --cam-primary-soft: #A855F7;
+    --cam-bg: #FAF7FF;
+    --cam-card: #FFFFFF;
+    --cam-border: #E9D5FF;
+    --cam-text: #171126;
+    --cam-muted: #6B5A7A;
+}
+
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #FFFFFF 0%, #FAF7FF 100%) !important;
+    border-right: 1px solid var(--cam-border) !important;
+}
+
+.sidebar-logo-icon {
+    background: linear-gradient(135deg, #5B21B6 0%, #7C3AED 45%, #A855F7 100%) !important;
+    box-shadow: 0 10px 24px rgba(124,58,237,.24) !important;
+}
+
+.sidebar-logo-text,
+.page-title,
+.audit-title,
+.compare-title {
+    color: var(--cam-text) !important;
+}
+
+.sidebar-logo-sub,
+.nav-section,
+.unit-name,
+[data-testid="stExpander"] summary {
+    color: var(--cam-primary) !important;
+    -webkit-text-fill-color: var(--cam-primary) !important;
+}
+
+.page-badge,
+.compare-pill {
+    color: var(--cam-primary-dark) !important;
+    background: #F3E8FF !important;
+    border-color: #DDD6FE !important;
+}
+
+.kpi-card,
+.unit-card,
+.audit-hero,
+.audit-card,
+.compare-card,
+.sidebar-stat-card,
+[data-testid="stExpander"],
+[data-testid="stDataFrame"],
+[data-testid="stAlert"] {
+    border-color: var(--cam-border) !important;
+    box-shadow: 0 14px 34px rgba(91,33,182,.08) !important;
+}
+
+.kpi-neutral::after,
+.compare-card.neutral:before {
+    background: linear-gradient(90deg, #5B21B6, #7C3AED, #A855F7) !important;
+}
+
+.val-purple,
+.sidebar-stat-card .stat-value,
+.compare-card.neutral .compare-value {
+    color: var(--cam-primary) !important;
+    -webkit-text-fill-color: var(--cam-primary) !important;
+}
+
+.stButton > button,
+.stDownloadButton > button {
+    background: linear-gradient(135deg, #7C3AED, #8B5CF6) !important;
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+    border: 1px solid rgba(124,58,237,.35) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 22px rgba(124,58,237,.18) !important;
+}
+
+.stButton > button:hover:not(:disabled),
+.stDownloadButton > button:hover:not(:disabled) {
+    background: linear-gradient(135deg, #5B21B6, #7C3AED) !important;
+    border-color: #7C3AED !important;
+    transform: translateY(-1px);
+}
+
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    background: #F3E8FF !important;
+    color: var(--cam-primary-dark) !important;
+    border-color: #DDD6FE !important;
+    font-weight: 700 !important;
+}
+
+[data-testid="stTextInput"] input:focus,
+[data-testid="stDateInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:hover,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+    border-color: var(--cam-primary) !important;
+    box-shadow: 0 0 0 1px var(--cam-primary) !important;
+}
+
+[data-testid="stTextInput"] input,
+[data-testid="stDateInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stFileUploader"] section {
+    border-color: #C4B5FD !important;
+}
+
+[data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="popover"] [aria-selected="true"] {
+    background: #F3E8FF !important;
+}
+
+.prog-fill,
+.audit-risk-fill {
+    background: linear-gradient(90deg, #7C3AED, #A855F7) !important;
+}
+
+hr,
+.page-header {
+    border-color: var(--cam-border) !important;
+}
 
 </style>
 """, unsafe_allow_html=True)
@@ -695,7 +825,7 @@ def classificar_fonte(saude: dict) -> tuple[str, str]:
     if saude.get("datas_invalidas", 0):
         return "Com ressalvas", "#d97706"
     if saude.get("linhas_processadas", 0) == 0:
-        return "Sem amostra", "#6b8496"
+        return "Sem amostra", "#8B7AA3"
     return "Auditável", "#059669"
 
 
@@ -1970,7 +2100,7 @@ def montar_mapa_cidades(df: pd.DataFrame) -> tuple[go.Figure | None, str]:
                 title="Gravidade (% Offline)", 
                 thickness=15, 
                 len=0.6, 
-                tickfont=dict(size=10, color="#6b8496"),
+                tickfont=dict(size=10, color="#8B7AA3"),
                 ticksuffix="%"
             ),
             line_color="white",
@@ -2785,7 +2915,7 @@ def gerar_excel(dados: dict) -> bytes:
 def pdefaults() -> dict:
     return dict(
         paper_bgcolor="#ffffff", plot_bgcolor="#ffffff",
-        font=dict(family="DM Sans", color="#4f6f85"),
+        font=dict(family="DM Sans", color="#6B5A7A"),
     )
 
 
@@ -2797,33 +2927,33 @@ def tabela_clara(df: pd.DataFrame):
         df.style
         .set_properties(**{
             "background-color": "#ffffff",
-            "color": "#102a3f",
-            "border-color": "#edf3f8",
+            "color": "#171126",
+            "border-color": "#F5F3FF",
         })
         .set_table_styles([
             {
                 "selector": "thead th",
                 "props": [
-                    ("background-color", "#e8f7fc"),
-                    ("color", "#007ab8"),
-                    ("border-color", "#dbe8f2"),
+                    ("background-color", "#F3E8FF"),
+                    ("color", "#6D28D9"),
+                    ("border-color", "#E9D5FF"),
                     ("font-weight", "700"),
                 ],
             },
             {
                 "selector": "tbody th",
                 "props": [
-                    ("background-color", "#f5f8fb"),
-                    ("color", "#4f6f85"),
-                    ("border-color", "#edf3f8"),
+                    ("background-color", "#FAF7FF"),
+                    ("color", "#6B5A7A"),
+                    ("border-color", "#F5F3FF"),
                 ],
             },
             {
                 "selector": "td",
                 "props": [
                     ("background-color", "#ffffff"),
-                    ("color", "#102a3f"),
-                    ("border-color", "#edf3f8"),
+                    ("color", "#171126"),
+                    ("border-color", "#F5F3FF"),
                 ],
             },
         ])
@@ -2855,8 +2985,8 @@ def render_card(col, wl_id, v, tendencia, delta_off):
     else:
         trend_html = '<div class="trend-badge trend-same">→ Estável vs anterior</div>'
 
-    sub_html = f'<div style="font-size:9px;color:#6b8496;margin-bottom:6px">{nome_empresa}</div>' if nome_empresa else ""
-    id_html  = f'<div style="font-size:9px;color:#6b8496">ID: {wl_id_html}</div>'
+    sub_html = f'<div style="font-size:9px;color:#8B7AA3;margin-bottom:6px">{nome_empresa}</div>' if nome_empresa else ""
+    id_html  = f'<div style="font-size:9px;color:#8B7AA3">ID: {wl_id_html}</div>'
 
     with col:
         card_html = f'<div class="unit-card {card_c}"><div class="unit-name">{nome_display}</div>{sub_html}<div class="unit-count {count_c}">{count}</div><div class="unit-label {label_c}">{label_txt}</div><div class="prog-track"><div class="prog-fill" style="width:{prog_w}%;background:{cor}"></div></div>{trend_html}{id_html}</div>'
@@ -2955,10 +3085,10 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
         '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.2rem;flex-wrap:wrap">'
         '<div style="background:rgba(0,136,204,.12);border:1px solid rgba(0,136,204,.22);'
         'border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;'
-        'color:#007ab8;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento rápido</div>'
+        'color:#6D28D9;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento rápido</div>'
         '<div>'
-        + f'<div style="font-size:20px;font-weight:700;color:#0088cc">{nome_cliente_html}</div>'
-        + f'<div style="font-size:12px;color:#6b8496">{nome_empresa_html} · ID: {wl_id_html}</div>'
+        + f'<div style="font-size:20px;font-weight:700;color:#7C3AED">{nome_cliente_html}</div>'
+        + f'<div style="font-size:12px;color:#8B7AA3">{nome_empresa_html} · ID: {wl_id_html}</div>'
         + '</div>'
         + f'<div style="margin-left:auto;font-size:13px;font-weight:700;color:{cor_d}">'
         + f'{offline_u} offline de {total_u} câmeras ({pct_d}%)'
@@ -3330,7 +3460,7 @@ def main():
         detalhe_delta_base = f"{abs(delta_total_cameras)} câmeras removidas"
     else:
         texto_delta_base = "+0"
-        cor_delta_base = "#0088cc"
+        cor_delta_base = "#7C3AED"
         detalhe_delta_base = "Sem alteração na base"
 
     clientes_melhoraram = sum(1 for v in delta_offs.values() if isinstance(v, (int, float)) and v < 0)
@@ -3371,7 +3501,7 @@ def main():
                     <div class="audit-title">Auditoria Clientes GOV</div>
                     <div class="audit-sub">
                         {acao_detalhe}<br>
-                        <span style="display:inline-block;margin-top:6px;font-family:'DM Mono',monospace;color:#007ab8;background:#e8f7fc;border:1px solid #b9e7f4;border-radius:6px;padding:5px 8px">📅 {datas_comparativo_txt}</span>
+                        <span style="display:inline-block;margin-top:6px;font-family:'DM Mono',monospace;color:#6D28D9;background:#F3E8FF;border:1px solid #DDD6FE;border-radius:6px;padding:5px 8px">📅 {datas_comparativo_txt}</span>
                     </div>
                 </div>
                 <div class="audit-badges">
@@ -3396,13 +3526,13 @@ def main():
             </div>
             <div class="audit-card">
                 <div class="audit-card-label">Data da Última Atualização</div>
-                <div class="audit-card-value" style="font-size:20px;color:#102a3f">{saude.get("ultima_atualizacao_base","N/D")}</div>
+                <div class="audit-card-value" style="font-size:20px;color:#171126">{saude.get("ultima_atualizacao_base","N/D")}</div>
                 <div class="audit-card-note">Última importação/atualização registrada</div>
             </div>
         </div>
         <div class="audit-riskbar">
             <div>
-                <div style="font-size:11px;color:#60798d;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">Carteira acima do limite crítico</div>
+                <div style="font-size:11px;color:#7C6A91;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">Carteira acima do limite crítico</div>
                 <div class="audit-risk-track"><div class="audit-risk-fill" style="width:{pct_clientes_criticos}%;background:{audit_color}"></div></div>
             </div>
             <div class="audit-risk-label" style="color:{audit_color}">{pct_clientes_criticos:.1f}% dos clientes</div>
@@ -3425,7 +3555,7 @@ def main():
 			</div>
 			<div class="kpi-card kpi-alert"
 				 style="background:#ffffff !important;
-						border-color:#dbe8f2 !important;">
+						border-color:#E9D5FF !important;">
 				<div class="kpi-label">
 					Câmeras Offline
 				</div>
@@ -3443,7 +3573,7 @@ def main():
             </div>
             <div class="kpi-card kpi-neutral">
                 <div class="kpi-label">Variação de Câmeras Offline</div>
-                <div class="kpi-value" style="font-size:28px;font-weight:700;color:{'#ef4444' if delta_global > 0 else ('#14b8a6' if delta_global < 0 else '#0088cc')};">{delta_global:+.0f}</div>
+                <div class="kpi-value" style="font-size:28px;font-weight:700;color:{'#ef4444' if delta_global > 0 else ('#14b8a6' if delta_global < 0 else '#7C3AED')};">{delta_global:+.0f}</div>
                 <div class="kpi-sub">{clientes_melhoraram} melhoraram · {clientes_pioraram} pioraram</div>
             </div>
         </div>
@@ -3456,10 +3586,10 @@ def main():
         col_a, col_b, col_c, col_d = st.columns(4)
         with col_a:
             st.markdown(f"""
-                <div class="kpi-card kpi-ok" style="background:#ffffff;border:1px solid #dbe8f2;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#6b8496;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes até 5% offline</div>
+                <div class="kpi-card kpi-ok" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes até 5% offline</div>
                     <div style="font-size:24px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:700">{n_saudavel}</div>
-                    <div style="font-size:11px;color:#6b8496">{n_saudavel} clientes · 0–5%</div>
+                    <div style="font-size:11px;color:#8B7AA3">{n_saudavel} clientes · 0–5%</div>
                 </div>
             """, unsafe_allow_html=True)
             if st.button("Ver clientes", key="audit_saudavel"):
@@ -3467,10 +3597,10 @@ def main():
                 st.session_state["mostrar_base_delta"] = False
         with col_b:
             st.markdown(f"""
-                <div class="kpi-card kpi-warn" style="background:#ffffff;border:1px solid #dbe8f2;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#6b8496;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes em atenção (5 a 10% offline)</div>
+                <div class="kpi-card kpi-warn" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes em atenção (5 a 10% offline)</div>
                     <div style="font-size:24px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:700">{n_atencao}</div>
-                    <div style="font-size:11px;color:#6b8496">{n_atencao} clientes · 5–10%</div>
+                    <div style="font-size:11px;color:#8B7AA3">{n_atencao} clientes · 5–10%</div>
                 </div>
             """, unsafe_allow_html=True)
             if st.button("Ver clientes", key="audit_atencao"):
@@ -3478,10 +3608,10 @@ def main():
                 st.session_state["mostrar_base_delta"] = False
         with col_c:
             st.markdown(f"""
-                <div class="kpi-card kpi-neutral" style="background:#ffffff !important;border:1px solid #dbe8f2;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#6b8496;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes acima de 10% offline</div>
+                <div class="kpi-card kpi-neutral" style="background:#ffffff !important;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes acima de 10% offline</div>
                     <div style="font-size:24px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:700">{n_critico}</div>
-                    <div style="font-size:11px;color:#6b8496">{n_critico} clientes · &gt;10%</div>
+                    <div style="font-size:11px;color:#8B7AA3">{n_critico} clientes · &gt;10%</div>
                 </div>
             """, unsafe_allow_html=True)
             if st.button("Ver clientes", key="audit_critico"):
@@ -3489,10 +3619,10 @@ def main():
                 st.session_state["mostrar_base_delta"] = False
         with col_d:
             st.markdown(f"""
-                <div class="kpi-card kpi-neutral" style="background:#ffffff;border:1px solid #dbe8f2;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#6b8496;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Crescimento da Base</div>
+                <div class="kpi-card kpi-neutral" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Crescimento da Base</div>
                     <div style="font-size:24px;color:{cor_delta_base};font-family:'DM Mono',monospace;font-weight:700">{texto_delta_base}</div>
-                    <div style="font-size:11px;color:#6b8496">{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}</div>
+                    <div style="font-size:11px;color:#8B7AA3">{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}</div>
                 </div>
             """, unsafe_allow_html=True)
 
@@ -3617,14 +3747,14 @@ def main():
                     shape="angular",
                     axis=dict(range=[0,100], showticklabels=False, ticks="", visible=False),
                     bar=dict(color=cor_g, thickness=0.34),
-                    bgcolor="#f5f8fb",
+                    bgcolor="#FAF7FF",
                     borderwidth=0,
                     steps=[
                         dict(range=[0,90],   color="#fecaca"),
                         dict(range=[90,95],  color="#fde68a"),
                         dict(range=[95,100], color="#a7f3d0"),
                     ],
-                    threshold=dict(line=dict(color="#475569", width=4), thickness=0.75, value=pct_online_global),
+                    threshold=dict(line=dict(color="#6B5A7A", width=4), thickness=0.75, value=pct_online_global),
                 ),
             ))
             layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
@@ -3636,7 +3766,7 @@ def main():
                 margin=dict(l=0,r=0,t=10,b=0),
                 annotations=[
                     dict(
-                        text=f"<span style='font-size:12px;color:#6b8496;font-family:DM Sans'>Câmeras operacionais</span>",
+                        text=f"<span style='font-size:12px;color:#8B7AA3;font-family:DM Sans'>Câmeras operacionais</span>",
                         x=0.5, y=0.08, showarrow=False, xanchor="center"
                     )
                 ],
@@ -3682,9 +3812,9 @@ def main():
             )
             fig_pie.add_annotation(
                 text=(
-                    f"<span style='font-size:26px;font-weight:800;color:#102a3f;font-family:DM Mono'>{total_clientes}</span>"
-                    f"<br><span style='font-size:11px;color:#6b8496;font-family:DM Sans'>clientes</span>"
-                    f"<br><span style='font-size:10px;color:#4f6f85;font-family:DM Sans;font-weight:700'>{pct_saudavel_card:.1f}% saudáveis</span>"
+                    f"<span style='font-size:26px;font-weight:800;color:#171126;font-family:DM Mono'>{total_clientes}</span>"
+                    f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans'>clientes</span>"
+                    f"<br><span style='font-size:10px;color:#6B5A7A;font-family:DM Sans;font-weight:700'>{pct_saudavel_card:.1f}% saudáveis</span>"
                 ),
                 x=0.5, y=0.5, showarrow=False,
             )
@@ -3704,17 +3834,17 @@ def main():
                     <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:9px 8px;text-align:center">
                         <div style="font-size:10px;color:#0f766e;font-weight:800;text-transform:uppercase">Saudável</div>
                         <div style="font-size:20px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:800">{n_saudavel}</div>
-                        <div style="font-size:10px;color:#60798d">0–5% · {pct_saudavel_card:.1f}%</div>
+                        <div style="font-size:10px;color:#7C6A91">0–5% · {pct_saudavel_card:.1f}%</div>
                     </div>
                     <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 8px;text-align:center">
                         <div style="font-size:10px;color:#b45309;font-weight:800;text-transform:uppercase">Atenção</div>
                         <div style="font-size:20px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:800">{n_atencao}</div>
-                        <div style="font-size:10px;color:#60798d">5–10% · {pct_atencao_card:.1f}%</div>
+                        <div style="font-size:10px;color:#7C6A91">5–10% · {pct_atencao_card:.1f}%</div>
                     </div>
                     <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 8px;text-align:center">
                         <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase">Crítico</div>
                         <div style="font-size:20px;color:#dc2626;font-family:'DM Mono',monospace;font-weight:800">{n_critico}</div>
-                        <div style="font-size:10px;color:#60798d">&gt;10% · {pct_critico_card:.1f}%</div>
+                        <div style="font-size:10px;color:#7C6A91">&gt;10% · {pct_critico_card:.1f}%</div>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
@@ -3746,14 +3876,14 @@ def main():
                     st.markdown(f"""
                     <div style="margin-bottom:14px">
                         <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                            <span style="font-size:12px;color:#102a3f;font-weight:600">{cliente_html}</span>
+                            <span style="font-size:12px;color:#171126;font-weight:600">{cliente_html}</span>
                             <span style="font-family:'DM Mono',monospace;font-size:12px;color:{cor};font-weight:700">{pct_html}</span>
                         </div>
-                        <div style="font-size:10px;color:#6b8496;margin-bottom:4px">{franqueado_html}</div>
-                        <div style="height:5px;background:#dbe8f2;border-radius:99px;overflow:hidden">
+                        <div style="font-size:10px;color:#8B7AA3;margin-bottom:4px">{franqueado_html}</div>
+                        <div style="height:5px;background:#E9D5FF;border-radius:99px;overflow:hidden">
                             <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
                         </div>
-                        <div style="font-size:10px;color:#6b8496;margin-top:3px">{offline_text}</div>
+                        <div style="font-size:10px;color:#8B7AA3;margin-top:3px">{offline_text}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -3803,9 +3933,9 @@ def main():
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             height=_heat_height,
-            xaxis=dict(tickfont=dict(color="#6b8496",size=10), tickangle=-45),
-            yaxis=dict(ticksuffix="%", gridcolor="#dbe8f2",
-                       tickfont=dict(color="#6b8496",size=10),
+            xaxis=dict(tickfont=dict(color="#8B7AA3",size=10), tickangle=-45),
+            yaxis=dict(ticksuffix="%", gridcolor="#E9D5FF",
+                       tickfont=dict(color="#8B7AA3",size=10),
                        range=[0, max(df_heat["Pct"].max()*1.2, 10)]),
             margin=dict(l=10,r=10,t=10,b=110),
         )
@@ -3954,10 +4084,10 @@ def main():
                 '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap">'
                 '<div style="background:rgba(0,136,204,.12);border:1px solid rgba(0,136,204,.22);'
                 'border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;'
-                'color:#007ab8;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento</div>'
+                'color:#6D28D9;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento</div>'
                 '<div>'
-                + f'<div style="font-size:20px;font-weight:700;color:#0088cc">{nome_cliente_html}</div>'
-                + f'<div style="font-size:12px;color:#6b8496">{nome_empresa_html} · ID: {wl_id_html}</div>'
+                + f'<div style="font-size:20px;font-weight:700;color:#7C3AED">{nome_cliente_html}</div>'
+                + f'<div style="font-size:12px;color:#8B7AA3">{nome_empresa_html} · ID: {wl_id_html}</div>'
                 + '</div>'
                 + f'<div style="margin-left:auto;font-size:13px;font-weight:700;color:{cor_d}">'
                 + f'{len(df_det)} offline de {total_u} câmeras ({pct_d}%)'
@@ -4108,7 +4238,7 @@ def main():
                 return f'''
                 <div style="
                     background:#ffffff;
-                    border:1px solid #dbe8f2;
+                    border:1px solid #E9D5FF;
                     border-radius:14px;
                     padding:18px 18px 16px;
                     text-align:center;
@@ -4118,9 +4248,9 @@ def main():
                     min-height:118px;
                 ">
                     <div style="position:absolute;top:0;left:0;right:0;height:4px;background:{cor};"></div>
-                    <div style="font-size:10px;color:#60798d;font-weight:800;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">{titulo}</div>
+                    <div style="font-size:10px;color:#7C6A91;font-weight:800;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">{titulo}</div>
                     <div style="font-size:34px;font-weight:800;color:{cor};font-family:DM Mono,monospace;line-height:1.15;margin-top:10px">{valor}</div>
-                    <div style="font-size:11px;color:#60798d;margin-top:6px">{subtitulo}</div>
+                    <div style="font-size:11px;color:#7C6A91;margin-top:6px">{subtitulo}</div>
                 </div>
                 '''
 
@@ -4294,7 +4424,7 @@ def main():
                             tickvals=tickvals,
                             ticktext=ticktext,
                             gridcolor="rgba(148,163,184,.10)",
-                            tickfont=dict(color="#64748b", size=9),
+                            tickfont=dict(color="#8B7AA3", size=9),
                             tickangle=-45,
                             zeroline=False,
                             range=[0.5, len(df_graf) + 0.5],
@@ -4302,7 +4432,7 @@ def main():
                         yaxis=dict(
                             title="Dias offline",
                             gridcolor="rgba(148,163,184,.16)",
-                            tickfont=dict(color="#64748b", size=10),
+                            tickfont=dict(color="#8B7AA3", size=10),
                             zeroline=False,
                             rangemode="tozero",
                             ticksuffix="d",
@@ -4359,21 +4489,21 @@ def main():
         fig_bar.add_vrect(x0=10,  x1=15,  fillcolor="rgba(217,119,6,0.06)",  layer="below", line_width=0)
         fig_bar.add_vrect(x0=15,  x1=100, fillcolor="rgba(220,38,38,0.06)",  layer="below", line_width=0)
         for xv, lbl in [(5,"5%"),(10,"10%")]:
-            fig_bar.add_vline(x=xv, line_dash="dot", line_color="#b9d7e8", line_width=1.5,
+            fig_bar.add_vline(x=xv, line_dash="dot", line_color="#C4B5FD", line_width=1.5,
                 annotation_text=lbl, annotation_position="top",
-                annotation_font=dict(color="#6b8496", size=10))
+                annotation_font=dict(color="#8B7AA3", size=10))
         fig_bar.add_trace(go.Bar(
             y=df_bar["Cliente"], x=df_bar["Pct"], orientation="h",
             marker=dict(color=[cor_hex(p) for p in df_bar["Pct"]], line=dict(width=0)),
             text=[f"{p:.1f}% ({o}/{t})" for p,o,t in zip(df_bar["Pct"],df_bar["Offline"],df_bar["Total"])],
-            textposition="outside", textfont=dict(color="#6b8496",size=10,family="DM Mono"),
+            textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
             hovertemplate="<b>%{y}</b><br>%{x:.1f}% offline<extra></extra>",
         ))
         fig_bar.update_layout(
             **pdefaults(), height=max(360, len(df_bar)*34), showlegend=False,
-            xaxis=dict(range=[0,100], ticksuffix="%", gridcolor="#dbe8f2",
-                       tickfont=dict(color="#6b8496",size=10), zeroline=False),
-            yaxis=dict(tickfont=dict(color="#4f6f85",size=10), gridcolor="#f5f8fb"),
+            xaxis=dict(range=[0,100], ticksuffix="%", gridcolor="#E9D5FF",
+                       tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+            yaxis=dict(tickfont=dict(color="#6B5A7A",size=10), gridcolor="#FAF7FF"),
             margin=dict(l=10, r=80, t=30, b=10),
         )
         st.plotly_chart(fig_bar, use_container_width=True)
@@ -4404,19 +4534,19 @@ def main():
                 name="Offline", y=df_rank["Cliente"], x=df_rank["Offline"],
                 orientation="h", marker_color="#ef4444",
                 text=[f'{p:.1f}%' for p in df_rank["% Offline"]],
-                textposition="outside", textfont=dict(color="#6b8496",size=10,family="DM Mono"),
+                textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
                 hovertemplate="%{y}<br>Offline: %{x} (%{text})<extra></extra>",
             ))
             fig_rank.update_layout(
                 **pdefaults(), barmode="stack",
                 height=max(360, len(df_rank)*40),
-                xaxis=dict(title="Quantidade de câmeras", gridcolor="#dbe8f2",
-                           tickfont=dict(color="#6b8496",size=10), zeroline=False),
-                yaxis=dict(tickfont=dict(color="#4f6f85",size=10),
+                xaxis=dict(title="Quantidade de câmeras", gridcolor="#E9D5FF",
+                           tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                yaxis=dict(tickfont=dict(color="#6B5A7A",size=10),
                            categoryorder="array",
                            categoryarray=df_rank["Cliente"].tolist()[::-1]),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                            font=dict(color="#6b8496",size=11), bgcolor="rgba(0,0,0,0)"),
+                            font=dict(color="#8B7AA3",size=11), bgcolor="rgba(0,0,0,0)"),
                 margin=dict(l=10, r=80, t=50, b=10),
             )
             st.plotly_chart(fig_rank, use_container_width=True)
@@ -4554,7 +4684,7 @@ def main():
                     resumo_status = "Melhora operacional"
                     resumo_texto = f"A base reduziu {abs(delta_off_global)} câmeras offline no período."
                 else:
-                    resumo_cor = "#007ab8"
+                    resumo_cor = "#6D28D9"
                     resumo_status = "Operação estável"
                     resumo_texto = "O total de câmeras offline ficou estável no período."
 
@@ -4645,7 +4775,7 @@ def main():
                         <b>Com variação offline:</b> {clientes_com_variacao_offline} · 
                         <b>Estáveis:</b> {estaveis}
                     </div>
-                    <div class="compare-status-tag" style="color:#007ab8">Resumo executivo</div>
+                    <div class="compare-status-tag" style="color:#6D28D9">Resumo executivo</div>
                 </div>
                 <div class="compare-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px">
                     <div class="compare-card neutral">
@@ -4687,8 +4817,8 @@ def main():
                         ))
                         fig_piora.update_layout(
                             **pdefaults(), height=max(320, len(df_top_piora)*34), showlegend=False,
-                            xaxis=dict(gridcolor="#dbe8f2", tickfont=dict(color="#6b8496",size=10), zeroline=False),
-                            yaxis=dict(autorange="reversed", tickfont=dict(color="#4f6f85",size=10)),
+                            xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                            yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
                             margin=dict(l=10, r=60, t=10, b=10),
                         )
                         st.plotly_chart(fig_piora, use_container_width=True, key="hist_top_piora")
@@ -4711,8 +4841,8 @@ def main():
                         ))
                         fig_melhora.update_layout(
                             **pdefaults(), height=max(320, len(df_m_plot)*34), showlegend=False,
-                            xaxis=dict(gridcolor="#dbe8f2", tickfont=dict(color="#6b8496",size=10), zeroline=False),
-                            yaxis=dict(autorange="reversed", tickfont=dict(color="#4f6f85",size=10)),
+                            xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                            yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
                             margin=dict(l=10, r=60, t=10, b=10),
                         )
                         st.plotly_chart(fig_melhora, use_container_width=True, key="hist_top_melhora")
@@ -4773,8 +4903,8 @@ def main():
                         title="% offline",
                         range=[0, max_pct_area],
                         ticksuffix="%",
-                        gridcolor="#dbe8f2",
-                        tickfont=dict(color="#6b8496", size=10),
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
                         zeroline=False,
                     ),
                     yaxis=dict(
@@ -4787,10 +4917,10 @@ def main():
                         ticktext=df_area["cliente_eixo"].tolist(),
                         showticklabels=True,
                         automargin=True,
-                        tickfont=dict(color="#4f6f85", size=10),
+                        tickfont=dict(color="#6B5A7A", size=10),
                     ),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                                font=dict(size=11, color="#6b8496"), bgcolor="rgba(0,0,0,0)"),
+                                font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
                     margin=dict(l=10, r=20, t=45, b=40),
                     hovermode="closest",
                 )
@@ -4830,13 +4960,13 @@ def main():
                     xaxis=dict(
                         title="Quantidade de câmeras offline",
                         range=[0, max_offline_cliente * 1.18],
-                        gridcolor="#dbe8f2",
-                        tickfont=dict(color="#6b8496", size=10),
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
                         zeroline=False,
                     ),
-                    yaxis=dict(tickfont=dict(color="#4f6f85", size=10)),
+                    yaxis=dict(tickfont=dict(color="#6B5A7A", size=10)),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                                font=dict(size=11, color="#6b8496"), bgcolor="rgba(0,0,0,0)"),
+                                font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
                     margin=dict(l=10, r=20, t=45, b=10),
                 )
                 st.plotly_chart(fig_comp, use_container_width=True, key="hist_comp_offline_cliente")
@@ -4844,19 +4974,19 @@ def main():
                 st.markdown("#### Variação líquida de offline")
                 st.caption("Valores positivos indicam piora; valores negativos indicam melhora.")
                 df_delta = df_comp.copy().sort_values("delta_off", ascending=True)
-                cores_d  = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#64748b") for d in df_delta["delta_off"]]
+                cores_d  = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in df_delta["delta_off"]]
                 fig_d = go.Figure(go.Bar(
                     y=df_delta["cliente"], x=df_delta["delta_off"], orientation="h",
                     marker=dict(color=cores_d, line=dict(width=0)),
                     text=[f"{'+' if d>0 else ''}{int(d)}" for d in df_delta["delta_off"]],
-                    textposition="outside", textfont=dict(color="#6b8496",size=10,family="DM Mono"),
+                    textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
                     hovertemplate="%{y}<br>Δ %{x:+.0f} câmeras<extra></extra>",
                 ))
-                fig_d.add_vline(x=0, line_color="#b9d7e8", line_width=1)
+                fig_d.add_vline(x=0, line_color="#C4B5FD", line_width=1)
                 fig_d.update_layout(
                     **pdefaults(), height=max(420, len(df_delta)*32), showlegend=False,
-                    xaxis=dict(gridcolor="#dbe8f2", tickfont=dict(color="#6b8496",size=10), zeroline=False),
-                    yaxis=dict(tickfont=dict(color="#4f6f85",size=10)),
+                    xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                    yaxis=dict(tickfont=dict(color="#6B5A7A",size=10)),
                     margin=dict(l=10, r=70, t=20, b=10),
                 )
                 st.plotly_chart(fig_d, use_container_width=True, key="hist_delta_off_cliente")
@@ -5002,8 +5132,8 @@ def main():
                     xaxis=dict(
                         title="LPRs offline",
                         range=[0, max_lpr_area],
-                        gridcolor="#dbe8f2",
-                        tickfont=dict(color="#6b8496", size=10),
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
                         zeroline=False,
                     ),
                     yaxis=dict(
@@ -5011,7 +5141,7 @@ def main():
                         type="category",
                         categoryorder="array",
                         categoryarray=top_lpr_area["Cliente eixo"].tolist(),
-                        tickfont=dict(color="#4f6f85", size=11),
+                        tickfont=dict(color="#6B5A7A", size=11),
                         automargin=True,
                     ),
                     showlegend=False,
