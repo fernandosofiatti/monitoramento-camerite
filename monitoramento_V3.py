@@ -1114,6 +1114,51 @@ def registrar_historico_importacao(df_envio: pd.DataFrame, arquivo_nome: str = "
         pass
 
 
+def _postgrest_in_filter_text(valores: list[str]) -> str:
+    """Monta filtro in.(...) seguro para colunas text do PostgREST/Supabase."""
+    limpos = []
+    for valor in valores:
+        texto = str(valor or "").strip()
+        if not texto:
+            continue
+        # Os whitelabels são numéricos na base atual. Mantemos suporte a letras,
+        # hífen e underline caso surja algum código diferente.
+        texto = re.sub(r"[^A-Za-z0-9_-]", "", texto)
+        if texto:
+            limpos.append(texto)
+    return "in.(" + ",".join(sorted(set(limpos))) + ")"
+
+
+def apagar_cameras_origem_por_whitelabel(ids_whitelabel: list[str], progress_callback=None, total_registros: int = 0) -> tuple[bool, str]:
+    """Remove da cameras_origem todos os registros dos whitelabels importados.
+
+    Isso força a base online a refletir exatamente o CSV mais recente.
+    Sem este passo, uma câmera que mudou de status ou saiu do arquivo pode
+    continuar aparecendo em dashboards caso o upsert não substitua tudo.
+    """
+    ids = sorted({str(x).strip() for x in ids_whitelabel if str(x).strip()})
+    if not ids:
+        return True, ""
+
+    tamanho_lote = 100
+    for i in range(0, len(ids), tamanho_lote):
+        lote_ids = ids[i:i + tamanho_lote]
+        filtro = _postgrest_in_filter_text(lote_ids)
+        if filtro == "in.()":
+            continue
+        if progress_callback:
+            progress_callback(0, max(total_registros, 1), f"Limpando registros antigos da cameras_origem... lote {i // tamanho_lote + 1}")
+        resp = requests.delete(
+            supabase_base_url(),
+            headers=supabase_headers("return=minimal"),
+            params={"id_whitelabel": filtro},
+            timeout=60,
+        )
+        if resp.status_code not in (200, 202, 204):
+            return False, f"Erro ao limpar cameras_origem: {resp.status_code} - {resp.text[:500]}"
+    return True, ""
+
+
 def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bool, str, int]:
     if not supabase_configurado():
         return False, "Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.", 0
@@ -1122,18 +1167,37 @@ def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bo
     if df_envio.empty:
         return False, "Nenhuma linha válida para importar. Verifique ID_Whitelabel e ID_da_Camera.", 0
 
+    # Importante: a atualização agora é uma SINCRONIZAÇÃO completa dos clientes
+    # presentes no CSV filtrado. Primeiro apaga a cameras_origem desses
+    # whitelabels e depois reinsere a foto atual do CSV. Isso elimina registros
+    # antigos/órfãos e garante que status como ONLINE/OFFLINE sejam substituídos.
+    ids_wl_importados = df_envio["id_whitelabel"].astype(str).str.strip().dropna().unique().tolist()
+    qtd_total = len(df_envio)
+
+    try:
+        ok_limpeza, msg_limpeza = apagar_cameras_origem_por_whitelabel(
+            ids_wl_importados,
+            progress_callback=progress_callback,
+            total_registros=qtd_total,
+        )
+        if not ok_limpeza:
+            return False, msg_limpeza, 0
+    except Exception as e:
+        return False, f"Erro ao limpar registros antigos da cameras_origem: {e}", 0
+
     registros = df_para_registros_json(df_envio)
     total = 0
-    qtd_total = len(registros)
     tamanho_lote = 1000
     try:
         for i in range(0, qtd_total, tamanho_lote):
             lote = registros[i:i + tamanho_lote]
             if progress_callback:
-                progress_callback(total, qtd_total, "Enviando dados para o Supabase...")
+                progress_callback(total, qtd_total, "Inserindo foto atual do CSV na cameras_origem...")
             resp = requests.post(
                 supabase_base_url(),
-                headers=supabase_headers("resolution=merge-duplicates"),
+                # Mantemos upsert como proteção contra duplicidade dentro do lote,
+                # embora a tabela já tenha sido limpa para os whitelabels importados.
+                headers=supabase_headers("resolution=merge-duplicates,return=minimal"),
                 params={"on_conflict": "id_camera"},
                 json=lote,
                 timeout=60,
@@ -1142,7 +1206,7 @@ def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bo
                 return False, f"Erro ao importar para o Supabase: {resp.status_code} - {resp.text[:500]}", total
             total += len(lote)
             if progress_callback:
-                progress_callback(total, qtd_total, f"Atualizando base online... {total}/{qtd_total} registros enviados")
+                progress_callback(total, qtd_total, f"Sincronizando base online... {total}/{qtd_total} registros gravados")
     except Exception as e:
         return False, f"Erro ao enviar dados ao Supabase: {e}", total
 
@@ -1152,7 +1216,7 @@ def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bo
 
     # Não limpamos os caches aqui para a barra não chegar em 100% antes da
     # gravação do snapshot e da recarga dos dashboards. Esse controle fica na tela.
-    return True, "Base online atualizada com sucesso.", total
+    return True, "Base online sincronizada com sucesso.", total
 
 
 def sql_criacao_supabase() -> str:
