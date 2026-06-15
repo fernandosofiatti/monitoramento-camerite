@@ -1505,6 +1505,7 @@ def criar_tabela_acoes_se_nao_existir() -> tuple[bool, str]:
 
 
 
+
 def calcular_metricas_cliente_info(info: dict) -> tuple[int, int, float]:
     """Retorna total, offline e % offline usando a mesma fonte dos cards de Clientes."""
     total = int(info.get("total", 0) or 0)
@@ -1517,6 +1518,58 @@ def calcular_metricas_cliente_info(info: dict) -> tuple[int, int, float]:
     return total, offline, pct
 
 
+def status_operacional_visual(pct: float, offline: int) -> tuple[str, str, str]:
+    """Rótulo, cor e emoji para a visão executiva."""
+    if offline == 0:
+        return "Saudável", "#059669", "🟢"
+    if pct > 10:
+        return "Crítico", "#dc2626", "🔴"
+    if pct > 5:
+        return "Atenção", "#d97706", "🟡"
+    return "Saudável", "#059669", "🟢"
+
+
+def status_acao_cor(status: str) -> tuple[str, str, str]:
+    texto = str(status or "Pendente").strip()
+    normal = normalizar_coluna(texto)
+    if normal in ("concluido", "concluida", "resolvido", "resolvida", "finalizado", "finalizada"):
+        return texto or "Concluído", "#059669", "✅"
+    if normal in ("emandamento", "andamento", "execucao", "emexecucao"):
+        return texto, "#7C3AED", "🟣"
+    if normal in ("aguardandocliente", "cliente", "aguardando"):
+        return texto, "#d97706", "🟠"
+    if normal in ("cancelado", "cancelada"):
+        return texto, "#8B7AA3", "⚪"
+    return texto or "Pendente", "#d97706", "🟡"
+
+
+def formatar_data_curta(valor) -> str:
+    if valor is None or str(valor).strip() in ("", "None", "NaT", "nan"):
+        return "N/D"
+    try:
+        dt = pd.to_datetime(valor, errors="coerce")
+        if pd.isna(dt):
+            return "N/D"
+        return dt.strftime("%d/%m/%Y")
+    except Exception:
+        return "N/D"
+
+
+def dias_desde_data(valor) -> str:
+    try:
+        dt = pd.to_datetime(valor, errors="coerce")
+        if pd.isna(dt):
+            return "Sem data"
+        dias = (agora_sao_paulo().date() - dt.date()).days
+        if dias <= 0:
+            return "Hoje"
+        if dias == 1:
+            return "há 1 dia"
+        return f"há {dias} dias"
+    except Exception:
+        return "Sem data"
+
+
 def montar_opcoes_clientes_acoes(dados: dict) -> list[dict]:
     """Monta uma lista leve de clientes para cadastro direto na Central de Ações."""
     opcoes = []
@@ -1524,8 +1577,8 @@ def montar_opcoes_clientes_acoes(dados: dict) -> list[dict]:
         total, offline, pct = calcular_metricas_cliente_info(v)
         nome_cliente = str(v.get("cidade_estado") or v.get("nome_cliente") or v.get("nome_empresa") or wl_id).strip()
         nome_empresa = str(v.get("nome_empresa") or "").strip()
-        status = status_cliente(pct, offline)
-        label = f"{nome_cliente} · ID {wl_id} · {offline}/{total} offline ({pct:.1f}%)"
+        status_label, _, emoji = status_operacional_visual(pct, offline)
+        label = f"{emoji} {nome_cliente} · ID {wl_id} · {offline}/{total} offline ({pct:.1f}%)"
         opcoes.append({
             "id_whitelabel": str(wl_id),
             "nome_cliente": nome_cliente,
@@ -1533,17 +1586,17 @@ def montar_opcoes_clientes_acoes(dados: dict) -> list[dict]:
             "total": total,
             "offline": offline,
             "pct": pct,
-            "status": status,
+            "status": status_label,
             "label": label,
             "busca": f"{nome_cliente} {nome_empresa} {wl_id}".upper(),
         })
-    return sorted(opcoes, key=lambda x: (-x["offline"], -x["pct"], x["nome_cliente"].upper()))
+    return sorted(opcoes, key=lambda x: (-x["pct"], -x["offline"], x["nome_cliente"].upper()))
 
 
 def render_form_cadastro_acao(dados: dict, prefixo_key: str = "central") -> None:
     """Formulário único e rápido para cadastrar ações sem abrir a aba Clientes."""
-    st.markdown("#### ➕ Cadastrar nova ação")
-    st.caption("Escolha o cliente aqui mesmo, registre o que foi feito e acompanhe tudo abaixo.")
+    st.markdown("#### ➕ Registrar acompanhamento")
+    st.caption("Escolha o cliente, registre a ação e defina status/prazo sem precisar abrir a aba Clientes.")
 
     opcoes_clientes = montar_opcoes_clientes_acoes(dados)
     if not opcoes_clientes:
@@ -1561,43 +1614,52 @@ def render_form_cadastro_acao(dados: dict, prefixo_key: str = "central") -> None
         st.warning("Nenhum cliente encontrado com esse filtro.")
         return
 
-    # Limita visualmente para manter a tela rápida quando a base tem muitos clientes.
     opcoes_filtradas = opcoes_filtradas[:80]
     labels = [o["label"] for o in opcoes_filtradas]
 
     with st.form(f"{prefixo_key}_form_nova_acao", clear_on_submit=True):
-        label_escolhido = st.selectbox(
-            "Cliente",
-            labels,
-            key=f"{prefixo_key}_cliente_acao_select",
-        )
+        label_escolhido = st.selectbox("Cliente", labels, key=f"{prefixo_key}_cliente_acao_select")
         cliente_sel = opcoes_filtradas[labels.index(label_escolhido)]
+        status_label, status_cor, status_emoji = status_operacional_visual(cliente_sel["pct"], cliente_sel["offline"])
+        st.markdown(f"""
+        <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:14px;padding:14px 16px;margin:8px 0 14px;box-shadow:0 10px 24px rgba(91,33,182,.07)">
+            <div style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+                <div>
+                    <div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase;letter-spacing:.8px">Cliente selecionado</div>
+                    <div style="font-size:18px;color:#171126;font-weight:800;margin-top:4px">{escape_html(cliente_sel['nome_cliente'])}</div>
+                    <div style="font-size:12px;color:#6B5A7A;margin-top:2px">ID {escape_html(cliente_sel['id_whitelabel'])} · {escape_html(cliente_sel.get('nome_empresa',''))}</div>
+                </div>
+                <div style="text-align:right">
+                    <div style="font-family:'DM Mono',monospace;font-size:24px;color:{status_cor};font-weight:900">{cliente_sel['pct']:.1f}%</div>
+                    <div style="font-size:12px;color:{status_cor};font-weight:800">{status_emoji} {status_label} · {cliente_sel['offline']}/{cliente_sel['total']} offline</div>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         acao_texto = st.text_area(
             "Ação realizada / ação combinada",
-            placeholder="Ex.: Cliente acionado no WhatsApp; técnico abriu chamado; prazo combinado para limpeza/ajuste...",
-            height=110,
+            placeholder="Ex.: Cliente acionado; reunião realizada; técnico abriu chamado; prazo combinado para limpeza/ajuste...",
+            height=120,
             key=f"{prefixo_key}_acao_texto",
         )
 
         col_prazo, col_status = st.columns(2)
         with col_prazo:
-            prazo = st.date_input(
-                "Prazo para ajuste",
-                value=None,
-                format="DD/MM/YYYY",
-                key=f"{prefixo_key}_prazo_acao",
-            )
+            prazo = st.date_input("Prazo para ajuste", value=None, format="DD/MM/YYYY", key=f"{prefixo_key}_prazo_acao")
         with col_status:
             status_acao = st.selectbox(
-                "Status inicial",
-                ["Pendente", "Concluído"],
+                "Status da ação",
+                ["Pendente", "Em andamento", "Aguardando Cliente", "Concluído", "Cancelado"],
                 key=f"{prefixo_key}_status_acao",
             )
 
         submitted = st.form_submit_button("💾 Salvar ação", use_container_width=True)
 
     if submitted:
+        if not str(acao_texto or "").strip():
+            st.error("Descreva a ação antes de salvar.")
+            return
         prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
         sucesso, msg = salvar_acao_cliente(
             id_whitelabel=cliente_sel["id_whitelabel"],
@@ -1612,15 +1674,14 @@ def render_form_cadastro_acao(dados: dict, prefixo_key: str = "central") -> None
         else:
             st.error(msg)
             with st.expander("Como resolver no Supabase", expanded=True):
-                st.markdown(
-                    "Verifique se a tabela `acoes_clientes` está exposta na API e se as policies de RLS permitem INSERT/SELECT/UPDATE para a chave usada no Streamlit."
-                )
+                st.markdown("Verifique se a tabela `acoes_clientes` está exposta na API e se as policies de RLS permitem INSERT/SELECT/UPDATE para a chave usada no Streamlit.")
                 st.code(sql_criacao_supabase(), language="sql")
 
 
 def status_prazo_acao(row) -> str:
-    if str(row.get("status_acao", "")).strip() == "Concluído":
-        return "✅ Concluído"
+    status_txt, _, _ = status_acao_cor(row.get("status_acao", ""))
+    if normalizar_coluna(status_txt) in ("concluido", "concluida", "resolvido", "resolvida", "finalizado", "finalizada", "cancelado", "cancelada"):
+        return "✅ Concluído" if "conclu" in normalizar_coluna(status_txt) else "⚪ Encerrado"
 
     prazo_str = row.get("prazo_ajustes")
     if prazo_str is None or str(prazo_str).strip() in ("", "None", "NaT", "nan"):
@@ -1641,242 +1702,349 @@ def status_prazo_acao(row) -> str:
         return "⏳ Sem prazo"
 
 
-def render_lista_acoes(df_todas_acoes: pd.DataFrame) -> None:
-    """Renderiza KPIs, filtros e lista de ações."""
+def preparar_acoes_view(df_todas_acoes: pd.DataFrame | None) -> pd.DataFrame:
     if df_todas_acoes is None or df_todas_acoes.empty:
-        st.info("Nenhuma ação registrada ainda. Cadastre a primeira na sub-aba “Cadastrar ação”.")
-        return
-
-    df_acoes_view = df_todas_acoes.copy()
-    for col in ["nome_cliente", "status_acao", "prazo_ajustes", "o_que_foi_feito", "data_criacao"]:
-        if col not in df_acoes_view.columns:
-            df_acoes_view[col] = ""
-
-    df_acoes_view["status_prazo_calc"] = df_acoes_view.apply(status_prazo_acao, axis=1)
-
-    total_acoes = len(df_acoes_view)
-    acoes_pendentes = int((df_acoes_view["status_acao"].astype(str) == "Pendente").sum())
-    acoes_concluidas = int((df_acoes_view["status_acao"].astype(str) == "Concluído").sum())
-    acoes_vencidas = int(df_acoes_view["status_prazo_calc"].astype(str).str.contains("Vencido", na=False).sum())
-
-    col_k1, col_k2, col_k3, col_k4 = st.columns(4)
-    col_k1.metric("Total de ações", total_acoes, f"{acoes_concluidas} concluídas")
-    col_k2.metric("Pendentes", acoes_pendentes, "Em execução")
-    col_k3.metric("Concluídas", acoes_concluidas, f"{round(acoes_concluidas / total_acoes * 100, 0):.0f}%" if total_acoes else "0%")
-    col_k4.metric("Vencidas", acoes_vencidas, "Ação necessária" if acoes_vencidas else "Ok")
-
-    st.divider()
-
-    col_filtro1, col_filtro2, col_filtro3 = st.columns([1.2, 2, 1.4])
-    with col_filtro1:
-        filtro_status = st.selectbox("Status", ["Todos", "Pendente", "Concluído"], key="central_acoes_status_v2")
-    with col_filtro2:
-        filtro_cliente = st.text_input("Filtrar ações", placeholder="Cliente, ID ou texto da ação...", key="central_acoes_cliente_v2")
-    with col_filtro3:
-        ordem = st.selectbox("Ordenar por", ["Mais recente", "Prazo mais próximo", "Cliente A-Z"], key="central_acoes_ordem_v2")
-
-    mask = pd.Series(True, index=df_acoes_view.index)
-    if filtro_status != "Todos":
-        mask &= df_acoes_view["status_acao"].astype(str).eq(filtro_status)
-    if filtro_cliente.strip():
-        termo = filtro_cliente.upper().strip()
-        campo_busca = (
-            df_acoes_view.get("nome_cliente", "").astype(str) + " " +
-            df_acoes_view.get("id_whitelabel", "").astype(str) + " " +
-            df_acoes_view.get("o_que_foi_feito", "").astype(str)
-        ).str.upper()
-        mask &= campo_busca.str.contains(re.escape(termo), na=False)
-
-    df_filtrado = df_acoes_view[mask].copy()
-    if ordem == "Mais recente":
-        df_filtrado["_data_sort"] = pd.to_datetime(df_filtrado["data_criacao"], errors="coerce")
-        df_filtrado = df_filtrado.sort_values("_data_sort", ascending=False, na_position="last")
-    elif ordem == "Prazo mais próximo":
-        df_filtrado["_prazo_sort"] = pd.to_datetime(df_filtrado["prazo_ajustes"], errors="coerce")
-        df_filtrado = df_filtrado.sort_values("_prazo_sort", na_position="last")
-    else:
-        df_filtrado = df_filtrado.sort_values("nome_cliente", ascending=True)
-
-    if df_filtrado.empty:
-        st.info("Nenhuma ação encontrada com os filtros aplicados.")
-        return
-
-    for _, acao in df_filtrado.iterrows():
-        status_acao = str(acao.get("status_acao", "Pendente") or "Pendente")
-        status_prazo = str(acao.get("status_prazo_calc", "⏳ Sem prazo"))
-        col_acao, col_status_btn = st.columns([4, 1])
-
-        if "Vencido" in status_prazo:
-            cor_borda, cor_bg = "#ef4444", "#fef2f2"
-        elif "Concluído" in status_prazo:
-            cor_borda, cor_bg = "#14b8a6", "#f0fdfa"
-        elif "⚠️" in status_prazo:
-            cor_borda, cor_bg = "#f59e0b", "#fffbeb"
-        else:
-            cor_borda, cor_bg = "#7C3AED", "#f3e8ff"
-
-        with col_acao:
-            st.markdown(f"""
-            <div style="background:{cor_bg};border:1px solid {cor_borda};border-radius:12px;padding:16px;margin-bottom:12px">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px">
-                    <div>
-                        <div style="font-size:12px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">🏢 Cliente</div>
-                        <div style="font-size:14px;color:#171126;font-weight:700;margin-top:4px">{escape_html(acao.get('nome_cliente', 'N/D'))}</div>
-                        <div style="font-size:10px;color:#8B7AA3;margin-top:2px">ID {escape_html(acao.get('id_whitelabel', 'N/D'))}</div>
-                    </div>
-                    <div style="text-align:right">
-                        <div style="font-size:11px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Prazo</div>
-                        <div style="font-size:13px;font-weight:700;margin-top:4px">{escape_html(status_prazo)}</div>
-                    </div>
-                </div>
-                <div style="background:#ffffff;border:1px solid {cor_borda};border-radius:8px;padding:12px;margin-bottom:10px">
-                    <div style="font-size:12px;color:#171126;line-height:1.5">{escape_html(acao.get('o_que_foi_feito', 'N/D'))}</div>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
-                        <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Criada em</div>
-                        <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{escape_html(str(acao.get('data_criacao', 'N/D'))[:10])}</div>
-                    </div>
-                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
-                        <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Prazo</div>
-                        <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{escape_html(acao.get('prazo_ajustes') or 'Sem prazo')}</div>
-                    </div>
-                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
-                        <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Situação</div>
-                        <div style="font-size:11px;color:{'#059669' if status_acao == 'Concluído' else '#d97706'};font-weight:700;margin-top:2px">{escape_html(status_acao)}</div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_status_btn:
-            novo_status = st.selectbox(
-                "Mudar",
-                ["Pendente", "Concluído"],
-                index=0 if status_acao != "Concluído" else 1,
-                key=f"select_status_v2_{acao.get('id', uuid.uuid4())}",
-            )
-            if novo_status != status_acao:
-                sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
-                if sucesso:
-                    st.success("Atualizado")
-                    st.rerun()
-                else:
-                    st.error(msg)
-
+        return pd.DataFrame()
+    df = df_todas_acoes.copy()
+    for col in ["id", "id_whitelabel", "nome_cliente", "status_acao", "prazo_ajustes", "o_que_foi_feito", "data_criacao", "data_atualizacao"]:
+        if col not in df.columns:
+            df[col] = ""
+    df["id_whitelabel"] = df["id_whitelabel"].astype(str).str.strip()
+    df["_data_sort"] = pd.to_datetime(df["data_atualizacao"].where(df["data_atualizacao"].astype(str).str.strip().ne(""), df["data_criacao"]), errors="coerce")
+    df["_data_criacao_sort"] = pd.to_datetime(df["data_criacao"], errors="coerce")
+    df["_prazo_sort"] = pd.to_datetime(df["prazo_ajustes"], errors="coerce")
+    df["status_prazo_calc"] = df.apply(status_prazo_acao, axis=1)
+    return df.sort_values("_data_sort", ascending=False, na_position="last")
 
 
 def montar_df_clientes_central_acoes(dados: dict, df_todas_acoes: pd.DataFrame | None = None) -> pd.DataFrame:
-    """Base de clientes da Central de Ações com métricas operacionais reais e contagem de ações."""
-    rows = []
-    contagens = {}
+    """Base executiva por cliente: 1 linha por cliente, com a última ação como resumo."""
+    df_acoes = preparar_acoes_view(df_todas_acoes)
+    ultimas = {}
     pendencias = {}
-    if df_todas_acoes is not None and not df_todas_acoes.empty and "id_whitelabel" in df_todas_acoes.columns:
-        tmp = df_todas_acoes.copy()
-        tmp["id_whitelabel"] = tmp["id_whitelabel"].astype(str).str.strip()
-        contagens = tmp.groupby("id_whitelabel").size().to_dict()
-        if "status_acao" in tmp.columns:
-            pend = tmp[tmp["status_acao"].astype(str).str.strip().ne("Concluído")]
-            pendencias = pend.groupby("id_whitelabel").size().to_dict()
+    vencidos = {}
 
+    if not df_acoes.empty:
+        df_ord = df_acoes.sort_values("_data_sort", ascending=False, na_position="last")
+        for wl, g in df_ord.groupby("id_whitelabel", sort=False):
+            if not str(wl).strip():
+                continue
+            ultimas[str(wl)] = g.iloc[0].to_dict()
+            pend = g[~g["status_acao"].astype(str).map(lambda x: normalizar_coluna(x) in ("concluido", "concluida", "resolvido", "resolvida", "cancelado", "cancelada"))]
+            pendencias[str(wl)] = len(pend)
+            vencidos[str(wl)] = int(pend["status_prazo_calc"].astype(str).str.contains("Vencido", na=False).sum()) if not pend.empty else 0
+
+    rows = []
     for wl_id, info in (dados or {}).items():
+        wl = str(wl_id).strip()
         total, offline, pct = calcular_metricas_cliente_info(info)
-        nome_cliente = str(info.get("cidade_estado") or info.get("nome_cliente") or f"ID {wl_id}").strip()
+        nome_cliente = str(info.get("cidade_estado") or info.get("nome_cliente") or f"ID {wl}").strip()
         nome_empresa = str(info.get("nome_empresa") or "").strip()
+        op_label, op_cor, op_emoji = status_operacional_visual(pct, offline)
+        ultima = ultimas.get(wl, {})
+        status_ult, status_cor, status_emoji = status_acao_cor(ultima.get("status_acao", "Sem ação")) if ultima else ("Sem ação", "#8B7AA3", "⚪")
+        ultima_acao = str(ultima.get("o_que_foi_feito", "") or "").strip() if ultima else ""
         rows.append({
-            "ID": str(wl_id),
+            "ID": wl,
             "Cliente": nome_cliente,
             "Franqueado": nome_empresa,
             "Total": total,
             "Offline": offline,
             "% Offline": pct,
-            "Status Operacional": status_cliente(pct, offline),
-            "Ações": int(contagens.get(str(wl_id), 0) or 0),
-            "Pendentes": int(pendencias.get(str(wl_id), 0) or 0),
+            "Situação": f"{op_emoji} {op_label}",
+            "Situação Cor": op_cor,
+            "Última ação": ultima_acao[:160] if ultima_acao else "Sem ação registrada",
+            "Data última ação": formatar_data_curta(ultima.get("data_atualizacao") or ultima.get("data_criacao")) if ultima else "N/D",
+            "Dias sem atualização": dias_desde_data(ultima.get("data_atualizacao") or ultima.get("data_criacao")) if ultima else "Sem acompanhamento",
+            "Status da ação": f"{status_emoji} {status_ult}",
+            "Status Cor": status_cor,
+            "Prazo": formatar_data_curta(ultima.get("prazo_ajustes")) if ultima else "N/D",
+            "Prazo Status": ultima.get("status_prazo_calc", "Sem ação") if ultima else "Sem ação",
+            "Pendências": int(pendencias.get(wl, 0) or 0),
+            "Vencidas": int(vencidos.get(wl, 0) or 0),
+            "Tem ação": bool(ultima),
         })
     df = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(columns=["ID", "Cliente", "Franqueado", "Total", "Offline", "% Offline", "Status Operacional", "Ações", "Pendentes"])
-    return df.sort_values(["Offline", "% Offline", "Cliente"], ascending=[False, False, True]).reset_index(drop=True)
+        return pd.DataFrame()
+    return df.sort_values(["% Offline", "Offline", "Cliente"], ascending=[False, False, True]).reset_index(drop=True)
+
+
+def card_executivo(titulo: str, valor: str, subtitulo: str, cor: str = "#7C3AED", icone: str = "📌") -> None:
+    st.markdown(f"""
+    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:16px;padding:18px 18px 16px;box-shadow:0 12px 30px rgba(91,33,182,.08);height:132px;position:relative;overflow:hidden">
+        <div style="position:absolute;top:0;left:0;right:0;height:5px;background:{cor}"></div>
+        <div style="font-size:11px;color:#8B7AA3;font-weight:900;text-transform:uppercase;letter-spacing:.8px">{icone} {escape_html(titulo)}</div>
+        <div style="font-family:'DM Mono',monospace;font-size:36px;line-height:1;color:{cor};font-weight:900;margin-top:12px">{escape_html(str(valor))}</div>
+        <div style="font-size:12px;color:#6B5A7A;margin-top:10px;line-height:1.35">{escape_html(subtitulo)}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_dashboard_acoes(df_todas_acoes: pd.DataFrame, dados: dict) -> None:
-    """Dashboards resumidos da Central de Ações, separados do cadastro."""
-    df_clientes_central = montar_df_clientes_central_acoes(dados, df_todas_acoes)
-
-    if df_todas_acoes is None or df_todas_acoes.empty:
-        total_acoes = pendentes = concluidas = vencidas = 0
-        df_view = pd.DataFrame()
-    else:
-        df_view = df_todas_acoes.copy()
-        for col in ["status_acao", "prazo_ajustes"]:
-            if col not in df_view.columns:
-                df_view[col] = ""
-        df_view["status_prazo_calc"] = df_view.apply(status_prazo_acao, axis=1)
-        total_acoes = len(df_view)
-        pendentes = int(df_view["status_acao"].astype(str).ne("Concluído").sum())
-        concluidas = int(df_view["status_acao"].astype(str).eq("Concluído").sum())
-        vencidas = int(df_view["status_prazo_calc"].astype(str).str.contains("Vencido", na=False).sum())
-
-    clientes_com_acao = int((df_clientes_central["Ações"] > 0).sum()) if not df_clientes_central.empty else 0
-    clientes_criticos = int((df_clientes_central["% Offline"] > 10).sum()) if not df_clientes_central.empty else 0
-    offline_total = int(df_clientes_central["Offline"].sum()) if not df_clientes_central.empty else 0
-
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Ações cadastradas", total_acoes, f"{concluidas} concluídas")
-    k2.metric("Pendentes", pendentes, "em aberto")
-    k3.metric("Vencidas", vencidas, "atenção" if vencidas else "ok")
-    k4.metric("Clientes com ação", clientes_com_acao, f"{clientes_criticos} críticos")
-
-    st.divider()
-    col_esq, col_dir = st.columns([1, 1])
-    with col_esq:
-        st.markdown("#### Clientes mais críticos")
-        top_clientes = df_clientes_central.head(15).copy()
-        if top_clientes.empty:
-            st.info("Nenhum cliente carregado.")
-        else:
-            top_show = top_clientes[["Cliente", "Total", "Offline", "% Offline", "Pendentes"]].copy()
-            top_show["% Offline"] = top_show["% Offline"].map(lambda v: f"{v:.1f}%")
-            render_dataframe(top_show, height=min(520, (len(top_show)+1)*35 + 3))
-    with col_dir:
-        st.markdown("#### Resumo operacional")
-        st.metric("Câmeras offline na carteira", offline_total)
-        if not df_clientes_central.empty:
-            dist = df_clientes_central["Status Operacional"].value_counts().reset_index()
-            dist.columns = ["Faixa", "Clientes"]
-            render_dataframe(dist, height=min(260, (len(dist)+1)*35 + 3))
-        if not df_view.empty and "status_acao" in df_view.columns:
-            st.markdown("#### Ações por status")
-            status_df = df_view["status_acao"].fillna("Pendente").astype(str).value_counts().reset_index()
-            status_df.columns = ["Status", "Quantidade"]
-            render_dataframe(status_df, height=min(220, (len(status_df)+1)*35 + 3))
-
-
-def render_clientes_central_acoes(dados: dict, df_todas_acoes: pd.DataFrame | None) -> None:
-    """Lista de clientes da Central de Ações com valores reais de offline."""
-    st.markdown("#### Clientes da Central")
-    st.caption("Aqui os totais usam a mesma base operacional dos cards da aba Clientes.")
-    df_clientes_central = montar_df_clientes_central_acoes(dados, df_todas_acoes)
-    if df_clientes_central.empty:
+    """Dashboard executivo orientado a clientes, não a quantidade de ações."""
+    df_clientes = montar_df_clientes_central_acoes(dados, df_todas_acoes)
+    if df_clientes.empty:
         st.info("Nenhum cliente carregado.")
         return
 
-    termo = st.text_input("Buscar cliente na central", placeholder="Nome, franqueado ou ID...", key="central_clientes_busca_v3").strip().upper()
-    df_view = df_clientes_central.copy()
+    criticos = df_clientes[df_clientes["% Offline"] > 10].copy()
+    atencao = df_clientes[(df_clientes["% Offline"] > 5) & (df_clientes["% Offline"] <= 10)].copy()
+    precisa_acomp = df_clientes[(df_clientes["% Offline"] > 5) & (~df_clientes["Tem ação"])].copy()
+    vencidos = df_clientes[df_clientes["Vencidas"] > 0].copy()
+    acompanhamento = df_clientes[(df_clientes["% Offline"] > 5) & (df_clientes["Tem ação"])].copy()
+
+    st.markdown("#### 📊 Resumo executivo")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        card_executivo("Clientes críticos", str(len(criticos)), "Acima de 10% offline", "#dc2626", "🔴")
+    with c2:
+        card_executivo("Clientes em atenção", str(len(atencao)), "Entre 5% e 10% offline", "#d97706", "🟡")
+    with c3:
+        card_executivo("Sem acompanhamento", str(len(precisa_acomp)), "Críticos/atenção sem ação", "#7C3AED", "📌")
+    with c4:
+        card_executivo("Prazo vencido", str(len(vencidos)), "Clientes com pendência vencida", "#ef4444", "🚨")
+
+    st.markdown("#### 🏢 Clientes para reunião")
+    st.caption("Uma linha por cliente, focando situação atual, última ação e status do acompanhamento.")
+    prioridade = df_clientes[(df_clientes["% Offline"] > 5) | (df_clientes["Tem ação"])].copy()
+    prioridade = prioridade.sort_values(["% Offline", "Vencidas", "Pendências"], ascending=[False, False, False]).head(20)
+    if prioridade.empty:
+        st.success("Nenhum cliente crítico/em atenção ou com ação registrada no momento.")
+    else:
+        show = prioridade[["Cliente", "Offline", "% Offline", "Situação", "Última ação", "Data última ação", "Status da ação", "Prazo Status"]].copy()
+        show["% Offline"] = show["% Offline"].map(lambda v: f"{float(v):.1f}%")
+        render_dataframe(show, height=min(650, (len(show)+1)*42 + 3))
+
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
+        st.markdown("#### 🚨 Sem acompanhamento")
+        if precisa_acomp.empty:
+            st.success("Todos os clientes em atenção/críticos têm acompanhamento registrado.")
+        else:
+            aux = precisa_acomp[["Cliente", "Offline", "% Offline", "Situação"]].head(12).copy()
+            aux["% Offline"] = aux["% Offline"].map(lambda v: f"{float(v):.1f}%")
+            render_dataframe(aux, height=min(430, (len(aux)+1)*38 + 3))
+    with col_b:
+        st.markdown("#### ⏱️ Prazos vencidos")
+        if vencidos.empty:
+            st.success("Nenhum cliente com prazo vencido.")
+        else:
+            aux = vencidos[["Cliente", "% Offline", "Última ação", "Prazo", "Prazo Status"]].head(12).copy()
+            aux["% Offline"] = aux["% Offline"].map(lambda v: f"{float(v):.1f}%")
+            render_dataframe(aux, height=min(430, (len(aux)+1)*38 + 3))
+
+
+def render_cards_reuniao_clientes(df_clientes: pd.DataFrame) -> None:
+    if df_clientes.empty:
+        st.info("Nenhum cliente para exibir.")
+        return
+    for _, row in df_clientes.iterrows():
+        pct = float(row.get("% Offline", 0) or 0)
+        situacao = str(row.get("Situação", ""))
+        cor = row.get("Situação Cor", "#7C3AED")
+        status = str(row.get("Status da ação", "Sem ação"))
+        status_cor = row.get("Status Cor", "#8B7AA3")
+        ultima = str(row.get("Última ação", "Sem ação registrada") or "Sem ação registrada")
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#ffffff 0%,#FBF7FF 100%);border:1px solid #E9D5FF;border-left:6px solid {cor};border-radius:18px;padding:18px 20px;margin:0 0 14px;box-shadow:0 14px 34px rgba(91,33,182,.09)">
+            <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap">
+                <div style="min-width:280px;flex:1">
+                    <div style="font-size:11px;color:#8B7AA3;font-weight:900;text-transform:uppercase;letter-spacing:.8px">Cliente</div>
+                    <div style="font-size:21px;color:#171126;font-weight:900;margin-top:3px">{escape_html(row.get('Cliente','N/D'))}</div>
+                    <div style="font-size:12px;color:#6B5A7A;margin-top:3px">ID {escape_html(row.get('ID',''))} · {escape_html(row.get('Franqueado',''))}</div>
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:12px;padding:10px 14px;text-align:center;min-width:116px">
+                        <div style="font-size:10px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Offline</div>
+                        <div style="font-family:'DM Mono',monospace;font-size:24px;color:{cor};font-weight:900">{pct:.1f}%</div>
+                        <div style="font-size:11px;color:#6B5A7A">{int(row.get('Offline',0))}/{int(row.get('Total',0))} câmeras</div>
+                    </div>
+                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:12px;padding:10px 14px;text-align:center;min-width:140px">
+                        <div style="font-size:10px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Situação</div>
+                        <div style="font-size:13px;color:{cor};font-weight:900;margin-top:8px">{escape_html(situacao)}</div>
+                    </div>
+                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:12px;padding:10px 14px;text-align:center;min-width:160px">
+                        <div style="font-size:10px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Acompanhamento</div>
+                        <div style="font-size:13px;color:{status_cor};font-weight:900;margin-top:8px">{escape_html(status)}</div>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:14px;background:#ffffff;border:1px solid #F1E8FF;border-radius:12px;padding:13px 14px">
+                <div style="font-size:10px;color:#8B7AA3;font-weight:900;text-transform:uppercase;letter-spacing:.7px">Última ação</div>
+                <div style="font-size:14px;color:#171126;line-height:1.45;margin-top:5px">{escape_html(ultima)}</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Data: {escape_html(row.get('Data última ação','N/D'))}</span>
+                <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">{escape_html(row.get('Dias sem atualização',''))}</span>
+                <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Prazo: {escape_html(row.get('Prazo Status','N/D'))}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def render_lista_acoes(df_todas_acoes: pd.DataFrame, dados: dict | None = None) -> None:
+    """Visão moderna das ações: apresentação por cliente + histórico operacional."""
+    df_acoes = preparar_acoes_view(df_todas_acoes)
+    if df_acoes.empty:
+        st.info("Nenhuma ação registrada ainda. Cadastre a primeira na sub-aba “Cadastrar ação”.")
+        return
+
+    tab_reuniao, tab_historico = st.tabs(["🎯 Visão para reunião", "📚 Histórico de ações"])
+
+    with tab_reuniao:
+        df_clientes = montar_df_clientes_central_acoes(dados or {}, df_todas_acoes) if dados is not None else pd.DataFrame()
+        if df_clientes.empty:
+            st.info("Não foi possível cruzar ações com a base de clientes carregada.")
+        else:
+            st.markdown("#### 🎯 Acompanhamento por cliente")
+            st.caption("Visual pronto para apresentar: foco no cliente, % offline, última ação, status e prazo.")
+            col_f1, col_f2, col_f3 = st.columns([1.1, 1.1, 2])
+            with col_f1:
+                filtro_situacao = st.selectbox("Situação", ["Críticos e atenção", "Todos com ação", "Críticos", "Atenção", "Sem acompanhamento", "Prazo vencido"], key="filtro_reuniao_situacao_v4")
+            with col_f2:
+                limite = st.selectbox("Quantidade", [10, 15, 25, 50], index=1, key="filtro_reuniao_limite_v4")
+            with col_f3:
+                termo = st.text_input("Buscar", placeholder="Cliente, franqueado ou ID...", key="filtro_reuniao_busca_v4").strip().upper()
+
+            df_view = df_clientes.copy()
+            if filtro_situacao == "Críticos e atenção":
+                df_view = df_view[df_view["% Offline"] > 5]
+            elif filtro_situacao == "Todos com ação":
+                df_view = df_view[df_view["Tem ação"]]
+            elif filtro_situacao == "Críticos":
+                df_view = df_view[df_view["% Offline"] > 10]
+            elif filtro_situacao == "Atenção":
+                df_view = df_view[(df_view["% Offline"] > 5) & (df_view["% Offline"] <= 10)]
+            elif filtro_situacao == "Sem acompanhamento":
+                df_view = df_view[(df_view["% Offline"] > 5) & (~df_view["Tem ação"])]
+            elif filtro_situacao == "Prazo vencido":
+                df_view = df_view[df_view["Vencidas"] > 0]
+
+            if termo:
+                busca = (df_view["Cliente"].astype(str) + " " + df_view["Franqueado"].astype(str) + " " + df_view["ID"].astype(str)).str.upper()
+                df_view = df_view[busca.str.contains(re.escape(termo), na=False)].copy()
+
+            df_view = df_view.sort_values(["% Offline", "Vencidas", "Pendências"], ascending=[False, False, False]).head(int(limite))
+            render_cards_reuniao_clientes(df_view)
+
+    with tab_historico:
+        st.markdown("#### 📚 Histórico operacional")
+        col_filtro1, col_filtro2, col_filtro3 = st.columns([1.2, 2, 1.4])
+        with col_filtro1:
+            statuses = sorted(set([str(x or "Pendente") for x in df_acoes["status_acao"].dropna().tolist()]))
+            filtro_status = st.selectbox("Status", ["Todos"] + statuses, key="central_acoes_status_v4")
+        with col_filtro2:
+            filtro_cliente = st.text_input("Filtrar ações", placeholder="Cliente, ID ou texto da ação...", key="central_acoes_cliente_v4")
+        with col_filtro3:
+            ordem = st.selectbox("Ordenar por", ["Mais recente", "Prazo mais próximo", "Cliente A-Z"], key="central_acoes_ordem_v4")
+
+        mask = pd.Series(True, index=df_acoes.index)
+        if filtro_status != "Todos":
+            mask &= df_acoes["status_acao"].astype(str).eq(filtro_status)
+        if filtro_cliente.strip():
+            termo = filtro_cliente.upper().strip()
+            campo_busca = (df_acoes["nome_cliente"].astype(str) + " " + df_acoes["id_whitelabel"].astype(str) + " " + df_acoes["o_que_foi_feito"].astype(str)).str.upper()
+            mask &= campo_busca.str.contains(re.escape(termo), na=False)
+
+        df_filtrado = df_acoes[mask].copy()
+        if ordem == "Mais recente":
+            df_filtrado = df_filtrado.sort_values("_data_sort", ascending=False, na_position="last")
+        elif ordem == "Prazo mais próximo":
+            df_filtrado = df_filtrado.sort_values("_prazo_sort", na_position="last")
+        else:
+            df_filtrado = df_filtrado.sort_values("nome_cliente", ascending=True)
+
+        if df_filtrado.empty:
+            st.info("Nenhuma ação encontrada com os filtros aplicados.")
+            return
+
+        for _, acao in df_filtrado.iterrows():
+            status_texto, status_cor, status_emoji = status_acao_cor(acao.get("status_acao", "Pendente"))
+            status_prazo = str(acao.get("status_prazo_calc", "⏳ Sem prazo"))
+            if "Vencido" in status_prazo:
+                cor_borda, cor_bg = "#ef4444", "#fff7f7"
+            elif "Concluído" in status_prazo or "Encerrado" in status_prazo:
+                cor_borda, cor_bg = "#14b8a6", "#f0fdfa"
+            elif "⚠️" in status_prazo:
+                cor_borda, cor_bg = "#f59e0b", "#fffbeb"
+            else:
+                cor_borda, cor_bg = "#7C3AED", "#fbf7ff"
+
+            col_acao, col_status_btn = st.columns([4.6, 1.1])
+            with col_acao:
+                st.markdown(f"""
+                <div style="background:{cor_bg};border:1px solid #E9D5FF;border-left:5px solid {cor_borda};border-radius:16px;padding:16px 18px;margin-bottom:12px;box-shadow:0 10px 24px rgba(91,33,182,.07)">
+                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+                        <div>
+                            <div style="font-size:11px;color:#8B7AA3;font-weight:900;text-transform:uppercase;letter-spacing:.7px">🏢 Cliente</div>
+                            <div style="font-size:17px;color:#171126;font-weight:900;margin-top:3px">{escape_html(acao.get('nome_cliente', 'N/D'))}</div>
+                            <div style="font-size:12px;color:#6B5A7A;margin-top:3px">ID {escape_html(acao.get('id_whitelabel',''))}</div>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+                            <span style="background:#ffffff;color:{status_cor};border:1px solid #E9D5FF;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:900">{status_emoji} {escape_html(status_texto)}</span>
+                            <span style="background:#ffffff;color:{cor_borda};border:1px solid #E9D5FF;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:900">{escape_html(status_prazo)}</span>
+                        </div>
+                    </div>
+                    <div style="background:#ffffff;border:1px solid #F1E8FF;border-radius:12px;padding:12px 13px;margin-top:13px;color:#171126;font-size:14px;line-height:1.45">{escape_html(acao.get('o_que_foi_feito', ''))}</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                        <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Criada: {escape_html(formatar_data_curta(acao.get('data_criacao')))}</span>
+                        <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Atualizada: {escape_html(formatar_data_curta(acao.get('data_atualizacao') or acao.get('data_criacao')))}</span>
+                        <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Prazo: {escape_html(formatar_data_curta(acao.get('prazo_ajustes')))}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col_status_btn:
+                opcoes_status = ["Pendente", "Em andamento", "Aguardando Cliente", "Concluído", "Cancelado"]
+                idx = opcoes_status.index(status_texto) if status_texto in opcoes_status else 0
+                novo_status = st.selectbox("Status", opcoes_status, index=idx, key=f"select_status_v4_{acao.get('id', uuid.uuid4())}")
+                if novo_status != status_texto:
+                    sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                    if sucesso:
+                        st.success("Atualizado")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+
+def render_clientes_central_acoes(dados: dict, df_todas_acoes: pd.DataFrame | None) -> None:
+    """Lista de clientes da Central de Ações com valores reais de offline e última ação."""
+    st.markdown("#### 🏢 Clientes da Central")
+    st.caption("Uma linha por cliente, com % offline real e o último acompanhamento registrado.")
+    df_clientes = montar_df_clientes_central_acoes(dados, df_todas_acoes)
+    if df_clientes.empty:
+        st.info("Nenhum cliente carregado.")
+        return
+
+    col_b, col_s = st.columns([2, 1])
+    with col_b:
+        termo = st.text_input("Buscar cliente na central", placeholder="Nome, franqueado ou ID...", key="central_clientes_busca_v4").strip().upper()
+    with col_s:
+        filtro = st.selectbox("Filtro", ["Todos", "Críticos", "Atenção", "Sem acompanhamento", "Com prazo vencido"], key="central_clientes_filtro_v4")
+
+    df_view = df_clientes.copy()
+    if filtro == "Críticos":
+        df_view = df_view[df_view["% Offline"] > 10]
+    elif filtro == "Atenção":
+        df_view = df_view[(df_view["% Offline"] > 5) & (df_view["% Offline"] <= 10)]
+    elif filtro == "Sem acompanhamento":
+        df_view = df_view[(df_view["% Offline"] > 5) & (~df_view["Tem ação"])]
+    elif filtro == "Com prazo vencido":
+        df_view = df_view[df_view["Vencidas"] > 0]
+
     if termo:
-        busca = (
-            df_view["Cliente"].astype(str) + " " +
-            df_view["Franqueado"].astype(str) + " " +
-            df_view["ID"].astype(str)
-        ).str.upper()
+        busca = (df_view["Cliente"].astype(str) + " " + df_view["Franqueado"].astype(str) + " " + df_view["ID"].astype(str)).str.upper()
         df_view = df_view[busca.str.contains(re.escape(termo), na=False)].copy()
-    df_view["% Offline"] = df_view["% Offline"].map(lambda v: f"{float(v):.1f}%")
-    render_dataframe(df_view, height=min(680, (len(df_view)+1)*35 + 3))
+
+    show = df_view[["ID", "Cliente", "Franqueado", "Total", "Offline", "% Offline", "Situação", "Última ação", "Data última ação", "Status da ação", "Prazo Status"]].copy()
+    show["% Offline"] = show["% Offline"].map(lambda v: f"{float(v):.1f}%")
+    render_dataframe(show, height=min(720, (len(show)+1)*38 + 3))
+
 
 def render_central_acoes(dados: dict) -> None:
     st.markdown("### 📋 Central de Ações")
-    st.caption("Cadastro rápido, dashboards e acompanhamento separados para a tela ficar mais limpa e rápida.")
+    st.caption("Visão executiva para reunião + cadastro rápido + histórico operacional, usando a tabela `acoes_clientes`.")
 
     if not supabase_configurado():
         st.warning("⚠️ Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.")
@@ -1892,22 +2060,21 @@ def render_central_acoes(dados: dict) -> None:
 
     df_todas_acoes = carregar_todas_acoes()
 
-    sub_cadastro, sub_dash, sub_acoes, sub_clientes = st.tabs([
+    sub_dash, sub_cadastro, sub_acoes, sub_clientes = st.tabs([
+        "📊 Resumo executivo",
         "➕ Cadastrar ação",
-        "📊 Dashboards",
-        "📋 Ações registradas",
+        "🎯 Ações registradas",
         "🏢 Clientes",
     ])
-
-    with sub_cadastro:
-        render_form_cadastro_acao(dados, prefixo_key="central_acoes_v3")
 
     with sub_dash:
         render_dashboard_acoes(df_todas_acoes, dados)
 
+    with sub_cadastro:
+        render_form_cadastro_acao(dados, prefixo_key="central_acoes_v4")
+
     with sub_acoes:
-        st.markdown("#### Ações registradas")
-        render_lista_acoes(df_todas_acoes)
+        render_lista_acoes(df_todas_acoes, dados)
 
     with sub_clientes:
         render_clientes_central_acoes(dados, df_todas_acoes)
