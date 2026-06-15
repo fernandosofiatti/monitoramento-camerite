@@ -14,6 +14,7 @@ import glob
 import html
 import time
 import uuid
+import base64
 
 THEME_OPTIONS = {
     "theme.base": "light",
@@ -2566,6 +2567,24 @@ def carregar_clientes_prefeitura() -> dict:
         return {}
 
 
+@st.cache_data(ttl=60)
+def carregar_clientes_franqueado() -> dict:
+    """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Franqueado}."""
+    if not os.path.exists(XLSX_CLIENTES):
+        return {}
+    try:
+        df = pd.read_excel(XLSX_CLIENTES, engine="openpyxl")
+        if df.empty:
+            return {}
+        col_id = next((c for c in df.columns if "whitelabel" in str(c).lower() or str(c).lower().strip() in ("id", "id_cliente")), df.columns[0])
+        col_franq = next((c for c in df.columns if "franqueado" in str(c).lower() or "franquia" in str(c).lower()), None)
+        if col_franq is None:
+            return {}
+        return dict(zip(df[col_id].astype(str).str.strip(), df[col_franq].astype(str).replace({"nan": ""}).str.strip()))
+    except Exception:
+        return {}
+
+
 def parse_prefeitura_localidade(valor: str) -> tuple[str | None, str | None]:
     valor = str(valor or "").strip()
     if not valor:
@@ -2806,6 +2825,7 @@ def processar_df_gov(df: pd.DataFrame, clientes_map: dict) -> dict:
     """
     df = df.copy()
     df.columns = [c.strip() for c in df.columns]
+    franqueados_map = carregar_clientes_franqueado()
 
     # ── Filtrar apenas clientes do xlsx (se xlsx foi carregado) ──
     if clientes_map:
@@ -2831,7 +2851,8 @@ def processar_df_gov(df: pd.DataFrame, clientes_map: dict) -> dict:
     resultado = {}
     for wl_id, grupo in df.groupby(df[COL_WL].astype(str).str.strip()):
         nome_cliente = clientes_map.get(wl_id, f"ID {wl_id}")
-        nome_empresa = grupo[COL_EMPRESA].iloc[0] if COL_EMPRESA in grupo.columns else ""
+        nome_empresa_csv = grupo[COL_EMPRESA].iloc[0] if COL_EMPRESA in grupo.columns else ""
+        nome_empresa = franqueados_map.get(wl_id, nome_empresa_csv) or nome_empresa_csv
         cidade = grupo[city_col].iloc[0] if city_col in grupo.columns else ""
         estado = grupo[state_col].iloc[0] if state_col in grupo.columns else ""
         cidade_estado = ""
@@ -3902,6 +3923,174 @@ def montar_df_tempo(dados: dict) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).sort_values("_horas", ascending=False)
+
+
+def slug_arquivo(valor: str) -> str:
+    texto = unicodedata.normalize("NFKD", str(valor or "relatorio")).encode("ascii", "ignore").decode("ascii")
+    texto = re.sub(r"[^A-Za-z0-9_-]+", "_", texto).strip("_").lower()
+    return texto or "relatorio"
+
+
+def _status_relatorio_franquia(pct: float, offline: int) -> tuple[str, str, str]:
+    if offline <= 0:
+        return "Saudável", "#059669", "#D1FAE5"
+    if pct > 10:
+        return "Crítico", "#DC2626", "#FEE2E2"
+    if pct > 5:
+        return "Atenção", "#D97706", "#FEF3C7"
+    return "Saudável", "#059669", "#D1FAE5"
+
+
+def gerar_relatorio_franquia_html(nome_franquia: str, df_clientes_franquia: pd.DataFrame, dados: dict) -> str:
+    """Gera HTML pronto para colar no corpo do e-mail da franquia."""
+    nome_franquia = str(nome_franquia or "Sem franquia").strip()
+    df_rel = df_clientes_franquia.copy()
+    total_clientes_rel = int(len(df_rel))
+    total_cameras_rel = int(pd.to_numeric(df_rel.get("Total", 0), errors="coerce").fillna(0).sum()) if not df_rel.empty else 0
+    total_offline_rel = int(pd.to_numeric(df_rel.get("Offline", 0), errors="coerce").fillna(0).sum()) if not df_rel.empty else 0
+    pct_rel = round(total_offline_rel / total_cameras_rel * 100, 2) if total_cameras_rel else 0.0
+    data_ref = carregar_ultima_atualizacao_base()
+    data_geracao = agora_sao_paulo_str("%d/%m/%Y %H:%M")
+    status_geral, status_cor, status_bg = _status_relatorio_franquia(pct_rel, total_offline_rel)
+
+    linhas_clientes = []
+    linhas_offline = []
+    if not df_rel.empty:
+        df_rel = df_rel.sort_values(["% Offline", "Offline", "Cliente"], ascending=[False, False, True])
+        for _, row in df_rel.iterrows():
+            cliente = str(row.get("Cliente", ""))
+            wl_id = str(row.get("ID", ""))
+            total = int(row.get("Total", 0) or 0)
+            offline = int(row.get("Offline", 0) or 0)
+            online = int(row.get("Online", max(total - offline, 0)) or 0)
+            pct = float(row.get("% Offline", 0) or 0)
+            status_txt, status_cor_linha, status_bg_linha = _status_relatorio_franquia(pct, offline)
+            linhas_clientes.append(
+                f'<tr>'
+                f'<td style="padding:10px 12px;border-bottom:1px solid #E9D5FF;color:#171126;font-weight:700">{escape_html(cliente)}<br><span style="font-size:11px;color:#8B7AA3;font-weight:500">ID {escape_html(wl_id)}</span></td>'
+                f'<td style="padding:10px 12px;border-bottom:1px solid #E9D5FF;text-align:right;color:#171126">{total}</td>'
+                f'<td style="padding:10px 12px;border-bottom:1px solid #E9D5FF;text-align:right;color:#059669;font-weight:700">{online}</td>'
+                f'<td style="padding:10px 12px;border-bottom:1px solid #E9D5FF;text-align:right;color:#DC2626;font-weight:700">{offline}</td>'
+                f'<td style="padding:10px 12px;border-bottom:1px solid #E9D5FF;text-align:right;color:#171126;font-weight:700">{pct:.1f}%</td>'
+                f'<td style="padding:10px 12px;border-bottom:1px solid #E9D5FF;text-align:center"><span style="display:inline-block;background:{status_bg_linha};color:{status_cor_linha};border-radius:999px;padding:4px 9px;font-size:11px;font-weight:800">{status_txt}</span></td>'
+                f'</tr>'
+            )
+            info = dados.get(wl_id, {})
+            df_off = info.get("offline", pd.DataFrame())
+            if df_off is not None and not df_off.empty:
+                for _, cam in df_off.head(80).iterrows():
+                    td = cam.get("_tempo_off", timedelta(seconds=-1))
+                    tempo = fmt_tempo(td) if isinstance(td, timedelta) and td.total_seconds() >= 0 else "N/D"
+                    ult = cam.get(COL_ULT_ATU, "")
+                    ult_txt = ult.strftime("%d/%m/%Y %H:%M") if isinstance(ult, pd.Timestamp) else str(ult or "N/D")
+                    linhas_offline.append(
+                        f'<tr>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #F3E8FF;color:#171126;font-weight:700">{escape_html(cliente)}</td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #F3E8FF;color:#171126">{escape_html(cam.get(COL_ID_CAM, ""))}</td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #F3E8FF;color:#171126">{escape_html(cam.get(COL_NOME_CAM, ""))}</td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #F3E8FF;color:#6B5A7A">{escape_html(ult_txt)}</td>'
+                        f'<td style="padding:9px 10px;border-bottom:1px solid #F3E8FF;color:#DC2626;font-weight:700">{escape_html(tempo)}</td>'
+                        f'</tr>'
+                    )
+
+    tabela_offline = '<div style="background:#ECFDF5;border:1px solid #A7F3D0;border-radius:12px;padding:14px;color:#047857;font-weight:700;margin-top:18px">Nenhuma câmera offline identificada para esta franquia.</div>'
+    if linhas_offline:
+        tabela_offline = (
+            '<h2 style="font-size:18px;color:#171126;margin:26px 0 10px">Câmeras offline</h2>'
+            '<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;background:#FFFFFF;border:1px solid #E9D5FF;border-radius:12px;overflow:hidden">'
+            '<thead><tr style="background:#F3E8FF">'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Cliente</th>'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">ID Câmera</th>'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Nome da Câmera</th>'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Última vez online</th>'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Tempo offline</th>'
+            '</tr></thead><tbody>' + ''.join(linhas_offline) + '</tbody></table>'
+            '<p style="font-size:11px;color:#8B7AA3;margin-top:8px">Obs.: quando houver muitas câmeras offline, o relatório limita a listagem a 80 câmeras por cliente para manter o e-mail leve.</p>'
+        )
+
+    return f"""<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#FAF7FF;font-family:Arial,Helvetica,sans-serif;color:#171126">
+<div style="max-width:980px;margin:0 auto;padding:24px">
+    <div style="background:linear-gradient(135deg,#5B21B6,#7C3AED,#A855F7);border-radius:18px;padding:24px;color:#FFFFFF">
+        <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;opacity:.9">Camerite BI · Monitoramento</div>
+        <h1 style="font-size:26px;line-height:1.2;margin:8px 0 4px">Relatório por franquia</h1>
+        <div style="font-size:16px;font-weight:700">{escape_html(nome_franquia)}</div>
+        <div style="font-size:12px;margin-top:12px;opacity:.9">Base: {escape_html(data_ref)} · Gerado em: {escape_html(data_geracao)}</div>
+    </div>
+    <div style="display:block;background:#FFFFFF;border:1px solid #E9D5FF;border-radius:16px;padding:18px;margin-top:16px">
+        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse"><tr>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Clientes</div><div style="font-size:28px;font-weight:900;color:#7C3AED">{total_clientes_rel}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Câmeras</div><div style="font-size:28px;font-weight:900;color:#171126">{total_cameras_rel}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Online</div><div style="font-size:28px;font-weight:900;color:#059669">{total_cameras_rel-total_offline_rel}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Offline</div><div style="font-size:28px;font-weight:900;color:#DC2626">{total_offline_rel}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">% Offline</div><div style="font-size:28px;font-weight:900;color:{status_cor}">{pct_rel:.1f}%</div><span style="display:inline-block;background:{status_bg};color:{status_cor};border-radius:999px;padding:4px 9px;font-size:11px;font-weight:800">{status_geral}</span></td>
+        </tr></table>
+    </div>
+    <h2 style="font-size:18px;color:#171126;margin:26px 0 10px">Resumo por cliente</h2>
+    <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;background:#FFFFFF;border:1px solid #E9D5FF;border-radius:12px;overflow:hidden">
+        <thead><tr style="background:#F3E8FF">
+            <th align="left" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Cliente</th><th align="right" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Total</th><th align="right" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Online</th><th align="right" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Offline</th><th align="right" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">% Offline</th><th align="center" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Status</th>
+        </tr></thead><tbody>{''.join(linhas_clientes)}</tbody>
+    </table>
+    {tabela_offline}
+    <p style="font-size:12px;color:#6B5A7A;margin-top:22px;line-height:1.5">Este relatório foi gerado automaticamente a partir da base atual do monitoramento. Para tratativas, priorizar clientes com maior percentual offline e câmeras com maior tempo sem atualização.</p>
+</div></body></html>"""
+
+
+def gerar_eml_relatorio_franquia(nome_franquia: str, html_body: str) -> bytes:
+    assunto = f"Relatório de Monitoramento - {nome_franquia}"
+    corpo_b64 = base64.b64encode(html_body.encode("utf-8")).decode("ascii")
+    eml = f"Subject: {assunto}\nMIME-Version: 1.0\nContent-Type: text/html; charset=utf-8\nContent-Transfer-Encoding: base64\n\n{corpo_b64}\n"
+    return eml.encode("utf-8")
+
+
+def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict) -> None:
+    st.markdown("#### 📧 Relatório por franquia")
+    st.caption("Gere um HTML pronto para colar no corpo do e-mail ou um arquivo .eml para abrir no Outlook.")
+    if df_clientes_ops is None or df_clientes_ops.empty or "Franqueado" not in df_clientes_ops.columns:
+        st.info("Nenhum dado de franquia encontrado. Confira se o arquivo nome_clientes.xlsx possui a coluna Franqueado.")
+        return
+    df_base = df_clientes_ops.copy()
+    df_base["Franqueado"] = df_base["Franqueado"].fillna("").astype(str).str.strip()
+    df_base = df_base[df_base["Franqueado"] != ""].copy()
+    if df_base.empty:
+        st.info("Nenhuma franquia preenchida na base de clientes.")
+        return
+    resumo = df_base.groupby("Franqueado", as_index=False).agg(Clientes=("ID", "count"), Total=("Total", "sum"), Offline=("Offline", "sum")).sort_values(["Offline", "Clientes", "Franqueado"], ascending=[False, False, True]).reset_index(drop=True)
+    resumo["Online"] = resumo["Total"] - resumo["Offline"]
+    resumo["% Offline"] = (resumo["Offline"] / resumo["Total"].replace({0: pd.NA}) * 100).fillna(0).round(1)
+    col_sel, col_busca = st.columns([2, 1])
+    with col_busca:
+        termo = st.text_input("Buscar franquia", key="busca_relatorio_franquia", placeholder="Digite parte do nome…").strip()
+    resumo_view = resumo[resumo["Franqueado"].str.upper().str.contains(re.escape(termo.upper()), na=False)].copy() if termo else resumo.copy()
+    with col_sel:
+        opcoes = resumo_view["Franqueado"].tolist()
+        franquia_preview = st.selectbox("Pré-visualizar franquia", opcoes, key="preview_relatorio_franquia") if opcoes else None
+    if resumo_view.empty:
+        st.info("Nenhuma franquia encontrada para a busca.")
+        return
+    st.markdown("##### Franquias disponíveis")
+    render_dataframe(resumo_view, height=min(420, (len(resumo_view) + 1) * 35 + 3))
+    st.markdown("##### Gerar arquivos")
+    for _, row in resumo_view.iterrows():
+        franquia = str(row["Franqueado"])
+        df_franquia = df_base[df_base["Franqueado"].eq(franquia)].copy()
+        html_rel = gerar_relatorio_franquia_html(franquia, df_franquia, dados)
+        nome_base = f"relatorio_monitoramento_{slug_arquivo(franquia)}_{agora_sao_paulo_str('%Y%m%d_%H%M')}"
+        st.markdown(f"""
+        <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:12px;padding:12px 14px;margin:8px 0;box-shadow:0 8px 22px rgba(91,33,182,.06)">
+            <div style="font-size:14px;font-weight:800;color:#171126">{escape_html(franquia)}</div>
+            <div style="font-size:12px;color:#6B5A7A">{int(row['Clientes'])} clientes · {int(row['Total'])} câmeras · {int(row['Offline'])} offline · {float(row['% Offline']):.1f}% offline</div>
+        </div>
+        """, unsafe_allow_html=True)
+        c_html, c_eml = st.columns(2)
+        c_html.download_button("⬇ Baixar HTML", data=html_rel.encode("utf-8"), file_name=f"{nome_base}.html", mime="text/html", use_container_width=True, key=f"dl_html_franquia_{slug_arquivo(franquia)}")
+        c_eml.download_button("✉ Baixar e abrir no Outlook (.eml)", data=gerar_eml_relatorio_franquia(franquia, html_rel), file_name=f"{nome_base}.eml", mime="message/rfc822", use_container_width=True, key=f"dl_eml_franquia_{slug_arquivo(franquia)}")
+    if franquia_preview:
+        st.markdown("##### Prévia do HTML")
+        html_preview = gerar_relatorio_franquia_html(franquia_preview, df_base[df_base["Franqueado"].eq(franquia_preview)].copy(), dados)
+        st.components.v1.html(html_preview, height=650, scrolling=True)
 
 def montar_df_clientes(dados: dict, tendencias: dict | None = None, delta_offs: dict | None = None,
                        recorrencia: dict | None = None) -> pd.DataFrame:
@@ -5015,352 +5204,357 @@ def main():
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
     with tabs[1]:
-        # Quando um cliente está aberto, não renderiza todos os cards novamente.
-        # Isso deixa o clique em "Ver detalhes" muito mais rápido.
-        if "detalhe" not in st.session_state:
-            # Filtros vetorizados.
-            # Agora a aba renderiza todos os clientes do recorte na mesma tela, sem paginação.
-            df_clientes_view = df_clientes_ops.copy()
-            if "ID" in df_clientes_view.columns:
-                df_clientes_view["ID"] = df_clientes_view["ID"].astype(str)
-            for col_txt in ["Cliente", "Franqueado", "Status"]:
-                if col_txt in df_clientes_view.columns:
-                    df_clientes_view[col_txt] = df_clientes_view[col_txt].fillna("").astype(str)
+        clientes_subtabs = st.tabs(["Painel de clientes", "Relatório por franquia"])
+        with clientes_subtabs[0]:
+            # Quando um cliente está aberto, não renderiza todos os cards novamente.
+            # Isso deixa o clique em "Ver detalhes" muito mais rápido.
+            if "detalhe" not in st.session_state:
+                # Filtros vetorizados.
+                # Agora a aba renderiza todos os clientes do recorte na mesma tela, sem paginação.
+                df_clientes_view = df_clientes_ops.copy()
+                if "ID" in df_clientes_view.columns:
+                    df_clientes_view["ID"] = df_clientes_view["ID"].astype(str)
+                for col_txt in ["Cliente", "Franqueado", "Status"]:
+                    if col_txt in df_clientes_view.columns:
+                        df_clientes_view[col_txt] = df_clientes_view[col_txt].fillna("").astype(str)
     
-            franqueados = ["Todos"] + sorted([
-                x for x in df_clientes_view["Franqueado"].dropna().unique().tolist()
-                if str(x).strip()
-            ])
+                franqueados = ["Todos"] + sorted([
+                    x for x in df_clientes_view["Franqueado"].dropna().unique().tolist()
+                    if str(x).strip()
+                ])
     
-            if "status_filter" not in st.session_state:
-                st.session_state["status_filter"] = "Todos"
+                if "status_filter" not in st.session_state:
+                    st.session_state["status_filter"] = "Todos"
     
-            st.caption("Clique no grupo para filtrar os clientes conforme a faixa de % offline.")
-            btns = st.columns([1, 1, 1, 1])
-            status_anterior = st.session_state.get("status_filter", "Todos")
-            if btns[0].button("Todos", key="clientes_status_todos"):
-                st.session_state["status_filter"] = "Todos"
-            if btns[1].button("Saudável (0-5%)", key="clientes_status_saudavel"):
-                st.session_state["status_filter"] = "Saudável (0-5%)"
-            if btns[2].button("Atenção (5-10%)", key="clientes_status_atencao"):
-                st.session_state["status_filter"] = "Atenção (5-10%)"
-            if btns[3].button("Crítico (>10%)", key="clientes_status_critico"):
-                st.session_state["status_filter"] = "Crítico (>10%)"
+                st.caption("Clique no grupo para filtrar os clientes conforme a faixa de % offline.")
+                btns = st.columns([1, 1, 1, 1])
+                status_anterior = st.session_state.get("status_filter", "Todos")
+                if btns[0].button("Todos", key="clientes_status_todos"):
+                    st.session_state["status_filter"] = "Todos"
+                if btns[1].button("Saudável (0-5%)", key="clientes_status_saudavel"):
+                    st.session_state["status_filter"] = "Saudável (0-5%)"
+                if btns[2].button("Atenção (5-10%)", key="clientes_status_atencao"):
+                    st.session_state["status_filter"] = "Atenção (5-10%)"
+                if btns[3].button("Crítico (>10%)", key="clientes_status_critico"):
+                    st.session_state["status_filter"] = "Crítico (>10%)"
     
-            # Os filtros abaixo ficam dentro de um form para evitar recarregar a aba a cada tecla digitada.
-            with st.form("form_filtros_clientes", clear_on_submit=False):
-                col_search, col_franq, col_min = st.columns([2, 2, 1])
-                with col_search:
-                    busca_input = st.text_input(
-                        "Buscar",
-                        value=st.session_state.get("clientes_busca", ""),
-                        placeholder="Buscar cliente, franqueado ou ID…",
-                    )
-                with col_franq:
-                    filtro_franq_input = st.selectbox(
-                        "Franqueado",
-                        franqueados,
-                        index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
-                        if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
-                    )
-                with col_min:
-                    min_opcoes = [0, 10, 50, 100, 200]
-                    min_cameras_input = st.selectbox(
-                        "Min. câmeras",
-                        min_opcoes,
-                        index=min_opcoes.index(st.session_state.get("clientes_min", 0))
-                        if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
-                    )
-                aplicar_filtros = st.form_submit_button("Aplicar filtros", use_container_width=True)
-    
-            if aplicar_filtros:
-                st.session_state["clientes_busca"] = busca_input
-                st.session_state["clientes_franq"] = filtro_franq_input
-                st.session_state["clientes_min"] = min_cameras_input
-    
-            busca = st.session_state.get("clientes_busca", "").strip()
-            filtro_franq = st.session_state.get("clientes_franq", "Todos")
-            min_cameras = st.session_state.get("clientes_min", 0)
-            filtro = st.session_state.get("status_filter", "Todos")
-    
-            # Filtro vetorizado: evita loop com df_clientes_ops[df_clientes_ops['ID'] == wl_id].iloc[0].
-            mask = pd.Series(True, index=df_clientes_view.index)
-            if busca:
-                termo = busca.upper()
-                texto_busca = (
-                    df_clientes_view.get("Cliente", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                    + " " + df_clientes_view.get("Franqueado", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                    + " " + df_clientes_view.get("ID", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                )
-                mask &= texto_busca.str.contains(re.escape(termo), na=False)
-            if filtro_franq != "Todos":
-                mask &= df_clientes_view["Franqueado"].eq(filtro_franq)
-            if filtro != "Todos":
-                mask &= df_clientes_view["Status"].eq(filtro)
-            if min_cameras:
-                mask &= pd.to_numeric(df_clientes_view["Total"], errors="coerce").fillna(0).ge(min_cameras)
-    
-            df_filtrado = df_clientes_view.loc[mask].copy()
-            if not df_filtrado.empty:
-                df_filtrado = df_filtrado.sort_values("% Offline", ascending=False).reset_index(drop=True)
-    
-            if df_filtrado.empty:
-                st.info("Nenhum cliente encontrado com os filtros aplicados.")
-            else:
-                total_clientes_recorte = len(df_filtrado)
-    
-                c_res, c_dl = st.columns([4, 1.4])
-                c_res.caption(
-                    f"{total_clientes_recorte} clientes no recorte · "
-                    f"{int(df_filtrado['Offline'].sum())} câmeras offline · "
-                    f"exibindo todos os clientes"
-                )
-    
-                buf_filtro = io.BytesIO()
-                df_filtrado.drop(columns=["_score", "_max_horas"], errors="ignore").to_excel(
-                    buf_filtro, index=False, engine="openpyxl"
-                )
-                c_dl.download_button(
-                    "⬇ Exportar recorte",
-                    data=buf_filtro.getvalue(),
-                    file_name=f"clientes_filtrados_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
-    
-                ids_f = df_filtrado["ID"].astype(str).tolist()
-    
-                for linha in [ids_f[i:i + COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
-                    cols = st.columns(COLUNAS_PAINEL)
-                    for col, wl_id in zip(cols, linha):
-                        if wl_id in dados:
-                            render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
-    
-        # ── Detalhe de um cliente ──
-        if "detalhe" in st.session_state:
-            wl_id  = st.session_state["detalhe"]
-            v      = dados.get(wl_id, {"nome_cliente":"?","nome_empresa":"","offline":pd.DataFrame(),"total":0})
-            df_det = v["offline"].copy()
-            total_u= v["total"]
-            pct_d  = round(len(df_det)/total_u*100, 1) if total_u else 0
-            cor_d  = cor_hex(pct_d)
-            agora  = agora_sao_paulo()
-            nome_cliente_html = escape_html(v.get("cidade_estado") or v["nome_cliente"])
-            nome_empresa_html = escape_html(v["nome_empresa"])
-            wl_id_html = escape_html(wl_id)
-
-            st.markdown("<hr>", unsafe_allow_html=True)
-            html_det = (
-                '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap">'
-                '<div style="background:rgba(0,136,204,.12);border:1px solid rgba(0,136,204,.22);'
-                'border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;'
-                'color:#6D28D9;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento</div>'
-                '<div>'
-                + f'<div style="font-size:20px;font-weight:700;color:#7C3AED">{nome_cliente_html}</div>'
-                + f'<div style="font-size:12px;color:#8B7AA3">{nome_empresa_html} · ID: {wl_id_html}</div>'
-                + '</div>'
-                + f'<div style="margin-left:auto;font-size:13px;font-weight:700;color:{cor_d}">'
-                + f'{len(df_det)} offline de {total_u} câmeras ({pct_d}%)'
-                + '</div>'
-                + '</div>'
-            )
-            st.markdown(html_det, unsafe_allow_html=True)
-
-            df_cli_row = df_clientes_ops[df_clientes_ops["ID"] == wl_id]
-            if not df_cli_row.empty:
-                cli_row = df_cli_row.iloc[0]
-                delta_txt = "N/D" if pd.isna(cli_row["Delta Offline"]) else f"{int(cli_row['Delta Offline']):+d}"
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("Total", int(cli_row["Total"]))
-                m2.metric("Offline", int(cli_row["Offline"]), delta=delta_txt if delta_txt != "N/D" else None)
-                m3.metric("% Offline", f"{cli_row['% Offline']:.1f}%")
-                m4.metric("Maior tempo", cli_row["Maior Tempo"])
-
-            if df_det.empty:
-                st.success("Nenhuma câmera offline.")
-            else:
-                # Selecionar colunas relevantes e renomear para exibição
-                col_map = {
-                    COL_ID_CAM:   "ID da Câmera",
-                    COL_NOME_CAM: "Nome da Câmera",
-                    COL_ULT_ATU:  "Última vez Online",
-                    COL_OBS:      "Observações",
-                }
-                internal_cols = {COL_WL, COL_EMPRESA, COL_STATUS, "_tempo_off"}
-                base_cols = [COL_ID_CAM, COL_NOME_CAM, COL_ULT_ATU, COL_OBS]
-                cols_ex = [c for c in base_cols if c in df_det.columns] + [c for c in df_det.columns if c not in internal_cols and c not in base_cols]
-
-                if COL_ULT_ATU in df_det.columns:
-                    # Já vem ordenado por tempo offline (mais antigo primeiro)
-                    df_show = df_det[cols_ex].copy()
-                    df_show = df_show.rename(columns=col_map)
-
-                    # Adicionar coluna de tempo offline calculado
-                    if "Última vez Online" in df_show.columns:
-                        df_show.insert(
-                            df_show.columns.get_loc("Última vez Online") + 1,
-                            "Tempo Offline",
-                            df_det["_tempo_off"].apply(
-                                lambda td: fmt_tempo(td) if td.total_seconds() >= 0 else "N/D"
-                            ).values
+                # Os filtros abaixo ficam dentro de um form para evitar recarregar a aba a cada tecla digitada.
+                with st.form("form_filtros_clientes", clear_on_submit=False):
+                    col_search, col_franq, col_min = st.columns([2, 2, 1])
+                    with col_search:
+                        busca_input = st.text_input(
+                            "Buscar",
+                            value=st.session_state.get("clientes_busca", ""),
+                            placeholder="Buscar cliente, franqueado ou ID…",
                         )
-
-                    # Formatar data
-                    if "Última vez Online" in df_show.columns:
-                        df_show["Última vez Online"] = formatar_ultima_atualizacao(df_show["Última vez Online"])
+                    with col_franq:
+                        filtro_franq_input = st.selectbox(
+                            "Franqueado",
+                            franqueados,
+                            index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
+                            if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
+                        )
+                    with col_min:
+                        min_opcoes = [0, 10, 50, 100, 200]
+                        min_cameras_input = st.selectbox(
+                            "Min. câmeras",
+                            min_opcoes,
+                            index=min_opcoes.index(st.session_state.get("clientes_min", 0))
+                            if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
+                        )
+                    aplicar_filtros = st.form_submit_button("Aplicar filtros", use_container_width=True)
+    
+                if aplicar_filtros:
+                    st.session_state["clientes_busca"] = busca_input
+                    st.session_state["clientes_franq"] = filtro_franq_input
+                    st.session_state["clientes_min"] = min_cameras_input
+    
+                busca = st.session_state.get("clientes_busca", "").strip()
+                filtro_franq = st.session_state.get("clientes_franq", "Todos")
+                min_cameras = st.session_state.get("clientes_min", 0)
+                filtro = st.session_state.get("status_filter", "Todos")
+    
+                # Filtro vetorizado: evita loop com df_clientes_ops[df_clientes_ops['ID'] == wl_id].iloc[0].
+                mask = pd.Series(True, index=df_clientes_view.index)
+                if busca:
+                    termo = busca.upper()
+                    texto_busca = (
+                        df_clientes_view.get("Cliente", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                        + " " + df_clientes_view.get("Franqueado", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                        + " " + df_clientes_view.get("ID", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                    )
+                    mask &= texto_busca.str.contains(re.escape(termo), na=False)
+                if filtro_franq != "Todos":
+                    mask &= df_clientes_view["Franqueado"].eq(filtro_franq)
+                if filtro != "Todos":
+                    mask &= df_clientes_view["Status"].eq(filtro)
+                if min_cameras:
+                    mask &= pd.to_numeric(df_clientes_view["Total"], errors="coerce").fillna(0).ge(min_cameras)
+    
+                df_filtrado = df_clientes_view.loc[mask].copy()
+                if not df_filtrado.empty:
+                    df_filtrado = df_filtrado.sort_values("% Offline", ascending=False).reset_index(drop=True)
+    
+                if df_filtrado.empty:
+                    st.info("Nenhum cliente encontrado com os filtros aplicados.")
                 else:
-                    df_show = df_det[cols_ex].copy().rename(columns=col_map)
-
-                df_show = df_show.reset_index(drop=True)
-                df_show.index += 1
-                st.caption(f"⬆ Ordenado por tempo offline — quem está há mais tempo sem sinal aparece primeiro")
-                render_dataframe(df_show, height=min(500,(len(df_show)+1)*35+3))
-
-                # Botões de exportação do detalhe (XLSX e CSV)
-                buf_xlsx = io.BytesIO()
-                df_show.to_excel(buf_xlsx, index=True, engine="openpyxl")
-                buf_xlsx.seek(0)
-
-                buf_csv = io.StringIO()
-                df_show.to_csv(buf_csv, index=True)
-                buf_csv.seek(0)
-
-                dl_col1, dl_col2 = st.columns([1,1])
-                with dl_col1:
-                    st.download_button(
-                        label="⬇ Exportar detalhe (.xlsx)",
-                        data=buf_xlsx.getvalue(),
-                        file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                    total_clientes_recorte = len(df_filtrado)
+    
+                    c_res, c_dl = st.columns([4, 1.4])
+                    c_res.caption(
+                        f"{total_clientes_recorte} clientes no recorte · "
+                        f"{int(df_filtrado['Offline'].sum())} câmeras offline · "
+                        f"exibindo todos os clientes"
+                    )
+    
+                    buf_filtro = io.BytesIO()
+                    df_filtrado.drop(columns=["_score", "_max_horas"], errors="ignore").to_excel(
+                        buf_filtro, index=False, engine="openpyxl"
+                    )
+                    c_dl.download_button(
+                        "⬇ Exportar recorte",
+                        data=buf_filtro.getvalue(),
+                        file_name=f"clientes_filtrados_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
-                with dl_col2:
-                    st.download_button(
-                        label="⬇ Exportar detalhe (.csv)",
-                        data=buf_csv.getvalue(),
-                        file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                    )
+    
+                    ids_f = df_filtrado["ID"].astype(str).tolist()
+    
+                    for linha in [ids_f[i:i + COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
+                        cols = st.columns(COLUNAS_PAINEL)
+                        for col, wl_id in zip(cols, linha):
+                            if wl_id in dados:
+                                render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
+    
+            # ── Detalhe de um cliente ──
+            if "detalhe" in st.session_state:
+                wl_id  = st.session_state["detalhe"]
+                v      = dados.get(wl_id, {"nome_cliente":"?","nome_empresa":"","offline":pd.DataFrame(),"total":0})
+                df_det = v["offline"].copy()
+                total_u= v["total"]
+                pct_d  = round(len(df_det)/total_u*100, 1) if total_u else 0
+                cor_d  = cor_hex(pct_d)
+                agora  = agora_sao_paulo()
+                nome_cliente_html = escape_html(v.get("cidade_estado") or v["nome_cliente"])
+                nome_empresa_html = escape_html(v["nome_empresa"])
+                wl_id_html = escape_html(wl_id)
 
-                # Mini-métricas de tempo
-                if "_tempo_off" in df_det.columns:
-                    validos = df_det["_tempo_off"][df_det["_tempo_off"].dt.total_seconds() >= 0]
-                    if not validos.empty:
-                        col_t1, col_t2, col_t3 = st.columns(3)
-                        mais_antigo = validos.max()
-                        media_td    = validos.mean()
-                        acima_24h   = (validos.dt.total_seconds() >= 86400).sum()
-                        col_t1.metric("⏱️ Mais tempo offline", fmt_tempo(mais_antigo))
-                        col_t2.metric("📊 Tempo médio offline", fmt_tempo(media_td))
-                        col_t3.metric("🔴 Acima de 24h", f"{acima_24h} câmeras")
+                st.markdown("<hr>", unsafe_allow_html=True)
+                html_det = (
+                    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap">'
+                    '<div style="background:rgba(0,136,204,.12);border:1px solid rgba(0,136,204,.22);'
+                    'border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;'
+                    'color:#6D28D9;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento</div>'
+                    '<div>'
+                    + f'<div style="font-size:20px;font-weight:700;color:#7C3AED">{nome_cliente_html}</div>'
+                    + f'<div style="font-size:12px;color:#8B7AA3">{nome_empresa_html} · ID: {wl_id_html}</div>'
+                    + '</div>'
+                    + f'<div style="margin-left:auto;font-size:13px;font-weight:700;color:{cor_d}">'
+                    + f'{len(df_det)} offline de {total_u} câmeras ({pct_d}%)'
+                    + '</div>'
+                    + '</div>'
+                )
+                st.markdown(html_det, unsafe_allow_html=True)
 
-            # ─────────────────────────────────────────────
-            # SEÇÃO DE AÇÕES DO CLIENTE
-            # ─────────────────────────────────────────────
-            st.markdown("<hr>", unsafe_allow_html=True)
-            st.markdown("### 📋 Ações a realizar")
+                df_cli_row = df_clientes_ops[df_clientes_ops["ID"] == wl_id]
+                if not df_cli_row.empty:
+                    cli_row = df_cli_row.iloc[0]
+                    delta_txt = "N/D" if pd.isna(cli_row["Delta Offline"]) else f"{int(cli_row['Delta Offline']):+d}"
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1.metric("Total", int(cli_row["Total"]))
+                    m2.metric("Offline", int(cli_row["Offline"]), delta=delta_txt if delta_txt != "N/D" else None)
+                    m3.metric("% Offline", f"{cli_row['% Offline']:.1f}%")
+                    m4.metric("Maior tempo", cli_row["Maior Tempo"])
+
+                if df_det.empty:
+                    st.success("Nenhuma câmera offline.")
+                else:
+                    # Selecionar colunas relevantes e renomear para exibição
+                    col_map = {
+                        COL_ID_CAM:   "ID da Câmera",
+                        COL_NOME_CAM: "Nome da Câmera",
+                        COL_ULT_ATU:  "Última vez Online",
+                        COL_OBS:      "Observações",
+                    }
+                    internal_cols = {COL_WL, COL_EMPRESA, COL_STATUS, "_tempo_off"}
+                    base_cols = [COL_ID_CAM, COL_NOME_CAM, COL_ULT_ATU, COL_OBS]
+                    cols_ex = [c for c in base_cols if c in df_det.columns] + [c for c in df_det.columns if c not in internal_cols and c not in base_cols]
+
+                    if COL_ULT_ATU in df_det.columns:
+                        # Já vem ordenado por tempo offline (mais antigo primeiro)
+                        df_show = df_det[cols_ex].copy()
+                        df_show = df_show.rename(columns=col_map)
+
+                        # Adicionar coluna de tempo offline calculado
+                        if "Última vez Online" in df_show.columns:
+                            df_show.insert(
+                                df_show.columns.get_loc("Última vez Online") + 1,
+                                "Tempo Offline",
+                                df_det["_tempo_off"].apply(
+                                    lambda td: fmt_tempo(td) if td.total_seconds() >= 0 else "N/D"
+                                ).values
+                            )
+
+                        # Formatar data
+                        if "Última vez Online" in df_show.columns:
+                            df_show["Última vez Online"] = formatar_ultima_atualizacao(df_show["Última vez Online"])
+                    else:
+                        df_show = df_det[cols_ex].copy().rename(columns=col_map)
+
+                    df_show = df_show.reset_index(drop=True)
+                    df_show.index += 1
+                    st.caption(f"⬆ Ordenado por tempo offline — quem está há mais tempo sem sinal aparece primeiro")
+                    render_dataframe(df_show, height=min(500,(len(df_show)+1)*35+3))
+
+                    # Botões de exportação do detalhe (XLSX e CSV)
+                    buf_xlsx = io.BytesIO()
+                    df_show.to_excel(buf_xlsx, index=True, engine="openpyxl")
+                    buf_xlsx.seek(0)
+
+                    buf_csv = io.StringIO()
+                    df_show.to_csv(buf_csv, index=True)
+                    buf_csv.seek(0)
+
+                    dl_col1, dl_col2 = st.columns([1,1])
+                    with dl_col1:
+                        st.download_button(
+                            label="⬇ Exportar detalhe (.xlsx)",
+                            data=buf_xlsx.getvalue(),
+                            file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+                    with dl_col2:
+                        st.download_button(
+                            label="⬇ Exportar detalhe (.csv)",
+                            data=buf_csv.getvalue(),
+                            file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                        )
+
+                    # Mini-métricas de tempo
+                    if "_tempo_off" in df_det.columns:
+                        validos = df_det["_tempo_off"][df_det["_tempo_off"].dt.total_seconds() >= 0]
+                        if not validos.empty:
+                            col_t1, col_t2, col_t3 = st.columns(3)
+                            mais_antigo = validos.max()
+                            media_td    = validos.mean()
+                            acima_24h   = (validos.dt.total_seconds() >= 86400).sum()
+                            col_t1.metric("⏱️ Mais tempo offline", fmt_tempo(mais_antigo))
+                            col_t2.metric("📊 Tempo médio offline", fmt_tempo(media_td))
+                            col_t3.metric("🔴 Acima de 24h", f"{acima_24h} câmeras")
+
+                # ─────────────────────────────────────────────
+                # SEÇÃO DE AÇÕES DO CLIENTE
+                # ─────────────────────────────────────────────
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown("### 📋 Ações a realizar")
             
-            # Verificar configuração
-            if not supabase_configurado():
-                st.warning("⚠️ Supabase não configurado. As ações não podem ser salvas.")
-            else:
-                tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
-                if not tabela_existe:
-                    st.error("🚨 Não foi possível acessar a tabela acoes_clientes")
-                    st.info(msg_tabela)
+                # Verificar configuração
+                if not supabase_configurado():
+                    st.warning("⚠️ Supabase não configurado. As ações não podem ser salvas.")
+                else:
+                    tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
+                    if not tabela_existe:
+                        st.error("🚨 Não foi possível acessar a tabela acoes_clientes")
+                        st.info(msg_tabela)
             
-            with st.expander("✏️ Gerenciar ações", expanded=False):
-                # Carregar ações existentes
-                df_acoes = carregar_acoes_cliente(wl_id)
+                with st.expander("✏️ Gerenciar ações", expanded=False):
+                    # Carregar ações existentes
+                    df_acoes = carregar_acoes_cliente(wl_id)
                 
-                if df_acoes is not None and not df_acoes.empty:
-                    st.subheader("Ações registradas")
-                    for _, acao in df_acoes.iterrows():
-                        col_acao_data, col_acao_status, col_acao_del = st.columns([3, 1.5, 1])
+                    if df_acoes is not None and not df_acoes.empty:
+                        st.subheader("Ações registradas")
+                        for _, acao in df_acoes.iterrows():
+                            col_acao_data, col_acao_status, col_acao_del = st.columns([3, 1.5, 1])
                         
-                        data_criacao = acao.get("data_criacao", "N/D")
-                        if isinstance(data_criacao, str) and "T" in data_criacao:
-                            data_criacao = data_criacao.split("T")[0]
+                            data_criacao = acao.get("data_criacao", "N/D")
+                            if isinstance(data_criacao, str) and "T" in data_criacao:
+                                data_criacao = data_criacao.split("T")[0]
                         
-                        status_atual = acao.get("status_acao", "Pendente")
+                            status_atual = acao.get("status_acao", "Pendente")
                         
-                        with col_acao_data:
-                            st.markdown(f"""
-                            <div style="padding:12px 14px;background:#f8fafc;border:1px solid #E9D5FF;border-radius:8px">
-                                <div style="font-size:11px;color:#8B7AA3;font-weight:700;text-transform:uppercase;margin-bottom:4px">Ação</div>
-                                <div style="font-size:13px;color:#171126;margin-bottom:8px"><strong>{acao.get('o_que_foi_feito', 'N/D')}</strong></div>
-                                <div style="font-size:10px;color:#8B7AA3">📅 {data_criacao}</div>
-                                {f"<div style='font-size:10px;color:#8B7AA3'>⏰ Prazo: {acao.get('prazo_ajustes', 'Sem prazo')}</div>" if acao.get('prazo_ajustes') else ""}
-                            </div>
-                            """, unsafe_allow_html=True)
+                            with col_acao_data:
+                                st.markdown(f"""
+                                <div style="padding:12px 14px;background:#f8fafc;border:1px solid #E9D5FF;border-radius:8px">
+                                    <div style="font-size:11px;color:#8B7AA3;font-weight:700;text-transform:uppercase;margin-bottom:4px">Ação</div>
+                                    <div style="font-size:13px;color:#171126;margin-bottom:8px"><strong>{acao.get('o_que_foi_feito', 'N/D')}</strong></div>
+                                    <div style="font-size:10px;color:#8B7AA3">📅 {data_criacao}</div>
+                                    {f"<div style='font-size:10px;color:#8B7AA3'>⏰ Prazo: {acao.get('prazo_ajustes', 'Sem prazo')}</div>" if acao.get('prazo_ajustes') else ""}
+                                </div>
+                                """, unsafe_allow_html=True)
                         
-                        with col_acao_status:
-                            novo_status = st.selectbox(
+                            with col_acao_status:
+                                novo_status = st.selectbox(
+                                    "Status",
+                                    ["Pendente", "Concluído"],
+                                    index=0 if status_atual == "Pendente" else 1,
+                                    key=f"status_{acao.get('id', '')}"
+                                )
+                                if novo_status != status_atual:
+                                    sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                                    if sucesso:
+                                        st.success("Atualizado!", icon="✅")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                        
+                            with col_acao_del:
+                                st.write("")  # spacing
+                    else:
+                        st.info("Nenhuma ação registrada para este cliente.")
+                
+                    st.divider()
+                    st.subheader("Adicionar nova ação")
+                
+                    with st.form(f"form_acao_{wl_id}", clear_on_submit=True):
+                        acao_texto = st.text_area(
+                            "O que foi feito",
+                            placeholder="Descreva a ação tomada (ex: Abrir chamado com técnico, Enviar comunicado, etc.)",
+                            height=100,
+                            key=f"acao_texto_{wl_id}"
+                        )
+                    
+                        col_prazo, col_status = st.columns(2)
+                        with col_prazo:
+                            prazo = st.date_input(
+                                "Prazo para ajustes",
+                                value=None,
+                                format="DD/MM/YYYY",
+                                key=f"prazo_acao_{wl_id}"
+                            )
+                        with col_status:
+                            status_acao = st.selectbox(
                                 "Status",
                                 ["Pendente", "Concluído"],
-                                index=0 if status_atual == "Pendente" else 1,
-                                key=f"status_{acao.get('id', '')}"
+                                key=f"status_nova_acao_{wl_id}"
                             )
-                            if novo_status != status_atual:
-                                sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                    
+                        if st.form_submit_button("➕ Registrar ação", use_container_width=True):
+                            if not acao_texto.strip():
+                                st.error("Descreva a ação a ser realizada")
+                            else:
+                                prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
+                                sucesso, msg = salvar_acao_cliente(
+                                    id_whitelabel=wl_id,
+                                    nome_cliente=v.get("nome_cliente", ""),
+                                    o_que_foi_feito=acao_texto,
+                                    prazo_ajustes=prazo_str,
+                                    status_acao=status_acao
+                                )
                                 if sucesso:
-                                    st.success("Atualizado!", icon="✅")
+                                    st.success(msg)
                                     st.rerun()
                                 else:
                                     st.error(msg)
-                        
-                        with col_acao_del:
-                            st.write("")  # spacing
-                else:
-                    st.info("Nenhuma ação registrada para este cliente.")
-                
-                st.divider()
-                st.subheader("Adicionar nova ação")
-                
-                with st.form(f"form_acao_{wl_id}", clear_on_submit=True):
-                    acao_texto = st.text_area(
-                        "O que foi feito",
-                        placeholder="Descreva a ação tomada (ex: Abrir chamado com técnico, Enviar comunicado, etc.)",
-                        height=100,
-                        key=f"acao_texto_{wl_id}"
-                    )
-                    
-                    col_prazo, col_status = st.columns(2)
-                    with col_prazo:
-                        prazo = st.date_input(
-                            "Prazo para ajustes",
-                            value=None,
-                            format="DD/MM/YYYY",
-                            key=f"prazo_acao_{wl_id}"
-                        )
-                    with col_status:
-                        status_acao = st.selectbox(
-                            "Status",
-                            ["Pendente", "Concluído"],
-                            key=f"status_nova_acao_{wl_id}"
-                        )
-                    
-                    if st.form_submit_button("➕ Registrar ação", use_container_width=True):
-                        if not acao_texto.strip():
-                            st.error("Descreva a ação a ser realizada")
-                        else:
-                            prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
-                            sucesso, msg = salvar_acao_cliente(
-                                id_whitelabel=wl_id,
-                                nome_cliente=v.get("nome_cliente", ""),
-                                o_que_foi_feito=acao_texto,
-                                prazo_ajustes=prazo_str,
-                                status_acao=status_acao
-                            )
-                            if sucesso:
-                                st.success(msg)
-                                st.rerun()
-                            else:
-                                st.error(msg)
 
-            if st.button("← Voltar ao painel"):
-                del st.session_state["detalhe"]; st.rerun()
+                if st.button("← Voltar ao painel"):
+                    del st.session_state["detalhe"]; st.rerun()
+
+        with clientes_subtabs[1]:
+            render_relatorio_por_franquia(df_clientes_ops, dados)
 
     # ════════════════════════════════════════════
     # ABA 2 — CENTRAL DE AÇÕES
