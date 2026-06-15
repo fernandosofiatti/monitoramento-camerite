@@ -2051,7 +2051,7 @@ def render_lista_acoes(df_todas_acoes: pd.DataFrame, dados: dict | None = None) 
                     with col_edit_1:
                         novo_prazo = st.date_input(
                             "Prazo",
-                            value=prazo_valor,
+                            value=(prazo_valor or agora_sao_paulo().date()),
                             format="DD/MM/YYYY",
                             key=f"edit_prazo_{acao_id}",
                         )
@@ -2078,6 +2078,108 @@ def render_lista_acoes(df_todas_acoes: pd.DataFrame, dados: dict | None = None) 
                     else:
                         st.error(msg)
 
+
+
+def render_manutencao_acoes(df_todas_acoes: pd.DataFrame | None) -> None:
+    """Tela simples e estável para manutenção de ações já cadastradas."""
+    st.markdown("#### 🛠️ Manutenção de ações")
+    st.caption("Use esta área para atualizar status, prazo ou descrição sem abrir o Supabase.")
+
+    df_acoes = preparar_acoes_view(df_todas_acoes)
+    if df_acoes.empty:
+        st.info("Nenhuma ação cadastrada para manutenção.")
+        return
+
+    col_busca, col_status = st.columns([2, 1])
+    with col_busca:
+        termo = st.text_input(
+            "Buscar ação",
+            placeholder="Digite cliente, ID_Whitelabel ou parte da ação...",
+            key="manut_acoes_busca_v1",
+        ).strip().upper()
+    with col_status:
+        statuses = sorted(set([str(x or "Pendente") for x in df_acoes["status_acao"].dropna().tolist()]))
+        filtro_status = st.selectbox("Status", ["Todos"] + statuses, key="manut_acoes_status_v1")
+
+    df_filtrado = df_acoes.copy()
+    if filtro_status != "Todos":
+        df_filtrado = df_filtrado[df_filtrado["status_acao"].astype(str).eq(filtro_status)].copy()
+    if termo:
+        campo_busca = (
+            df_filtrado["nome_cliente"].astype(str) + " " +
+            df_filtrado["id_whitelabel"].astype(str) + " " +
+            df_filtrado["o_que_foi_feito"].astype(str)
+        ).str.upper()
+        df_filtrado = df_filtrado[campo_busca.str.contains(re.escape(termo), na=False)].copy()
+
+    df_filtrado = df_filtrado.sort_values("_data_sort", ascending=False, na_position="last").head(100)
+    if df_filtrado.empty:
+        st.warning("Nenhuma ação encontrada com esse filtro.")
+        return
+
+    def montar_label(row) -> str:
+        data = formatar_data_curta(row.get("data_criacao"))
+        cliente = str(row.get("nome_cliente") or "Cliente sem nome")[:70]
+        status = str(row.get("status_acao") or "Pendente")
+        texto = str(row.get("o_que_foi_feito") or "")[:80].replace("\n", " ")
+        return f"{data} · {cliente} · {status} · {texto}"
+
+    labels = [montar_label(row) for _, row in df_filtrado.iterrows()]
+    label_sel = st.selectbox("Selecione a ação para atualizar", labels, key="manut_acoes_select_v1")
+    acao = df_filtrado.iloc[labels.index(label_sel)]
+    acao_id = str(acao.get("id") or "").strip()
+
+    if not acao_id:
+        st.error("Esta ação está sem ID. Não consigo atualizar com segurança.")
+        return
+
+    status_texto, status_cor, status_emoji = status_acao_cor(acao.get("status_acao", "Pendente"))
+    st.markdown(f"""
+    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:16px;padding:16px 18px;margin:12px 0 16px;box-shadow:0 10px 24px rgba(91,33,182,.07)">
+        <div style="font-size:11px;color:#8B7AA3;font-weight:900;text-transform:uppercase;letter-spacing:.7px">Ação selecionada</div>
+        <div style="font-size:18px;color:#171126;font-weight:900;margin-top:4px">{escape_html(acao.get('nome_cliente','N/D'))}</div>
+        <div style="font-size:12px;color:#6B5A7A;margin-top:4px">ID {escape_html(acao.get('id_whitelabel',''))} · Criada em {escape_html(formatar_data_curta(acao.get('data_criacao')))}</div>
+        <div style="margin-top:10px"><span style="background:#F3E8FF;color:{status_cor};border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:900">{status_emoji} {escape_html(status_texto)}</span></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    opcoes_status = ["Pendente", "Em andamento", "Aguardando Cliente", "Concluído", "Cancelado"]
+    idx_status = opcoes_status.index(status_texto) if status_texto in opcoes_status else 0
+
+    prazo_atual = pd.to_datetime(acao.get("prazo_ajustes"), errors="coerce")
+    tem_prazo_atual = pd.notna(prazo_atual)
+    prazo_default = prazo_atual.date() if tem_prazo_atual else agora_sao_paulo().date()
+
+    with st.form(f"form_manut_acao_{acao_id}"):
+        novo_texto = st.text_area(
+            "Descrição da ação",
+            value=str(acao.get("o_que_foi_feito") or ""),
+            height=140,
+            key=f"manut_texto_{acao_id}",
+        )
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            novo_status = st.selectbox("Status", opcoes_status, index=idx_status, key=f"manut_status_{acao_id}")
+        with col2:
+            manter_prazo = st.checkbox("Usar prazo", value=bool(tem_prazo_atual), key=f"manut_tem_prazo_{acao_id}")
+        with col3:
+            novo_prazo_data = st.date_input("Prazo", value=prazo_default, format="DD/MM/YYYY", key=f"manut_prazo_{acao_id}")
+
+        salvar = st.form_submit_button("💾 Atualizar ação", use_container_width=True)
+
+    if salvar:
+        prazo_str = novo_prazo_data.strftime("%Y-%m-%d") if manter_prazo else None
+        sucesso, msg = atualizar_acao_cliente(
+            id_acao=acao_id,
+            o_que_foi_feito=novo_texto,
+            prazo_ajustes=prazo_str,
+            status_acao=novo_status,
+        )
+        if sucesso:
+            st.success(msg)
+            st.rerun()
+        else:
+            st.error(msg)
 
 def render_clientes_central_acoes(dados: dict, df_todas_acoes: pd.DataFrame | None) -> None:
     """Lista de clientes da Central de Ações com valores reais de offline e última ação."""
@@ -2131,9 +2233,10 @@ def render_central_acoes(dados: dict) -> None:
 
     df_todas_acoes = carregar_todas_acoes()
 
-    sub_dash, sub_cadastro, sub_acoes, sub_clientes = st.tabs([
+    sub_dash, sub_cadastro, sub_manutencao, sub_acoes, sub_clientes = st.tabs([
         "📊 Resumo executivo",
         "➕ Cadastrar ação",
+        "🛠️ Manutenção",
         "🎯 Ações registradas",
         "🏢 Clientes",
     ])
@@ -2142,7 +2245,10 @@ def render_central_acoes(dados: dict) -> None:
         render_dashboard_acoes(df_todas_acoes, dados)
 
     with sub_cadastro:
-        render_form_cadastro_acao(dados, prefixo_key="central_acoes_v4")
+        render_form_cadastro_acao(dados, prefixo_key="central_acoes_v5")
+
+    with sub_manutencao:
+        render_manutencao_acoes(df_todas_acoes)
 
     with sub_acoes:
         render_lista_acoes(df_todas_acoes, dados)
