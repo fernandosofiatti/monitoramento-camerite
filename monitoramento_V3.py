@@ -599,6 +599,16 @@ PASTA                     = os.getenv("CAMERITE_MONITORAMENTO_PASTA", BASE_DIR)
 
 CSV_GOV                   = os.path.join(PASTA, "GOV_extracao_cameras.csv")
 XLSX_CLIENTES             = os.path.join(PASTA, "nome_clientes.xlsx")
+
+
+def caminho_xlsx_clientes() -> str | None:
+    """Localiza a base de clientes, aceitando nome_clientes.xlsx ou variações como nome_clientes(1).xlsx."""
+    candidatos = [XLSX_CLIENTES]
+    candidatos.extend(sorted(glob.glob(os.path.join(PASTA, "nome_clientes*.xlsx")), key=lambda p: os.path.getmtime(p), reverse=True))
+    for caminho in candidatos:
+        if caminho and os.path.exists(caminho):
+            return caminho
+    return None
 IMPORTACAO_INDIVIDUAL_DIR = os.path.join(PASTA, "_BKPS_importacao_individual")
 DB_PATH                   = os.path.join(PASTA, "historico.db")
 GEO_CACHE_PATH            = os.path.join(PASTA, "geocode_cache.json")
@@ -2535,10 +2545,11 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
 @st.cache_data(ttl=60)
 def carregar_clientes() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: nome_cliente}."""
-    if not os.path.exists(XLSX_CLIENTES):
+    caminho_clientes = caminho_xlsx_clientes()
+    if not caminho_clientes:
         return {}
     try:
-        df = pd.read_excel(XLSX_CLIENTES, engine="openpyxl")
+        df = pd.read_excel(caminho_clientes, engine="openpyxl")
         # Aceitar qualquer variação de nome de coluna
         col_id = next((c for c in df.columns if "whitelabel" in c.lower() or "id" in c.lower()), df.columns[0])
         col_nom = next((c for c in df.columns if "nome" in c.lower() or "client" in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
@@ -2549,10 +2560,11 @@ def carregar_clientes() -> dict:
 @st.cache_data(ttl=60)
 def carregar_clientes_prefeitura() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Prefeitura / cidade-estado}."""
-    if not os.path.exists(XLSX_CLIENTES):
+    caminho_clientes = caminho_xlsx_clientes()
+    if not caminho_clientes:
         return {}
     try:
-        df = pd.read_excel(XLSX_CLIENTES, engine="openpyxl")
+        df = pd.read_excel(caminho_clientes, engine="openpyxl")
         col_id = next((c for c in df.columns if "whitelabel" in c.lower() or "id" in c.lower()), df.columns[0])
         col_city = next((c for c in df.columns if any(k in c.lower() for k in ("prefeitura", "cidade", "municipio", "city"))), None)
         col_state = next((c for c in df.columns if any(k in c.lower() for k in ("estado", "uf", "state"))), None)
@@ -2570,10 +2582,11 @@ def carregar_clientes_prefeitura() -> dict:
 @st.cache_data(ttl=60)
 def carregar_clientes_franqueado() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Franqueado}."""
-    if not os.path.exists(XLSX_CLIENTES):
+    caminho_clientes = caminho_xlsx_clientes()
+    if not caminho_clientes:
         return {}
     try:
-        df = pd.read_excel(XLSX_CLIENTES, engine="openpyxl")
+        df = pd.read_excel(caminho_clientes, engine="openpyxl")
         if df.empty:
             return {}
         col_id = next((c for c in df.columns if "whitelabel" in str(c).lower() or str(c).lower().strip() in ("id", "id_cliente")), df.columns[0])
@@ -4045,40 +4058,9 @@ def gerar_eml_relatorio_franquia(nome_franquia: str, html_body: str) -> bytes:
     return eml.encode("utf-8")
 
 
-def abrir_relatorio_no_outlook(nome_franquia: str, html_body: str) -> tuple[bool, str]:
-    """Abre um novo e-mail no Outlook Desktop com o relatório no corpo.
-
-    Importante: isso só funciona quando o Streamlit está rodando no Windows da
-    pessoa que tem o Outlook instalado. No Streamlit Cloud, o servidor não tem
-    acesso ao Outlook do computador do usuário.
-    """
-    try:
-        import win32com.client  # type: ignore
-    except Exception:
-        return (
-            False,
-            "Não consegui encontrar o módulo pywin32. Instale com: pip install pywin32. "
-            "Esta opção só funciona no Windows com Outlook Desktop instalado.",
-        )
-
-    try:
-        outlook = win32com.client.Dispatch("Outlook.Application")
-        mail = outlook.CreateItem(0)
-        mail.Subject = f"Relatório de Monitoramento - {nome_franquia}"
-
-        # Display primeiro carrega a assinatura padrão do Outlook. Depois o relatório
-        # é colocado acima dela, mantendo a assinatura do usuário quando existir.
-        mail.Display(False)
-        assinatura = mail.HTMLBody or ""
-        mail.HTMLBody = html_body + assinatura
-        return True, "E-mail aberto no Outlook com o relatório no corpo."
-    except Exception as e:
-        return False, f"Não consegui abrir o Outlook automaticamente: {e}"
-
-
 def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict) -> None:
     st.markdown("#### 📧 Relatório por franquia")
-    st.caption("Gere o HTML ou abra um novo e-mail no Outlook Desktop já com o relatório no corpo.")
+    st.caption("Gere um HTML pronto para colar no corpo do e-mail ou um arquivo .eml para abrir no Outlook.")
     if df_clientes_ops is None or df_clientes_ops.empty or "Franqueado" not in df_clientes_ops.columns:
         st.info("Nenhum dado de franquia encontrado. Confira se o arquivo nome_clientes.xlsx possui a coluna Franqueado.")
         return
@@ -4115,30 +4097,9 @@ def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict) ->
             <div style="font-size:12px;color:#6B5A7A">{int(row['Clientes'])} clientes · {int(row['Total'])} câmeras · {int(row['Offline'])} offline · {float(row['% Offline']):.1f}% offline</div>
         </div>
         """, unsafe_allow_html=True)
-        c_html, c_outlook, c_eml = st.columns(3)
-        slug_franquia = slug_arquivo(franquia)
-        c_html.download_button(
-            "⬇ Baixar HTML",
-            data=html_rel.encode("utf-8"),
-            file_name=f"{nome_base}.html",
-            mime="text/html",
-            use_container_width=True,
-            key=f"dl_html_franquia_{slug_franquia}",
-        )
-        if c_outlook.button("📨 Abrir no Outlook", use_container_width=True, key=f"open_outlook_franquia_{slug_franquia}"):
-            ok_outlook, msg_outlook = abrir_relatorio_no_outlook(franquia, html_rel)
-            if ok_outlook:
-                st.success(msg_outlook)
-            else:
-                st.error(msg_outlook)
-        c_eml.download_button(
-            "✉ Baixar .eml",
-            data=gerar_eml_relatorio_franquia(franquia, html_rel),
-            file_name=f"{nome_base}.eml",
-            mime="message/rfc822",
-            use_container_width=True,
-            key=f"dl_eml_franquia_{slug_franquia}",
-        )
+        c_html, c_eml = st.columns(2)
+        c_html.download_button("⬇ Baixar HTML", data=html_rel.encode("utf-8"), file_name=f"{nome_base}.html", mime="text/html", use_container_width=True, key=f"dl_html_franquia_{slug_arquivo(franquia)}")
+        c_eml.download_button("✉ Baixar e abrir no Outlook (.eml)", data=gerar_eml_relatorio_franquia(franquia, html_rel), file_name=f"{nome_base}.eml", mime="message/rfc822", use_container_width=True, key=f"dl_eml_franquia_{slug_arquivo(franquia)}")
     if franquia_preview:
         st.markdown("##### Prévia do HTML")
         html_preview = gerar_relatorio_franquia_html(franquia_preview, df_base[df_base["Franqueado"].eq(franquia_preview)].copy(), dados)
@@ -4799,6 +4760,7 @@ def main():
         "Evidências",
         "LPRs Offline",
         "Atualizar Base",
+        "Relatório Franquia",
     ])
 
     # ════════════════════════════════════════════
@@ -5256,7 +5218,9 @@ def main():
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
     with tabs[1]:
-        clientes_subtabs = st.tabs(["Painel de clientes", "Relatório por franquia"])
+        st.markdown("### 🏢 Clientes")
+        st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -6610,6 +6574,14 @@ def main():
     # ════════════════════════════════════════════
     with tabs[7]:
         render_aba_atualizar_base(df_origem)
+
+    # ════════════════════════════════════════════
+    # ABA 8 — RELATÓRIO FRANQUIA (atalho visível)
+    # ════════════════════════════════════════════
+    with tabs[8]:
+        st.markdown("### ✉️ Relatório por franquia")
+        st.caption("Atalho da mesma rotina disponível dentro de Clientes > Relatório por franquia.")
+        render_relatorio_por_franquia(df_clientes_ops, dados)
 
 
 if __name__ == "__main__":
