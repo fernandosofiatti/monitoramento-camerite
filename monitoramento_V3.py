@@ -1255,7 +1255,98 @@ create index if not exists idx_cameras_origem_status
 
 create index if not exists idx_cameras_origem_ultima_atualizacao
     on public.{SUPABASE_TABLE} (ultima_atualizacao);
+
+create table if not exists public.acoes_clientes (
+    id uuid default gen_random_uuid() primary key,
+    id_whitelabel text not null,
+    nome_cliente text,
+    o_que_foi_feito text not null,
+    prazo_ajustes date,
+    status_acao text default 'Pendente',
+    data_criacao timestamp default now(),
+    data_atualizacao timestamp default now()
+);
+
+create index if not exists idx_acoes_clientes_whitelabel
+    on public.acoes_clientes (id_whitelabel);
+
+create index if not exists idx_acoes_clientes_status
+    on public.acoes_clientes (status_acao);
 """.strip()
+
+def carregar_acoes_cliente(id_whitelabel: str) -> pd.DataFrame | None:
+    """Carrega todas as ações de um cliente do Supabase."""
+    if not supabase_configurado():
+        return None
+    
+    try:
+        resp = requests.get(
+            supabase_table_url("acoes_clientes"),
+            headers=supabase_headers(),
+            params={
+                "id_whitelabel": f"eq.{id_whitelabel}",
+                "order": "data_criacao.desc",
+            },
+            timeout=20,
+        )
+        if resp.status_code in (200, 206):
+            dados = resp.json()
+            if dados:
+                df = pd.DataFrame(dados)
+                return df
+        return pd.DataFrame()
+    except Exception:
+        return None
+
+def salvar_acao_cliente(id_whitelabel: str, nome_cliente: str, o_que_foi_feito: str, prazo_ajustes: str | None = None, status_acao: str = "Pendente") -> tuple[bool, str]:
+    """Salva uma nova ação para um cliente no Supabase."""
+    if not supabase_configurado():
+        return False, "Supabase não configurado"
+    
+    try:
+        payload = {
+            "id_whitelabel": id_whitelabel,
+            "nome_cliente": nome_cliente,
+            "o_que_foi_feito": o_que_foi_feito,
+            "status_acao": status_acao,
+        }
+        if prazo_ajustes:
+            payload["prazo_ajustes"] = prazo_ajustes
+        
+        resp = requests.post(
+            supabase_table_url("acoes_clientes"),
+            headers=supabase_headers("return=minimal"),
+            json=payload,
+            timeout=20,
+        )
+        if resp.status_code in (200, 201, 204):
+            return True, "Ação registrada com sucesso!"
+        else:
+            return False, f"Erro ao salvar: {resp.status_code}"
+    except Exception as e:
+        return False, f"Erro: {str(e)}"
+
+def atualizar_status_acao(id_acao: str, novo_status: str) -> tuple[bool, str]:
+    """Atualiza o status de uma ação no Supabase."""
+    if not supabase_configurado():
+        return False, "Supabase não configurado"
+    
+    try:
+        resp = requests.patch(
+            supabase_table_url("acoes_clientes") + f"?id=eq.{id_acao}",
+            headers=supabase_headers("return=minimal"),
+            json={
+                "status_acao": novo_status,
+                "data_atualizacao": agora_sao_paulo_str(),
+            },
+            timeout=20,
+        )
+        if resp.status_code in (200, 204):
+            return True, "Status atualizado!"
+        else:
+            return False, f"Erro ao atualizar: {resp.status_code}"
+    except Exception as e:
+        return False, f"Erro: {str(e)}"
 
 def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
     st.markdown("### Atualizar base online")
@@ -4248,6 +4339,98 @@ def main():
                         col_t1.metric("⏱️ Mais tempo offline", fmt_tempo(mais_antigo))
                         col_t2.metric("📊 Tempo médio offline", fmt_tempo(media_td))
                         col_t3.metric("🔴 Acima de 24h", f"{acima_24h} câmeras")
+
+            # ─────────────────────────────────────────────
+            # SEÇÃO DE AÇÕES DO CLIENTE
+            # ─────────────────────────────────────────────
+            st.markdown("<hr>", unsafe_allow_html=True)
+            st.markdown("### 📋 Ações a realizar")
+            
+            with st.expander("✏️ Gerenciar ações", expanded=False):
+                # Carregar ações existentes
+                df_acoes = carregar_acoes_cliente(wl_id)
+                
+                if df_acoes is not None and not df_acoes.empty:
+                    st.subheader("Ações registradas")
+                    for _, acao in df_acoes.iterrows():
+                        col_acao_data, col_acao_status, col_acao_del = st.columns([3, 1.5, 1])
+                        
+                        data_criacao = acao.get("data_criacao", "N/D")
+                        if isinstance(data_criacao, str) and "T" in data_criacao:
+                            data_criacao = data_criacao.split("T")[0]
+                        
+                        status_atual = acao.get("status_acao", "Pendente")
+                        
+                        with col_acao_data:
+                            st.markdown(f"""
+                            <div style="padding:12px 14px;background:#f8fafc;border:1px solid #E9D5FF;border-radius:8px">
+                                <div style="font-size:11px;color:#8B7AA3;font-weight:700;text-transform:uppercase;margin-bottom:4px">Ação</div>
+                                <div style="font-size:13px;color:#171126;margin-bottom:8px"><strong>{acao.get('o_que_foi_feito', 'N/D')}</strong></div>
+                                <div style="font-size:10px;color:#8B7AA3">📅 {data_criacao}</div>
+                                {f"<div style='font-size:10px;color:#8B7AA3'>⏰ Prazo: {acao.get('prazo_ajustes', 'Sem prazo')}</div>" if acao.get('prazo_ajustes') else ""}
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col_acao_status:
+                            novo_status = st.selectbox(
+                                "Status",
+                                ["Pendente", "Concluído"],
+                                index=0 if status_atual == "Pendente" else 1,
+                                key=f"status_{acao.get('id', '')}"
+                            )
+                            if novo_status != status_atual:
+                                sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                                if sucesso:
+                                    st.success("Atualizado!", icon="✅")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                        
+                        with col_acao_del:
+                            st.write("")  # spacing
+                else:
+                    st.info("Nenhuma ação registrada para este cliente.")
+                
+                st.divider()
+                st.subheader("Adicionar nova ação")
+                
+                with st.form(f"form_acao_{wl_id}", clear_on_submit=True):
+                    acao_texto = st.text_area(
+                        "O que foi feito",
+                        placeholder="Descreva a ação tomada (ex: Abrir chamado com técnico, Enviar comunicado, etc.)",
+                        height=100
+                    )
+                    
+                    col_prazo, col_status = st.columns(2)
+                    with col_prazo:
+                        prazo = st.date_input(
+                            "Prazo para ajustes",
+                            value=None,
+                            format="DD/MM/YYYY"
+                        )
+                    with col_status:
+                        status_acao = st.selectbox(
+                            "Status",
+                            ["Pendente", "Concluído"]
+                        )
+                    
+                    if st.form_submit_button("➕ Registrar ação", use_container_width=True):
+                        if not acao_texto.strip():
+                            st.error("Descreva a ação a ser realizada")
+                        else:
+                            prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
+                            sucesso, msg = salvar_acao_cliente(
+                                id_whitelabel=wl_id,
+                                nome_cliente=v.get("nome_cliente", ""),
+                                o_que_foi_feito=acao_texto,
+                                prazo_ajustes=prazo_str,
+                                status_acao=status_acao
+                            )
+                            if sucesso:
+                                st.success(msg)
+                                st.rerun()
+                            else:
+                                st.error(msg)
 
             if st.button("← Voltar ao painel"):
                 del st.session_state["detalhe"]; st.rerun()
