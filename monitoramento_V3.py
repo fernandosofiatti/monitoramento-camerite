@@ -1393,15 +1393,41 @@ def salvar_acao_cliente(id_whitelabel: str, nome_cliente: str, o_que_foi_feito: 
         payload["prazo_ajustes"] = str(prazo_ajustes)
 
     try:
+        url = supabase_table_url("acoes_clientes")
+        headers = supabase_headers("return=minimal")
         resp = requests.post(
-            supabase_table_url("acoes_clientes"),
-            headers=supabase_headers("return=minimal"),
+            url,
+            headers=headers,
             json=payload,
             timeout=20,
         )
         if resp.status_code in (200, 201, 204):
             limpar_cache_acoes()
             return True, "Ação registrada com sucesso!"
+
+        # Fallback: caso a tabela tenha sido criada manualmente sem alguma coluna opcional,
+        # tenta gravar apenas os campos essenciais. Isso evita perder o cadastro por
+        # diferença pequena de schema como data_atualizacao ausente.
+        if resp.status_code == 400:
+            payload_minimo = {
+                "id_whitelabel": id_whitelabel,
+                "nome_cliente": nome_cliente,
+                "o_que_foi_feito": o_que_foi_feito,
+                "status_acao": status_acao,
+            }
+            if prazo_ajustes:
+                payload_minimo["prazo_ajustes"] = str(prazo_ajustes)
+            resp2 = requests.post(
+                url,
+                headers=headers,
+                json=payload_minimo,
+                timeout=20,
+            )
+            if resp2.status_code in (200, 201, 204):
+                limpar_cache_acoes()
+                return True, "Ação registrada com sucesso!"
+            return False, erro_supabase_amigavel(resp2)
+
         return False, erro_supabase_amigavel(resp)
     except Exception as e:
         return False, f"Erro ao salvar ação no Supabase: {e}"
@@ -1476,6 +1502,280 @@ def criar_tabela_acoes_se_nao_existir() -> tuple[bool, str]:
         return False, erro_supabase_amigavel(resp)
     except Exception as e:
         return False, f"Erro ao verificar tabela acoes_clientes: {e}"
+
+
+
+def montar_opcoes_clientes_acoes(dados: dict) -> list[dict]:
+    """Monta uma lista leve de clientes para cadastro direto na Central de Ações."""
+    opcoes = []
+    for wl_id, v in (dados or {}).items():
+        total = int(v.get("total", 0) or 0)
+        offline = int(v.get("offline_count", 0) or 0)
+        pct = float(v.get("pct", 0) or 0)
+        nome_cliente = str(v.get("nome_cliente") or v.get("nome_empresa") or wl_id).strip()
+        nome_empresa = str(v.get("nome_empresa") or "").strip()
+        label = f"{nome_cliente} · ID {wl_id} · {offline}/{total} offline ({pct:.1f}%)"
+        opcoes.append({
+            "id_whitelabel": str(wl_id),
+            "nome_cliente": nome_cliente,
+            "nome_empresa": nome_empresa,
+            "total": total,
+            "offline": offline,
+            "pct": pct,
+            "label": label,
+            "busca": f"{nome_cliente} {nome_empresa} {wl_id}".upper(),
+        })
+    return sorted(opcoes, key=lambda x: (-x["offline"], x["nome_cliente"].upper()))
+
+
+def render_form_cadastro_acao(dados: dict, prefixo_key: str = "central") -> None:
+    """Formulário único e rápido para cadastrar ações sem abrir a aba Clientes."""
+    st.markdown("#### ➕ Cadastrar nova ação")
+    st.caption("Escolha o cliente aqui mesmo, registre o que foi feito e acompanhe tudo abaixo.")
+
+    opcoes_clientes = montar_opcoes_clientes_acoes(dados)
+    if not opcoes_clientes:
+        st.warning("Não encontrei clientes carregados para vincular a ação.")
+        return
+
+    termo = st.text_input(
+        "Buscar cliente",
+        placeholder="Digite parte do nome, cidade ou ID_Whitelabel...",
+        key=f"{prefixo_key}_busca_cliente_acao",
+    ).strip().upper()
+
+    opcoes_filtradas = [o for o in opcoes_clientes if not termo or termo in o["busca"]]
+    if not opcoes_filtradas:
+        st.warning("Nenhum cliente encontrado com esse filtro.")
+        return
+
+    # Limita visualmente para manter a tela rápida quando a base tem muitos clientes.
+    opcoes_filtradas = opcoes_filtradas[:80]
+    labels = [o["label"] for o in opcoes_filtradas]
+
+    with st.form(f"{prefixo_key}_form_nova_acao", clear_on_submit=True):
+        label_escolhido = st.selectbox(
+            "Cliente",
+            labels,
+            key=f"{prefixo_key}_cliente_acao_select",
+        )
+        cliente_sel = opcoes_filtradas[labels.index(label_escolhido)]
+
+        acao_texto = st.text_area(
+            "Ação realizada / ação combinada",
+            placeholder="Ex.: Cliente acionado no WhatsApp; técnico abriu chamado; prazo combinado para limpeza/ajuste...",
+            height=110,
+            key=f"{prefixo_key}_acao_texto",
+        )
+
+        col_prazo, col_status = st.columns(2)
+        with col_prazo:
+            prazo = st.date_input(
+                "Prazo para ajuste",
+                value=None,
+                format="DD/MM/YYYY",
+                key=f"{prefixo_key}_prazo_acao",
+            )
+        with col_status:
+            status_acao = st.selectbox(
+                "Status inicial",
+                ["Pendente", "Concluído"],
+                key=f"{prefixo_key}_status_acao",
+            )
+
+        submitted = st.form_submit_button("💾 Salvar ação", use_container_width=True)
+
+    if submitted:
+        prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
+        sucesso, msg = salvar_acao_cliente(
+            id_whitelabel=cliente_sel["id_whitelabel"],
+            nome_cliente=cliente_sel["nome_cliente"],
+            o_que_foi_feito=acao_texto,
+            prazo_ajustes=prazo_str,
+            status_acao=status_acao,
+        )
+        if sucesso:
+            st.success(msg)
+            st.rerun()
+        else:
+            st.error(msg)
+            with st.expander("Como resolver no Supabase", expanded=True):
+                st.markdown(
+                    "Verifique se a tabela `acoes_clientes` está exposta na API e se as policies de RLS permitem INSERT/SELECT/UPDATE para a chave usada no Streamlit."
+                )
+                st.code(sql_criacao_supabase(), language="sql")
+
+
+def status_prazo_acao(row) -> str:
+    if str(row.get("status_acao", "")).strip() == "Concluído":
+        return "✅ Concluído"
+
+    prazo_str = row.get("prazo_ajustes")
+    if prazo_str is None or str(prazo_str).strip() in ("", "None", "NaT", "nan"):
+        return "⏳ Sem prazo"
+
+    try:
+        prazo = pd.to_datetime(prazo_str, errors="coerce").date()
+        hoje = agora_sao_paulo().date()
+        dias_restantes = (prazo - hoje).days
+        if dias_restantes < 0:
+            return f"🚨 Vencido ({abs(dias_restantes)}d)"
+        if dias_restantes == 0:
+            return "⚠️ Vence hoje"
+        if dias_restantes <= 3:
+            return f"⚠️ {dias_restantes}d restantes"
+        return f"✓ {dias_restantes}d restantes"
+    except Exception:
+        return "⏳ Sem prazo"
+
+
+def render_lista_acoes(df_todas_acoes: pd.DataFrame) -> None:
+    """Renderiza KPIs, filtros e lista de ações."""
+    if df_todas_acoes is None or df_todas_acoes.empty:
+        st.info("Nenhuma ação registrada ainda. Cadastre a primeira pelo formulário acima.")
+        return
+
+    df_acoes_view = df_todas_acoes.copy()
+    for col in ["nome_cliente", "status_acao", "prazo_ajustes", "o_que_foi_feito", "data_criacao"]:
+        if col not in df_acoes_view.columns:
+            df_acoes_view[col] = ""
+
+    df_acoes_view["status_prazo_calc"] = df_acoes_view.apply(status_prazo_acao, axis=1)
+
+    total_acoes = len(df_acoes_view)
+    acoes_pendentes = int((df_acoes_view["status_acao"].astype(str) == "Pendente").sum())
+    acoes_concluidas = int((df_acoes_view["status_acao"].astype(str) == "Concluído").sum())
+    acoes_vencidas = int(df_acoes_view["status_prazo_calc"].astype(str).str.contains("Vencido", na=False).sum())
+
+    col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+    col_k1.metric("Total de ações", total_acoes, f"{acoes_concluidas} concluídas")
+    col_k2.metric("Pendentes", acoes_pendentes, "Em execução")
+    col_k3.metric("Concluídas", acoes_concluidas, f"{round(acoes_concluidas / total_acoes * 100, 0):.0f}%" if total_acoes else "0%")
+    col_k4.metric("Vencidas", acoes_vencidas, "Ação necessária" if acoes_vencidas else "Ok")
+
+    st.divider()
+
+    col_filtro1, col_filtro2, col_filtro3 = st.columns([1.2, 2, 1.4])
+    with col_filtro1:
+        filtro_status = st.selectbox("Status", ["Todos", "Pendente", "Concluído"], key="central_acoes_status_v2")
+    with col_filtro2:
+        filtro_cliente = st.text_input("Filtrar ações", placeholder="Cliente, ID ou texto da ação...", key="central_acoes_cliente_v2")
+    with col_filtro3:
+        ordem = st.selectbox("Ordenar por", ["Mais recente", "Prazo mais próximo", "Cliente A-Z"], key="central_acoes_ordem_v2")
+
+    mask = pd.Series(True, index=df_acoes_view.index)
+    if filtro_status != "Todos":
+        mask &= df_acoes_view["status_acao"].astype(str).eq(filtro_status)
+    if filtro_cliente.strip():
+        termo = filtro_cliente.upper().strip()
+        campo_busca = (
+            df_acoes_view.get("nome_cliente", "").astype(str) + " " +
+            df_acoes_view.get("id_whitelabel", "").astype(str) + " " +
+            df_acoes_view.get("o_que_foi_feito", "").astype(str)
+        ).str.upper()
+        mask &= campo_busca.str.contains(re.escape(termo), na=False)
+
+    df_filtrado = df_acoes_view[mask].copy()
+    if ordem == "Mais recente":
+        df_filtrado["_data_sort"] = pd.to_datetime(df_filtrado["data_criacao"], errors="coerce")
+        df_filtrado = df_filtrado.sort_values("_data_sort", ascending=False, na_position="last")
+    elif ordem == "Prazo mais próximo":
+        df_filtrado["_prazo_sort"] = pd.to_datetime(df_filtrado["prazo_ajustes"], errors="coerce")
+        df_filtrado = df_filtrado.sort_values("_prazo_sort", na_position="last")
+    else:
+        df_filtrado = df_filtrado.sort_values("nome_cliente", ascending=True)
+
+    if df_filtrado.empty:
+        st.info("Nenhuma ação encontrada com os filtros aplicados.")
+        return
+
+    for _, acao in df_filtrado.iterrows():
+        status_acao = str(acao.get("status_acao", "Pendente") or "Pendente")
+        status_prazo = str(acao.get("status_prazo_calc", "⏳ Sem prazo"))
+        col_acao, col_status_btn = st.columns([4, 1])
+
+        if "Vencido" in status_prazo:
+            cor_borda, cor_bg = "#ef4444", "#fef2f2"
+        elif "Concluído" in status_prazo:
+            cor_borda, cor_bg = "#14b8a6", "#f0fdfa"
+        elif "⚠️" in status_prazo:
+            cor_borda, cor_bg = "#f59e0b", "#fffbeb"
+        else:
+            cor_borda, cor_bg = "#7C3AED", "#f3e8ff"
+
+        with col_acao:
+            st.markdown(f"""
+            <div style="background:{cor_bg};border:1px solid {cor_borda};border-radius:12px;padding:16px;margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px">
+                    <div>
+                        <div style="font-size:12px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">🏢 Cliente</div>
+                        <div style="font-size:14px;color:#171126;font-weight:700;margin-top:4px">{escape_html(acao.get('nome_cliente', 'N/D'))}</div>
+                        <div style="font-size:10px;color:#8B7AA3;margin-top:2px">ID {escape_html(acao.get('id_whitelabel', 'N/D'))}</div>
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:11px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Prazo</div>
+                        <div style="font-size:13px;font-weight:700;margin-top:4px">{escape_html(status_prazo)}</div>
+                    </div>
+                </div>
+                <div style="background:#ffffff;border:1px solid {cor_borda};border-radius:8px;padding:12px;margin-bottom:10px">
+                    <div style="font-size:12px;color:#171126;line-height:1.5">{escape_html(acao.get('o_que_foi_feito', 'N/D'))}</div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
+                        <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Criada em</div>
+                        <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{escape_html(str(acao.get('data_criacao', 'N/D'))[:10])}</div>
+                    </div>
+                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
+                        <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Prazo</div>
+                        <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{escape_html(acao.get('prazo_ajustes') or 'Sem prazo')}</div>
+                    </div>
+                    <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
+                        <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Situação</div>
+                        <div style="font-size:11px;color:{'#059669' if status_acao == 'Concluído' else '#d97706'};font-weight:700;margin-top:2px">{escape_html(status_acao)}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_status_btn:
+            novo_status = st.selectbox(
+                "Mudar",
+                ["Pendente", "Concluído"],
+                index=0 if status_acao != "Concluído" else 1,
+                key=f"select_status_v2_{acao.get('id', uuid.uuid4())}",
+            )
+            if novo_status != status_acao:
+                sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                if sucesso:
+                    st.success("Atualizado")
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+
+def render_central_acoes(dados: dict) -> None:
+    st.markdown("### 📋 Central de Ações")
+    st.caption("Cadastro rápido por cliente + acompanhamento geral. Não precisa mais abrir a aba Clientes para registrar uma ação.")
+
+    if not supabase_configurado():
+        st.warning("⚠️ Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.")
+        return
+
+    tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
+    if not tabela_existe:
+        st.error("🚨 Não foi possível acessar a tabela acoes_clientes no Supabase.")
+        st.info(msg_tabela)
+        with st.expander("SQL recomendado para recriar/ajustar a tabela", expanded=True):
+            st.code(sql_criacao_supabase(), language="sql")
+        return
+
+    st.success("Tabela acoes_clientes acessível no Supabase.")
+    render_form_cadastro_acao(dados, prefixo_key="central_acoes_v2")
+
+    st.divider()
+    st.markdown("#### Ações registradas")
+    df_todas_acoes = carregar_todas_acoes()
+    render_lista_acoes(df_todas_acoes)
 
 def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
     st.markdown("### Atualizar base online")
@@ -4581,201 +4881,7 @@ def main():
     # ABA 2 — CENTRAL DE AÇÕES
     # ════════════════════════════════════════════
     with tabs[2]:
-        st.markdown("### 📋 Central de Ações")
-        st.caption("Acompanhe todas as ações cadastradas, seus prazos e status de execução")
-        
-        # Verificar se a tabela existe
-        if not supabase_configurado():
-            st.warning("⚠️ Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.")
-        else:
-            tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
-            if not tabela_existe:
-                st.error("🚨 Não foi possível acessar a tabela acoes_clientes no Supabase!")
-                st.info(msg_tabela)
-                st.info("Execute/valide este SQL no Supabase SQL Editor:")
-                with st.expander("SQL para criar a tabela", expanded=True):
-                    st.code(sql_criacao_supabase(), language="sql")
-        
-        # Carregar todas as ações
-        df_todas_acoes = carregar_todas_acoes()
-        
-        if df_todas_acoes is None or df_todas_acoes.empty:
-            st.info("Nenhuma ação registrada ainda. Vá para a aba Clientes e adicione ações.")
-        else:
-            # Processar dados
-            df_acoes_view = df_todas_acoes.copy()
-            
-            # Calcular status de prazo
-            hoje = agora_sao_paulo().date()
-            
-            def status_prazo(row):
-                if row.get("status_acao") == "Concluído":
-                    return "✅ Concluído"
-                
-                prazo_str = row.get("prazo_ajustes")
-                if not prazo_str or prazo_str == "None":
-                    return "⏳ Sem prazo"
-                
-                try:
-                    if isinstance(prazo_str, str):
-                        prazo = pd.to_datetime(prazo_str).date()
-                    else:
-                        prazo = prazo_str
-                    
-                    dias_restantes = (prazo - hoje).days
-                    if dias_restantes < 0:
-                        return f"🚨 Vencido ({abs(dias_restantes)}d)"
-                    elif dias_restantes == 0:
-                        return "⚠️ Vence hoje"
-                    elif dias_restantes <= 3:
-                        return f"⚠️ {dias_restantes}d restantes"
-                    else:
-                        return f"✓ {dias_restantes}d restantes"
-                except:
-                    return "⏳ Sem prazo"
-            
-            df_acoes_view["status_prazo_calc"] = df_acoes_view.apply(status_prazo, axis=1)
-            
-            # KPIs
-            total_acoes = len(df_acoes_view)
-            acoes_pendentes = (df_acoes_view["status_acao"] == "Pendente").sum()
-            acoes_concluidas = (df_acoes_view["status_acao"] == "Concluído").sum()
-            acoes_vencidas = df_acoes_view["status_prazo_calc"].str.contains("Vencido", na=False).sum()
-            
-            col_k1, col_k2, col_k3, col_k4 = st.columns(4)
-            
-            col_k1.metric("Total de Ações", total_acoes, f"{acoes_concluidas} concluídas")
-            col_k2.metric("Pendentes", acoes_pendentes, "Em execução")
-            col_k3.metric("Concluídas", acoes_concluidas, f"{round(acoes_concluidas/total_acoes*100, 0):.0f}%" if total_acoes > 0 else "0%")
-            col_k4.metric("Vencidas", acoes_vencidas, "Ação necessária" if acoes_vencidas > 0 else "Ok")
-            
-            st.divider()
-            
-            # Filtros
-            col_filtro1, col_filtro2, col_filtro3 = st.columns([2, 2, 2])
-            
-            with col_filtro1:
-                filtro_status = st.selectbox(
-                    "Status",
-                    ["Todos", "Pendente", "Concluído"],
-                    key="central_acoes_status"
-                )
-            
-            with col_filtro2:
-                filtro_cliente = st.text_input(
-                    "Filtrar por cliente",
-                    placeholder="Digite o nome do cliente...",
-                    key="central_acoes_cliente"
-                )
-            
-            with col_filtro3:
-                ordem = st.selectbox(
-                    "Ordenar por",
-                    ["Mais recente", "Prazo mais próximo", "Cliente A-Z"],
-                    key="central_acoes_ordem"
-                )
-            
-            # Aplicar filtros
-            mask = pd.Series(True, index=df_acoes_view.index)
-            
-            if filtro_status != "Todos":
-                mask &= df_acoes_view["status_acao"] == filtro_status
-            
-            if filtro_cliente.strip():
-                termo = filtro_cliente.upper()
-                mask &= df_acoes_view["nome_cliente"].astype(str).str.upper().str.contains(termo, na=False)
-            
-            df_filtrado = df_acoes_view[mask].copy()
-            
-            # Ordenar
-            if ordem == "Mais recente":
-                df_filtrado = df_filtrado.sort_values("data_criacao", ascending=False)
-            elif ordem == "Prazo mais próximo":
-                df_filtrado["prazo_num"] = pd.to_datetime(df_filtrado["prazo_ajustes"], errors="coerce")
-                df_filtrado = df_filtrado.sort_values("prazo_num", na_position="last")
-            else:
-                df_filtrado = df_filtrado.sort_values("nome_cliente", ascending=True)
-            
-            # Exibir ações
-            if df_filtrado.empty:
-                st.info("Nenhuma ação encontrada com os filtros aplicados.")
-            else:
-                for idx, (_, acao) in enumerate(df_filtrado.iterrows()):
-                    col_acao, col_status_btn = st.columns([4, 1])
-                    
-                    # Determinar cores
-                    status_acao = acao.get("status_acao", "Pendente")
-                    status_prazo = acao.get("status_prazo_calc", "⏳ Sem prazo")
-                    
-                    if "Vencido" in status_prazo:
-                        cor_borda = "#ef4444"
-                        cor_bg = "#fef2f2"
-                    elif "Concluído" in status_prazo:
-                        cor_borda = "#14b8a6"
-                        cor_bg = "#f0fdfa"
-                    elif "restantes" in status_prazo and "⚠️" in status_prazo:
-                        cor_borda = "#f59e0b"
-                        cor_bg = "#fffbeb"
-                    else:
-                        cor_borda = "#7C3AED"
-                        cor_bg = "#f3e8ff"
-                    
-                    with col_acao:
-                        st.markdown(f"""
-                        <div style="
-                            background:{cor_bg};
-                            border:1px solid {cor_borda};
-                            border-radius:12px;
-                            padding:16px;
-                            margin-bottom:12px;
-                        ">
-                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px">
-                                <div>
-                                    <div style="font-size:12px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">🏢 Cliente</div>
-                                    <div style="font-size:14px;color:#171126;font-weight:700;margin-top:4px">{escape_html(acao.get('nome_cliente', 'N/D'))}</div>
-                                </div>
-                                <div style="text-align:right">
-                                    <div style="font-size:11px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Status</div>
-                                    <div style="font-size:13px;font-weight:700;margin-top:4px">{status_prazo}</div>
-                                </div>
-                            </div>
-                            
-                            <div style="background:#ffffff;border:1px solid {cor_borda};border-radius:8px;padding:12px;margin-bottom:10px">
-                                <div style="font-size:12px;color:#171126;line-height:1.5">{escape_html(acao.get('o_que_foi_feito', 'N/D'))}</div>
-                            </div>
-                            
-                            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-                                <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
-                                    <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Criada em</div>
-                                    <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{str(acao.get('data_criacao', 'N/D'))[:10]}</div>
-                                </div>
-                                <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
-                                    <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Prazo</div>
-                                    <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{acao.get('prazo_ajustes', 'Sem prazo')}</div>
-                                </div>
-                                <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
-                                    <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Situação</div>
-                                    <div style="font-size:11px;color:{'#059669' if status_acao == 'Concluído' else '#d97706'};font-weight:700;margin-top:2px">{status_acao}</div>
-                                </div>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_status_btn:
-                        st.write("")  # spacing
-                        novo_status = st.selectbox(
-                            "Mudar",
-                            ["Pendente", "Concluído"],
-                            index=0 if status_acao == "Pendente" else 1,
-                            key=f"select_status_{acao.get('id', '')}"
-                        )
-                        if novo_status != status_acao:
-                            sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
-                            if sucesso:
-                                st.success("✅", icon=None)
-                                st.rerun()
-                            else:
-                                st.error(msg)
+        render_central_acoes(dados)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
