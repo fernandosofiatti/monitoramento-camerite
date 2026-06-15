@@ -1272,69 +1272,155 @@ create index if not exists idx_acoes_clientes_whitelabel
 
 create index if not exists idx_acoes_clientes_status
     on public.acoes_clientes (status_acao);
+
+-- IMPORTANTE PARA O APP STREAMLIT:
+-- Se a tabela estiver com RLS habilitado e o app usa SUPABASE_KEY/ANON_KEY,
+-- é necessário liberar as operações abaixo. Sem isso o INSERT retorna 401/403
+-- ou "new row violates row-level security policy".
+alter table public.acoes_clientes enable row level security;
+
+drop policy if exists "acoes_clientes_select" on public.acoes_clientes;
+create policy "acoes_clientes_select"
+    on public.acoes_clientes for select
+    using (true);
+
+drop policy if exists "acoes_clientes_insert" on public.acoes_clientes;
+create policy "acoes_clientes_insert"
+    on public.acoes_clientes for insert
+    with check (true);
+
+drop policy if exists "acoes_clientes_update" on public.acoes_clientes;
+create policy "acoes_clientes_update"
+    on public.acoes_clientes for update
+    using (true)
+    with check (true);
 """.strip()
+
+
+def erro_supabase_amigavel(resp) -> str:
+    """Traduz erros comuns do Supabase/PostgREST para uma mensagem prática."""
+    texto = ""
+    try:
+        texto = resp.text or ""
+    except Exception:
+        texto = ""
+
+    msg_base = f"Supabase retornou {getattr(resp, 'status_code', 'N/D')}"
+    detalhe = texto[:700]
+    texto_lower = texto.lower()
+
+    if "row-level security" in texto_lower or "rls" in texto_lower or getattr(resp, "status_code", None) in (401, 403):
+        return (
+            f"{msg_base}. Parece ser bloqueio de permissão/RLS na tabela acoes_clientes. "
+            "No Supabase, execute o SQL exibido na aba Atualizar Base/Central de Ações, "
+            "ou crie policies de SELECT, INSERT e UPDATE para a chave usada pelo Streamlit. "
+            f"Detalhe: {detalhe}"
+        )
+
+    if "schema cache" in texto_lower or "pgrst" in texto_lower:
+        return (
+            f"{msg_base}. O PostgREST ainda não reconheceu a tabela/coluna no cache de schema. "
+            "No Supabase, recarregue o schema cache ou aguarde alguns segundos e tente novamente. "
+            f"Detalhe: {detalhe}"
+        )
+
+    if getattr(resp, "status_code", None) == 404:
+        return f"{msg_base}. Tabela acoes_clientes não encontrada/exposta na API. Detalhe: {detalhe}"
+
+    return f"{msg_base}. Detalhe: {detalhe}"
+
+
+def limpar_cache_acoes() -> None:
+    """Limpa caches relacionados à tela depois de inserir/atualizar ações."""
+    for func in (carregar_acoes_cliente, carregar_todas_acoes):
+        try:
+            func.clear()
+        except Exception:
+            pass
 
 def carregar_acoes_cliente(id_whitelabel: str) -> pd.DataFrame | None:
     """Carrega todas as ações de um cliente do Supabase."""
     if not supabase_configurado():
         return None
-    
+
+    id_whitelabel = str(id_whitelabel or "").strip()
+    if not id_whitelabel:
+        return pd.DataFrame()
+
     try:
         resp = requests.get(
             supabase_table_url("acoes_clientes"),
             headers=supabase_headers(),
             params={
+                "select": "*",
                 "id_whitelabel": f"eq.{id_whitelabel}",
                 "order": "data_criacao.desc",
             },
             timeout=20,
         )
         if resp.status_code in (200, 206):
-            dados = resp.json()
-            if dados:
-                df = pd.DataFrame(dados)
-                return df
-        return pd.DataFrame()
-    except Exception:
+            return pd.DataFrame(resp.json() or [])
+        st.error(erro_supabase_amigavel(resp))
         return None
+    except Exception as e:
+        st.error(f"Erro ao carregar ações do cliente: {e}")
+        return None
+
 
 def salvar_acao_cliente(id_whitelabel: str, nome_cliente: str, o_que_foi_feito: str, prazo_ajustes: str | None = None, status_acao: str = "Pendente") -> tuple[bool, str]:
     """Salva uma nova ação para um cliente no Supabase."""
     if not supabase_configurado():
-        return False, "Supabase não configurado"
-    
+        return False, "Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets."
+
+    id_whitelabel = str(id_whitelabel or "").strip()
+    nome_cliente = str(nome_cliente or "").strip()
+    o_que_foi_feito = str(o_que_foi_feito or "").strip()
+    status_acao = str(status_acao or "Pendente").strip()
+
+    if not id_whitelabel:
+        return False, "Não foi possível identificar o ID_Whitelabel do cliente."
+    if not o_que_foi_feito:
+        return False, "Descreva a ação antes de registrar."
+
+    payload = {
+        "id_whitelabel": id_whitelabel,
+        "nome_cliente": nome_cliente,
+        "o_que_foi_feito": o_que_foi_feito,
+        "status_acao": status_acao,
+        "data_atualizacao": agora_sao_paulo_str(),
+    }
+    if prazo_ajustes:
+        payload["prazo_ajustes"] = str(prazo_ajustes)
+
     try:
-        payload = {
-            "id_whitelabel": id_whitelabel,
-            "nome_cliente": nome_cliente,
-            "o_que_foi_feito": o_que_foi_feito,
-            "status_acao": status_acao,
-        }
-        if prazo_ajustes:
-            payload["prazo_ajustes"] = prazo_ajustes
-        
         resp = requests.post(
             supabase_table_url("acoes_clientes"),
-            headers=supabase_headers("return=representation"),
+            headers=supabase_headers("return=minimal"),
             json=payload,
             timeout=20,
         )
         if resp.status_code in (200, 201, 204):
+            limpar_cache_acoes()
             return True, "Ação registrada com sucesso!"
-        else:
-            return False, f"Erro ao salvar: {resp.status_code} - {resp.text[:200]}"
+        return False, erro_supabase_amigavel(resp)
     except Exception as e:
-        return False, f"Erro: {str(e)}"
+        return False, f"Erro ao salvar ação no Supabase: {e}"
+
 
 def atualizar_status_acao(id_acao: str, novo_status: str) -> tuple[bool, str]:
     """Atualiza o status de uma ação no Supabase."""
     if not supabase_configurado():
         return False, "Supabase não configurado"
-    
+
+    id_acao = str(id_acao or "").strip()
+    if not id_acao:
+        return False, "ID da ação inválido."
+
     try:
         resp = requests.patch(
-            supabase_table_url("acoes_clientes") + f"?id=eq.{id_acao}",
-            headers=supabase_headers("return=representation"),
+            supabase_table_url("acoes_clientes"),
+            headers=supabase_headers("return=minimal"),
+            params={"id": f"eq.{id_acao}"},
             json={
                 "status_acao": novo_status,
                 "data_atualizacao": agora_sao_paulo_str(),
@@ -1342,34 +1428,54 @@ def atualizar_status_acao(id_acao: str, novo_status: str) -> tuple[bool, str]:
             timeout=20,
         )
         if resp.status_code in (200, 204):
+            limpar_cache_acoes()
             return True, "Status atualizado!"
-        else:
-            return False, f"Erro ao atualizar: {resp.status_code}"
+        return False, erro_supabase_amigavel(resp)
     except Exception as e:
-        return False, f"Erro: {str(e)}"
+        return False, f"Erro ao atualizar ação no Supabase: {e}"
+
 
 def carregar_todas_acoes() -> pd.DataFrame | None:
     """Carrega todas as ações de todos os clientes do Supabase."""
     if not supabase_configurado():
         return None
-    
+
     try:
         resp = requests.get(
             supabase_table_url("acoes_clientes"),
             headers=supabase_headers(),
             params={
+                "select": "*",
                 "order": "data_criacao.desc",
             },
             timeout=20,
         )
         if resp.status_code in (200, 206):
-            dados = resp.json()
-            if dados:
-                df = pd.DataFrame(dados)
-                return df
-        return pd.DataFrame()
-    except Exception:
+            return pd.DataFrame(resp.json() or [])
+        st.error(erro_supabase_amigavel(resp))
         return None
+    except Exception as e:
+        st.error(f"Erro ao carregar Central de Ações: {e}")
+        return None
+
+
+def criar_tabela_acoes_se_nao_existir() -> tuple[bool, str]:
+    """Verifica se a tabela acoes_clientes está acessível pela API do Supabase."""
+    if not supabase_configurado():
+        return False, "Supabase não configurado"
+
+    try:
+        resp = requests.get(
+            supabase_table_url("acoes_clientes"),
+            headers=supabase_headers(),
+            params={"select": "id", "limit": "1"},
+            timeout=20,
+        )
+        if resp.status_code in (200, 206):
+            return True, "Tabela acoes_clientes acessível"
+        return False, erro_supabase_amigavel(resp)
+    except Exception as e:
+        return False, f"Erro ao verificar tabela acoes_clientes: {e}"
 
 def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
     st.markdown("### Atualizar base online")
@@ -4370,6 +4476,15 @@ def main():
             st.markdown("<hr>", unsafe_allow_html=True)
             st.markdown("### 📋 Ações a realizar")
             
+            # Verificar configuração
+            if not supabase_configurado():
+                st.warning("⚠️ Supabase não configurado. As ações não podem ser salvas.")
+            else:
+                tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
+                if not tabela_existe:
+                    st.error("🚨 Não foi possível acessar a tabela acoes_clientes")
+                    st.info(msg_tabela)
+            
             with st.expander("✏️ Gerenciar ações", expanded=False):
                 # Carregar ações existentes
                 df_acoes = carregar_acoes_cliente(wl_id)
@@ -4422,7 +4537,8 @@ def main():
                     acao_texto = st.text_area(
                         "O que foi feito",
                         placeholder="Descreva a ação tomada (ex: Abrir chamado com técnico, Enviar comunicado, etc.)",
-                        height=100
+                        height=100,
+                        key=f"acao_texto_{wl_id}"
                     )
                     
                     col_prazo, col_status = st.columns(2)
@@ -4430,12 +4546,14 @@ def main():
                         prazo = st.date_input(
                             "Prazo para ajustes",
                             value=None,
-                            format="DD/MM/YYYY"
+                            format="DD/MM/YYYY",
+                            key=f"prazo_acao_{wl_id}"
                         )
                     with col_status:
                         status_acao = st.selectbox(
                             "Status",
-                            ["Pendente", "Concluído"]
+                            ["Pendente", "Concluído"],
+                            key=f"status_nova_acao_{wl_id}"
                         )
                     
                     if st.form_submit_button("➕ Registrar ação", use_container_width=True):
@@ -4465,6 +4583,18 @@ def main():
     with tabs[2]:
         st.markdown("### 📋 Central de Ações")
         st.caption("Acompanhe todas as ações cadastradas, seus prazos e status de execução")
+        
+        # Verificar se a tabela existe
+        if not supabase_configurado():
+            st.warning("⚠️ Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.")
+        else:
+            tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
+            if not tabela_existe:
+                st.error("🚨 Não foi possível acessar a tabela acoes_clientes no Supabase!")
+                st.info(msg_tabela)
+                st.info("Execute/valide este SQL no Supabase SQL Editor:")
+                with st.expander("SQL para criar a tabela", expanded=True):
+                    st.code(sql_criacao_supabase(), language="sql")
         
         # Carregar todas as ações
         df_todas_acoes = carregar_todas_acoes()
