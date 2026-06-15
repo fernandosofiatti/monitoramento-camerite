@@ -599,6 +599,16 @@ PASTA                     = os.getenv("CAMERITE_MONITORAMENTO_PASTA", BASE_DIR)
 
 CSV_GOV                   = os.path.join(PASTA, "GOV_extracao_cameras.csv")
 XLSX_CLIENTES             = os.path.join(PASTA, "nome_clientes.xlsx")
+
+
+def caminho_xlsx_clientes() -> str | None:
+    """Localiza a base de clientes, aceitando nome_clientes.xlsx ou variações como nome_clientes(1).xlsx."""
+    candidatos = [XLSX_CLIENTES]
+    candidatos.extend(sorted(glob.glob(os.path.join(PASTA, "nome_clientes*.xlsx")), key=lambda p: os.path.getmtime(p), reverse=True))
+    for caminho in candidatos:
+        if caminho and os.path.exists(caminho):
+            return caminho
+    return None
 IMPORTACAO_INDIVIDUAL_DIR = os.path.join(PASTA, "_BKPS_importacao_individual")
 DB_PATH                   = os.path.join(PASTA, "historico.db")
 GEO_CACHE_PATH            = os.path.join(PASTA, "geocode_cache.json")
@@ -2535,10 +2545,11 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
 @st.cache_data(ttl=60)
 def carregar_clientes() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: nome_cliente}."""
-    if not os.path.exists(XLSX_CLIENTES):
+    caminho_clientes = caminho_xlsx_clientes()
+    if not caminho_clientes:
         return {}
     try:
-        df = pd.read_excel(XLSX_CLIENTES, engine="openpyxl")
+        df = pd.read_excel(caminho_clientes, engine="openpyxl")
         # Aceitar qualquer variação de nome de coluna
         col_id = next((c for c in df.columns if "whitelabel" in c.lower() or "id" in c.lower()), df.columns[0])
         col_nom = next((c for c in df.columns if "nome" in c.lower() or "client" in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
@@ -2549,10 +2560,11 @@ def carregar_clientes() -> dict:
 @st.cache_data(ttl=60)
 def carregar_clientes_prefeitura() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Prefeitura / cidade-estado}."""
-    if not os.path.exists(XLSX_CLIENTES):
+    caminho_clientes = caminho_xlsx_clientes()
+    if not caminho_clientes:
         return {}
     try:
-        df = pd.read_excel(XLSX_CLIENTES, engine="openpyxl")
+        df = pd.read_excel(caminho_clientes, engine="openpyxl")
         col_id = next((c for c in df.columns if "whitelabel" in c.lower() or "id" in c.lower()), df.columns[0])
         col_city = next((c for c in df.columns if any(k in c.lower() for k in ("prefeitura", "cidade", "municipio", "city"))), None)
         col_state = next((c for c in df.columns if any(k in c.lower() for k in ("estado", "uf", "state"))), None)
@@ -2570,10 +2582,11 @@ def carregar_clientes_prefeitura() -> dict:
 @st.cache_data(ttl=60)
 def carregar_clientes_franqueado() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Franqueado}."""
-    if not os.path.exists(XLSX_CLIENTES):
+    caminho_clientes = caminho_xlsx_clientes()
+    if not caminho_clientes:
         return {}
     try:
-        df = pd.read_excel(XLSX_CLIENTES, engine="openpyxl")
+        df = pd.read_excel(caminho_clientes, engine="openpyxl")
         if df.empty:
             return {}
         col_id = next((c for c in df.columns if "whitelabel" in str(c).lower() or str(c).lower().strip() in ("id", "id_cliente")), df.columns[0])
@@ -4747,6 +4760,7 @@ def main():
         "Evidências",
         "LPRs Offline",
         "Atualizar Base",
+        "Relatório Franquia",
     ])
 
     # ════════════════════════════════════════════
@@ -5204,7 +5218,9 @@ def main():
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
     with tabs[1]:
-        clientes_subtabs = st.tabs(["Painel de clientes", "Relatório por franquia"])
+        st.markdown("### 🏢 Clientes")
+        st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -6558,6 +6574,14 @@ def main():
     # ════════════════════════════════════════════
     with tabs[7]:
         render_aba_atualizar_base(df_origem)
+
+    # ════════════════════════════════════════════
+    # ABA 8 — RELATÓRIO FRANQUIA (atalho visível)
+    # ════════════════════════════════════════════
+    with tabs[8]:
+        st.markdown("### ✉️ Relatório por franquia")
+        st.caption("Atalho da mesma rotina disponível dentro de Clientes > Relatório por franquia.")
+        render_relatorio_por_franquia(df_clientes_ops, dados)
 
 
 if __name__ == "__main__":
