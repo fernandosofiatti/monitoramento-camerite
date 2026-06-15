@@ -1505,15 +1505,26 @@ def criar_tabela_acoes_se_nao_existir() -> tuple[bool, str]:
 
 
 
+def calcular_metricas_cliente_info(info: dict) -> tuple[int, int, float]:
+    """Retorna total, offline e % offline usando a mesma fonte dos cards de Clientes."""
+    total = int(info.get("total", 0) or 0)
+    df_off = info.get("offline")
+    try:
+        offline = int(len(df_off)) if df_off is not None else int(info.get("offline_count", 0) or 0)
+    except Exception:
+        offline = int(info.get("offline_count", 0) or 0)
+    pct = round((offline / total * 100), 2) if total else 0.0
+    return total, offline, pct
+
+
 def montar_opcoes_clientes_acoes(dados: dict) -> list[dict]:
     """Monta uma lista leve de clientes para cadastro direto na Central de Ações."""
     opcoes = []
     for wl_id, v in (dados or {}).items():
-        total = int(v.get("total", 0) or 0)
-        offline = int(v.get("offline_count", 0) or 0)
-        pct = float(v.get("pct", 0) or 0)
-        nome_cliente = str(v.get("nome_cliente") or v.get("nome_empresa") or wl_id).strip()
+        total, offline, pct = calcular_metricas_cliente_info(v)
+        nome_cliente = str(v.get("cidade_estado") or v.get("nome_cliente") or v.get("nome_empresa") or wl_id).strip()
         nome_empresa = str(v.get("nome_empresa") or "").strip()
+        status = status_cliente(pct, offline)
         label = f"{nome_cliente} · ID {wl_id} · {offline}/{total} offline ({pct:.1f}%)"
         opcoes.append({
             "id_whitelabel": str(wl_id),
@@ -1522,10 +1533,11 @@ def montar_opcoes_clientes_acoes(dados: dict) -> list[dict]:
             "total": total,
             "offline": offline,
             "pct": pct,
+            "status": status,
             "label": label,
             "busca": f"{nome_cliente} {nome_empresa} {wl_id}".upper(),
         })
-    return sorted(opcoes, key=lambda x: (-x["offline"], x["nome_cliente"].upper()))
+    return sorted(opcoes, key=lambda x: (-x["offline"], -x["pct"], x["nome_cliente"].upper()))
 
 
 def render_form_cadastro_acao(dados: dict, prefixo_key: str = "central") -> None:
@@ -1632,7 +1644,7 @@ def status_prazo_acao(row) -> str:
 def render_lista_acoes(df_todas_acoes: pd.DataFrame) -> None:
     """Renderiza KPIs, filtros e lista de ações."""
     if df_todas_acoes is None or df_todas_acoes.empty:
-        st.info("Nenhuma ação registrada ainda. Cadastre a primeira pelo formulário acima.")
+        st.info("Nenhuma ação registrada ainda. Cadastre a primeira na sub-aba “Cadastrar ação”.")
         return
 
     df_acoes_view = df_todas_acoes.copy()
@@ -1753,9 +1765,118 @@ def render_lista_acoes(df_todas_acoes: pd.DataFrame) -> None:
                     st.error(msg)
 
 
+
+def montar_df_clientes_central_acoes(dados: dict, df_todas_acoes: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Base de clientes da Central de Ações com métricas operacionais reais e contagem de ações."""
+    rows = []
+    contagens = {}
+    pendencias = {}
+    if df_todas_acoes is not None and not df_todas_acoes.empty and "id_whitelabel" in df_todas_acoes.columns:
+        tmp = df_todas_acoes.copy()
+        tmp["id_whitelabel"] = tmp["id_whitelabel"].astype(str).str.strip()
+        contagens = tmp.groupby("id_whitelabel").size().to_dict()
+        if "status_acao" in tmp.columns:
+            pend = tmp[tmp["status_acao"].astype(str).str.strip().ne("Concluído")]
+            pendencias = pend.groupby("id_whitelabel").size().to_dict()
+
+    for wl_id, info in (dados or {}).items():
+        total, offline, pct = calcular_metricas_cliente_info(info)
+        nome_cliente = str(info.get("cidade_estado") or info.get("nome_cliente") or f"ID {wl_id}").strip()
+        nome_empresa = str(info.get("nome_empresa") or "").strip()
+        rows.append({
+            "ID": str(wl_id),
+            "Cliente": nome_cliente,
+            "Franqueado": nome_empresa,
+            "Total": total,
+            "Offline": offline,
+            "% Offline": pct,
+            "Status Operacional": status_cliente(pct, offline),
+            "Ações": int(contagens.get(str(wl_id), 0) or 0),
+            "Pendentes": int(pendencias.get(str(wl_id), 0) or 0),
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["ID", "Cliente", "Franqueado", "Total", "Offline", "% Offline", "Status Operacional", "Ações", "Pendentes"])
+    return df.sort_values(["Offline", "% Offline", "Cliente"], ascending=[False, False, True]).reset_index(drop=True)
+
+
+def render_dashboard_acoes(df_todas_acoes: pd.DataFrame, dados: dict) -> None:
+    """Dashboards resumidos da Central de Ações, separados do cadastro."""
+    df_clientes_central = montar_df_clientes_central_acoes(dados, df_todas_acoes)
+
+    if df_todas_acoes is None or df_todas_acoes.empty:
+        total_acoes = pendentes = concluidas = vencidas = 0
+        df_view = pd.DataFrame()
+    else:
+        df_view = df_todas_acoes.copy()
+        for col in ["status_acao", "prazo_ajustes"]:
+            if col not in df_view.columns:
+                df_view[col] = ""
+        df_view["status_prazo_calc"] = df_view.apply(status_prazo_acao, axis=1)
+        total_acoes = len(df_view)
+        pendentes = int(df_view["status_acao"].astype(str).ne("Concluído").sum())
+        concluidas = int(df_view["status_acao"].astype(str).eq("Concluído").sum())
+        vencidas = int(df_view["status_prazo_calc"].astype(str).str.contains("Vencido", na=False).sum())
+
+    clientes_com_acao = int((df_clientes_central["Ações"] > 0).sum()) if not df_clientes_central.empty else 0
+    clientes_criticos = int((df_clientes_central["% Offline"] > 10).sum()) if not df_clientes_central.empty else 0
+    offline_total = int(df_clientes_central["Offline"].sum()) if not df_clientes_central.empty else 0
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Ações cadastradas", total_acoes, f"{concluidas} concluídas")
+    k2.metric("Pendentes", pendentes, "em aberto")
+    k3.metric("Vencidas", vencidas, "atenção" if vencidas else "ok")
+    k4.metric("Clientes com ação", clientes_com_acao, f"{clientes_criticos} críticos")
+
+    st.divider()
+    col_esq, col_dir = st.columns([1, 1])
+    with col_esq:
+        st.markdown("#### Clientes mais críticos")
+        top_clientes = df_clientes_central.head(15).copy()
+        if top_clientes.empty:
+            st.info("Nenhum cliente carregado.")
+        else:
+            top_show = top_clientes[["Cliente", "Total", "Offline", "% Offline", "Pendentes"]].copy()
+            top_show["% Offline"] = top_show["% Offline"].map(lambda v: f"{v:.1f}%")
+            render_dataframe(top_show, height=min(520, (len(top_show)+1)*35 + 3))
+    with col_dir:
+        st.markdown("#### Resumo operacional")
+        st.metric("Câmeras offline na carteira", offline_total)
+        if not df_clientes_central.empty:
+            dist = df_clientes_central["Status Operacional"].value_counts().reset_index()
+            dist.columns = ["Faixa", "Clientes"]
+            render_dataframe(dist, height=min(260, (len(dist)+1)*35 + 3))
+        if not df_view.empty and "status_acao" in df_view.columns:
+            st.markdown("#### Ações por status")
+            status_df = df_view["status_acao"].fillna("Pendente").astype(str).value_counts().reset_index()
+            status_df.columns = ["Status", "Quantidade"]
+            render_dataframe(status_df, height=min(220, (len(status_df)+1)*35 + 3))
+
+
+def render_clientes_central_acoes(dados: dict, df_todas_acoes: pd.DataFrame | None) -> None:
+    """Lista de clientes da Central de Ações com valores reais de offline."""
+    st.markdown("#### Clientes da Central")
+    st.caption("Aqui os totais usam a mesma base operacional dos cards da aba Clientes.")
+    df_clientes_central = montar_df_clientes_central_acoes(dados, df_todas_acoes)
+    if df_clientes_central.empty:
+        st.info("Nenhum cliente carregado.")
+        return
+
+    termo = st.text_input("Buscar cliente na central", placeholder="Nome, franqueado ou ID...", key="central_clientes_busca_v3").strip().upper()
+    df_view = df_clientes_central.copy()
+    if termo:
+        busca = (
+            df_view["Cliente"].astype(str) + " " +
+            df_view["Franqueado"].astype(str) + " " +
+            df_view["ID"].astype(str)
+        ).str.upper()
+        df_view = df_view[busca.str.contains(re.escape(termo), na=False)].copy()
+    df_view["% Offline"] = df_view["% Offline"].map(lambda v: f"{float(v):.1f}%")
+    render_dataframe(df_view, height=min(680, (len(df_view)+1)*35 + 3))
+
 def render_central_acoes(dados: dict) -> None:
     st.markdown("### 📋 Central de Ações")
-    st.caption("Cadastro rápido por cliente + acompanhamento geral. Não precisa mais abrir a aba Clientes para registrar uma ação.")
+    st.caption("Cadastro rápido, dashboards e acompanhamento separados para a tela ficar mais limpa e rápida.")
 
     if not supabase_configurado():
         st.warning("⚠️ Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets.")
@@ -1769,13 +1890,27 @@ def render_central_acoes(dados: dict) -> None:
             st.code(sql_criacao_supabase(), language="sql")
         return
 
-    st.success("Tabela acoes_clientes acessível no Supabase.")
-    render_form_cadastro_acao(dados, prefixo_key="central_acoes_v2")
-
-    st.divider()
-    st.markdown("#### Ações registradas")
     df_todas_acoes = carregar_todas_acoes()
-    render_lista_acoes(df_todas_acoes)
+
+    sub_cadastro, sub_dash, sub_acoes, sub_clientes = st.tabs([
+        "➕ Cadastrar ação",
+        "📊 Dashboards",
+        "📋 Ações registradas",
+        "🏢 Clientes",
+    ])
+
+    with sub_cadastro:
+        render_form_cadastro_acao(dados, prefixo_key="central_acoes_v3")
+
+    with sub_dash:
+        render_dashboard_acoes(df_todas_acoes, dados)
+
+    with sub_acoes:
+        st.markdown("#### Ações registradas")
+        render_lista_acoes(df_todas_acoes)
+
+    with sub_clientes:
+        render_clientes_central_acoes(dados, df_todas_acoes)
 
 def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
     st.markdown("### Atualizar base online")
@@ -2365,6 +2500,9 @@ def processar_df_gov(df: pd.DataFrame, clientes_map: dict) -> dict:
         df_off = grupo[grupo[COL_STATUS].astype(str).str.strip().str.upper() == "OFFLINE"].copy()
         if "_tempo_off" in df_off.columns:
             df_off = df_off.sort_values("_tempo_off", ascending=False)
+        total_grupo = int(len(grupo))
+        offline_grupo = int(len(df_off))
+        pct_grupo = round((offline_grupo / total_grupo * 100), 2) if total_grupo else 0.0
         resultado[wl_id] = {
             "nome_cliente": nome_cliente,
             "nome_empresa": nome_empresa,
@@ -2372,7 +2510,10 @@ def processar_df_gov(df: pd.DataFrame, clientes_map: dict) -> dict:
             "uf": estado,
             "cidade_estado": cidade_estado,
             "offline": df_off,
-            "total": len(grupo),
+            "offline_count": offline_grupo,
+            "total": total_grupo,
+            "pct": pct_grupo,
+            "pct_offline": pct_grupo,
         }
     return resultado
 
