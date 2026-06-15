@@ -1315,14 +1315,14 @@ def salvar_acao_cliente(id_whitelabel: str, nome_cliente: str, o_que_foi_feito: 
         
         resp = requests.post(
             supabase_table_url("acoes_clientes"),
-            headers=supabase_headers("return=minimal"),
+            headers=supabase_headers("return=representation"),
             json=payload,
             timeout=20,
         )
         if resp.status_code in (200, 201, 204):
             return True, "Ação registrada com sucesso!"
         else:
-            return False, f"Erro ao salvar: {resp.status_code}"
+            return False, f"Erro ao salvar: {resp.status_code} - {resp.text[:200]}"
     except Exception as e:
         return False, f"Erro: {str(e)}"
 
@@ -1334,7 +1334,7 @@ def atualizar_status_acao(id_acao: str, novo_status: str) -> tuple[bool, str]:
     try:
         resp = requests.patch(
             supabase_table_url("acoes_clientes") + f"?id=eq.{id_acao}",
-            headers=supabase_headers("return=minimal"),
+            headers=supabase_headers("return=representation"),
             json={
                 "status_acao": novo_status,
                 "data_atualizacao": agora_sao_paulo_str(),
@@ -1347,6 +1347,29 @@ def atualizar_status_acao(id_acao: str, novo_status: str) -> tuple[bool, str]:
             return False, f"Erro ao atualizar: {resp.status_code}"
     except Exception as e:
         return False, f"Erro: {str(e)}"
+
+def carregar_todas_acoes() -> pd.DataFrame | None:
+    """Carrega todas as ações de todos os clientes do Supabase."""
+    if not supabase_configurado():
+        return None
+    
+    try:
+        resp = requests.get(
+            supabase_table_url("acoes_clientes"),
+            headers=supabase_headers(),
+            params={
+                "order": "data_criacao.desc",
+            },
+            timeout=20,
+        )
+        if resp.status_code in (200, 206):
+            dados = resp.json()
+            if dados:
+                df = pd.DataFrame(dados)
+                return df
+        return pd.DataFrame()
+    except Exception:
+        return None
 
 def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
     st.markdown("### Atualizar base online")
@@ -3638,6 +3661,7 @@ def main():
     tabs = st.tabs([
         "Auditoria",
         "Clientes",
+        "Central de Ações",
         "Tempo offline",
         "% por cliente",
         "Evidências",
@@ -4436,9 +4460,197 @@ def main():
                 del st.session_state["detalhe"]; st.rerun()
 
     # ════════════════════════════════════════════
-    # ABA 2 — TEMPO OFFLINE
+    # ABA 2 — CENTRAL DE AÇÕES
     # ════════════════════════════════════════════
     with tabs[2]:
+        st.markdown("### 📋 Central de Ações")
+        st.caption("Acompanhe todas as ações cadastradas, seus prazos e status de execução")
+        
+        # Carregar todas as ações
+        df_todas_acoes = carregar_todas_acoes()
+        
+        if df_todas_acoes is None or df_todas_acoes.empty:
+            st.info("Nenhuma ação registrada ainda. Vá para a aba Clientes e adicione ações.")
+        else:
+            # Processar dados
+            df_acoes_view = df_todas_acoes.copy()
+            
+            # Calcular status de prazo
+            hoje = agora_sao_paulo().date()
+            
+            def status_prazo(row):
+                if row.get("status_acao") == "Concluído":
+                    return "✅ Concluído"
+                
+                prazo_str = row.get("prazo_ajustes")
+                if not prazo_str or prazo_str == "None":
+                    return "⏳ Sem prazo"
+                
+                try:
+                    if isinstance(prazo_str, str):
+                        prazo = pd.to_datetime(prazo_str).date()
+                    else:
+                        prazo = prazo_str
+                    
+                    dias_restantes = (prazo - hoje).days
+                    if dias_restantes < 0:
+                        return f"🚨 Vencido ({abs(dias_restantes)}d)"
+                    elif dias_restantes == 0:
+                        return "⚠️ Vence hoje"
+                    elif dias_restantes <= 3:
+                        return f"⚠️ {dias_restantes}d restantes"
+                    else:
+                        return f"✓ {dias_restantes}d restantes"
+                except:
+                    return "⏳ Sem prazo"
+            
+            df_acoes_view["status_prazo_calc"] = df_acoes_view.apply(status_prazo, axis=1)
+            
+            # KPIs
+            total_acoes = len(df_acoes_view)
+            acoes_pendentes = (df_acoes_view["status_acao"] == "Pendente").sum()
+            acoes_concluidas = (df_acoes_view["status_acao"] == "Concluído").sum()
+            acoes_vencidas = df_acoes_view["status_prazo_calc"].str.contains("Vencido", na=False).sum()
+            
+            col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+            
+            col_k1.metric("Total de Ações", total_acoes, f"{acoes_concluidas} concluídas")
+            col_k2.metric("Pendentes", acoes_pendentes, "Em execução")
+            col_k3.metric("Concluídas", acoes_concluidas, f"{round(acoes_concluidas/total_acoes*100, 0):.0f}%" if total_acoes > 0 else "0%")
+            col_k4.metric("Vencidas", acoes_vencidas, "Ação necessária" if acoes_vencidas > 0 else "Ok")
+            
+            st.divider()
+            
+            # Filtros
+            col_filtro1, col_filtro2, col_filtro3 = st.columns([2, 2, 2])
+            
+            with col_filtro1:
+                filtro_status = st.selectbox(
+                    "Status",
+                    ["Todos", "Pendente", "Concluído"],
+                    key="central_acoes_status"
+                )
+            
+            with col_filtro2:
+                filtro_cliente = st.text_input(
+                    "Filtrar por cliente",
+                    placeholder="Digite o nome do cliente...",
+                    key="central_acoes_cliente"
+                )
+            
+            with col_filtro3:
+                ordem = st.selectbox(
+                    "Ordenar por",
+                    ["Mais recente", "Prazo mais próximo", "Cliente A-Z"],
+                    key="central_acoes_ordem"
+                )
+            
+            # Aplicar filtros
+            mask = pd.Series(True, index=df_acoes_view.index)
+            
+            if filtro_status != "Todos":
+                mask &= df_acoes_view["status_acao"] == filtro_status
+            
+            if filtro_cliente.strip():
+                termo = filtro_cliente.upper()
+                mask &= df_acoes_view["nome_cliente"].astype(str).str.upper().str.contains(termo, na=False)
+            
+            df_filtrado = df_acoes_view[mask].copy()
+            
+            # Ordenar
+            if ordem == "Mais recente":
+                df_filtrado = df_filtrado.sort_values("data_criacao", ascending=False)
+            elif ordem == "Prazo mais próximo":
+                df_filtrado["prazo_num"] = pd.to_datetime(df_filtrado["prazo_ajustes"], errors="coerce")
+                df_filtrado = df_filtrado.sort_values("prazo_num", na_position="last")
+            else:
+                df_filtrado = df_filtrado.sort_values("nome_cliente", ascending=True)
+            
+            # Exibir ações
+            if df_filtrado.empty:
+                st.info("Nenhuma ação encontrada com os filtros aplicados.")
+            else:
+                for idx, (_, acao) in enumerate(df_filtrado.iterrows()):
+                    col_acao, col_status_btn = st.columns([4, 1])
+                    
+                    # Determinar cores
+                    status_acao = acao.get("status_acao", "Pendente")
+                    status_prazo = acao.get("status_prazo_calc", "⏳ Sem prazo")
+                    
+                    if "Vencido" in status_prazo:
+                        cor_borda = "#ef4444"
+                        cor_bg = "#fef2f2"
+                    elif "Concluído" in status_prazo:
+                        cor_borda = "#14b8a6"
+                        cor_bg = "#f0fdfa"
+                    elif "restantes" in status_prazo and "⚠️" in status_prazo:
+                        cor_borda = "#f59e0b"
+                        cor_bg = "#fffbeb"
+                    else:
+                        cor_borda = "#7C3AED"
+                        cor_bg = "#f3e8ff"
+                    
+                    with col_acao:
+                        st.markdown(f"""
+                        <div style="
+                            background:{cor_bg};
+                            border:1px solid {cor_borda};
+                            border-radius:12px;
+                            padding:16px;
+                            margin-bottom:12px;
+                        ">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px">
+                                <div>
+                                    <div style="font-size:12px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">🏢 Cliente</div>
+                                    <div style="font-size:14px;color:#171126;font-weight:700;margin-top:4px">{escape_html(acao.get('nome_cliente', 'N/D'))}</div>
+                                </div>
+                                <div style="text-align:right">
+                                    <div style="font-size:11px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Status</div>
+                                    <div style="font-size:13px;font-weight:700;margin-top:4px">{status_prazo}</div>
+                                </div>
+                            </div>
+                            
+                            <div style="background:#ffffff;border:1px solid {cor_borda};border-radius:8px;padding:12px;margin-bottom:10px">
+                                <div style="font-size:12px;color:#171126;line-height:1.5">{escape_html(acao.get('o_que_foi_feito', 'N/D'))}</div>
+                            </div>
+                            
+                            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                                <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
+                                    <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Criada em</div>
+                                    <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{str(acao.get('data_criacao', 'N/D'))[:10]}</div>
+                                </div>
+                                <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
+                                    <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Prazo</div>
+                                    <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-top:2px">{acao.get('prazo_ajustes', 'Sem prazo')}</div>
+                                </div>
+                                <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:6px;padding:8px 10px;text-align:center">
+                                    <div style="font-size:9px;color:#8B7AA3;font-weight:600;text-transform:uppercase">Situação</div>
+                                    <div style="font-size:11px;color:{'#059669' if status_acao == 'Concluído' else '#d97706'};font-weight:700;margin-top:2px">{status_acao}</div>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_status_btn:
+                        st.write("")  # spacing
+                        novo_status = st.selectbox(
+                            "Mudar",
+                            ["Pendente", "Concluído"],
+                            index=0 if status_acao == "Pendente" else 1,
+                            key=f"select_status_{acao.get('id', '')}"
+                        )
+                        if novo_status != status_acao:
+                            sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                            if sucesso:
+                                st.success("✅", icon=None)
+                                st.rerun()
+                            else:
+                                st.error(msg)
+
+    # ════════════════════════════════════════════
+    # ABA 3 — TEMPO OFFLINE
+    # ════════════════════════════════════════════
+    with tabs[3]:
         st.markdown("#### Câmeras offline por tempo sem sinal")
         st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
 
@@ -4718,9 +4930,9 @@ def main():
                 render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
 
     # ════════════════════════════════════════════
-    # ABA 3 — % OFFLINE POR CLIENTE
+    # ABA 4 — % OFFLINE POR CLIENTE
     # ════════════════════════════════════════════
-    with tabs[3]:
+    with tabs[4]:
         st.markdown("#### Percentual de câmeras offline por cliente")
         st.caption("Escala 0–100% · Verde 0–5% · Amarelo >5–10% · Vermelho >10%")
 
@@ -4813,9 +5025,9 @@ def main():
 
 
     # ════════════════════════════════════════════
-    # ABA 4 — HISTÓRICO & COMPARATIVO
+    # ABA 5 — HISTÓRICO & COMPARATIVO
     # ════════════════════════════════════════════
-    with tabs[4]:
+    with tabs[5]:
         st.markdown("#### Histórico de snapshots")
         df_snaps = listar_snapshots()
 
@@ -5267,9 +5479,9 @@ def main():
 
 
     # ════════════════════════════════════════════
-    # ABA 5 — LPRS OFFLINE
+    # ABA 6 — LPRS OFFLINE
     # ════════════════════════════════════════════
-    with tabs[5]:
+    with tabs[6]:
         st.markdown("### LPRs Offline")
         st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
 
@@ -5427,9 +5639,9 @@ def main():
 
 
     # ════════════════════════════════════════════
-    # ABA 6 — ATUALIZAR BASE ONLINE
+    # ABA 7 — ATUALIZAR BASE ONLINE
     # ════════════════════════════════════════════
-    with tabs[6]:
+    with tabs[7]:
         render_aba_atualizar_base(df_origem)
 
 
