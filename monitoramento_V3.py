@@ -1461,6 +1461,46 @@ def atualizar_status_acao(id_acao: str, novo_status: str) -> tuple[bool, str]:
         return False, f"Erro ao atualizar ação no Supabase: {e}"
 
 
+
+
+def atualizar_acao_cliente(id_acao: str, o_que_foi_feito: str | None = None, prazo_ajustes: str | None = None, status_acao: str | None = None) -> tuple[bool, str]:
+    """Atualiza descrição, prazo e status de uma ação no Supabase."""
+    if not supabase_configurado():
+        return False, "Supabase não configurado"
+
+    id_acao = str(id_acao or "").strip()
+    if not id_acao:
+        return False, "ID da ação inválido."
+
+    payload = {"data_atualizacao": agora_sao_paulo_str()}
+
+    if o_que_foi_feito is not None:
+        texto = str(o_que_foi_feito or "").strip()
+        if not texto:
+            return False, "A descrição da ação não pode ficar vazia."
+        payload["o_que_foi_feito"] = texto
+
+    if status_acao is not None:
+        payload["status_acao"] = str(status_acao or "Pendente").strip()
+
+    # DateInput sem data volta None. Enviamos null para limpar o prazo quando necessário.
+    payload["prazo_ajustes"] = prazo_ajustes
+
+    try:
+        resp = requests.patch(
+            supabase_table_url("acoes_clientes"),
+            headers=supabase_headers("return=minimal"),
+            params={"id": f"eq.{id_acao}"},
+            json=payload,
+            timeout=20,
+        )
+        if resp.status_code in (200, 204):
+            limpar_cache_acoes()
+            return True, "Ação atualizada com sucesso!"
+        return False, erro_supabase_amigavel(resp)
+    except Exception as e:
+        return False, f"Erro ao atualizar ação no Supabase: {e}"
+
 def carregar_todas_acoes() -> pd.DataFrame | None:
     """Carrega todas as ações de todos os clientes do Supabase."""
     if not supabase_configurado():
@@ -1971,38 +2011,69 @@ def render_lista_acoes(df_todas_acoes: pd.DataFrame, dados: dict | None = None) 
             else:
                 cor_borda, cor_bg = "#7C3AED", "#fbf7ff"
 
-            col_acao, col_status_btn = st.columns([4.6, 1.1])
-            with col_acao:
-                st.markdown(f"""
-                <div style="background:{cor_bg};border:1px solid #E9D5FF;border-left:5px solid {cor_borda};border-radius:16px;padding:16px 18px;margin-bottom:12px;box-shadow:0 10px 24px rgba(91,33,182,.07)">
-                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
-                        <div>
-                            <div style="font-size:11px;color:#8B7AA3;font-weight:900;text-transform:uppercase;letter-spacing:.7px">🏢 Cliente</div>
-                            <div style="font-size:17px;color:#171126;font-weight:900;margin-top:3px">{escape_html(acao.get('nome_cliente', 'N/D'))}</div>
-                            <div style="font-size:12px;color:#6B5A7A;margin-top:3px">ID {escape_html(acao.get('id_whitelabel',''))}</div>
-                        </div>
-                        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
-                            <span style="background:#ffffff;color:{status_cor};border:1px solid #E9D5FF;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:900">{status_emoji} {escape_html(status_texto)}</span>
-                            <span style="background:#ffffff;color:{cor_borda};border:1px solid #E9D5FF;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:900">{escape_html(status_prazo)}</span>
-                        </div>
+            acao_id = str(acao.get("id") or uuid.uuid4())
+            st.markdown(f"""
+            <div style="background:{cor_bg};border:1px solid #E9D5FF;border-left:5px solid {cor_borda};border-radius:16px;padding:16px 18px;margin-bottom:8px;box-shadow:0 10px 24px rgba(91,33,182,.07)">
+                <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
+                    <div>
+                        <div style="font-size:11px;color:#8B7AA3;font-weight:900;text-transform:uppercase;letter-spacing:.7px">🏢 Cliente</div>
+                        <div style="font-size:17px;color:#171126;font-weight:900;margin-top:3px">{escape_html(acao.get('nome_cliente', 'N/D'))}</div>
+                        <div style="font-size:12px;color:#6B5A7A;margin-top:3px">ID {escape_html(acao.get('id_whitelabel',''))}</div>
                     </div>
-                    <div style="background:#ffffff;border:1px solid #F1E8FF;border-radius:12px;padding:12px 13px;margin-top:13px;color:#171126;font-size:14px;line-height:1.45">{escape_html(acao.get('o_que_foi_feito', ''))}</div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-                        <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Criada: {escape_html(formatar_data_curta(acao.get('data_criacao')))}</span>
-                        <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Atualizada: {escape_html(formatar_data_curta(acao.get('data_atualizacao') or acao.get('data_criacao')))}</span>
-                        <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Prazo: {escape_html(formatar_data_curta(acao.get('prazo_ajustes')))}</span>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+                        <span style="background:#ffffff;color:{status_cor};border:1px solid #E9D5FF;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:900">{status_emoji} {escape_html(status_texto)}</span>
+                        <span style="background:#ffffff;color:{cor_borda};border:1px solid #E9D5FF;border-radius:999px;padding:7px 10px;font-size:11px;font-weight:900">{escape_html(status_prazo)}</span>
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+                <div style="background:#ffffff;border:1px solid #F1E8FF;border-radius:12px;padding:12px 13px;margin-top:13px;color:#171126;font-size:14px;line-height:1.45">{escape_html(acao.get('o_que_foi_feito', ''))}</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                    <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Criada: {escape_html(formatar_data_curta(acao.get('data_criacao')))}</span>
+                    <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Atualizada: {escape_html(formatar_data_curta(acao.get('data_atualizacao') or acao.get('data_criacao')))}</span>
+                    <span style="background:#F3E8FF;color:#5B21B6;border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800">Prazo: {escape_html(formatar_data_curta(acao.get('prazo_ajustes')))}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-            with col_status_btn:
+            with st.expander("🛠️ Manutenção / atualizar esta ação", expanded=False):
                 opcoes_status = ["Pendente", "Em andamento", "Aguardando Cliente", "Concluído", "Cancelado"]
                 idx = opcoes_status.index(status_texto) if status_texto in opcoes_status else 0
-                novo_status = st.selectbox("Status", opcoes_status, index=idx, key=f"select_status_v4_{acao.get('id', uuid.uuid4())}")
-                if novo_status != status_texto:
-                    sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                prazo_atual = pd.to_datetime(acao.get("prazo_ajustes"), errors="coerce")
+                prazo_valor = prazo_atual.date() if pd.notna(prazo_atual) else None
+
+                with st.form(f"form_editar_acao_{acao_id}"):
+                    novo_texto = st.text_area(
+                        "Descrição da ação",
+                        value=str(acao.get("o_que_foi_feito") or ""),
+                        height=120,
+                        key=f"edit_texto_{acao_id}",
+                    )
+                    col_edit_1, col_edit_2 = st.columns(2)
+                    with col_edit_1:
+                        novo_prazo = st.date_input(
+                            "Prazo",
+                            value=prazo_valor,
+                            format="DD/MM/YYYY",
+                            key=f"edit_prazo_{acao_id}",
+                        )
+                    with col_edit_2:
+                        novo_status = st.selectbox(
+                            "Status",
+                            opcoes_status,
+                            index=idx,
+                            key=f"edit_status_{acao_id}",
+                        )
+                    salvar_edicao = st.form_submit_button("💾 Atualizar ação", use_container_width=True)
+
+                if salvar_edicao:
+                    prazo_str = novo_prazo.strftime("%Y-%m-%d") if novo_prazo else None
+                    sucesso, msg = atualizar_acao_cliente(
+                        id_acao=acao.get("id", ""),
+                        o_que_foi_feito=novo_texto,
+                        prazo_ajustes=prazo_str,
+                        status_acao=novo_status,
+                    )
                     if sucesso:
-                        st.success("Atualizado")
+                        st.success(msg)
                         st.rerun()
                     else:
                         st.error(msg)
