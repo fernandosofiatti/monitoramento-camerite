@@ -2394,7 +2394,7 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
         st.markdown("#### Prévia da importação filtrada")
         render_dataframe(df_preview.head(100), height=320)
 
-        if st.button("🚀 Atualizar base online", type="primary", use_container_width=True):
+        if st.button("🚀 Atualizar base online", type="primary", use_container_width=True, key="btn_atualizar_base_online_v1"):
             status_box = st.empty()
             progress_bar = st.progress(0)
             percent_box = st.empty()
@@ -4264,10 +4264,10 @@ def render_card(col, wl_id, v, tendencia, delta_off):
         st.write(card_html, unsafe_allow_html=True)
 
         if count > 0:
-            if st.button("🔎 Ver detalhes do cliente", key=f"btn_{wl_id}"):
+            if st.button("🔎 Ver detalhes do cliente", key=f"btn_detalhe_cliente_{str(wl_id)}"):
                 st.session_state["detalhe"] = wl_id
         else:
-            st.button("✓ Operacional", key=f"btn_{wl_id}", disabled=True)
+            st.button("✓ Operacional", key=f"btn_operacional_cliente_{str(wl_id)}", disabled=True)
 
 
 # ─────────────────────────────────────────────
@@ -4300,14 +4300,14 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
 
         st.markdown('<div class="nav-section">Ações</div>', unsafe_allow_html=True)
 
-        if st.button("🔄 Atualizar dados"):
+        if st.button("🔄 Atualizar dados", key="sidebar_atualizar_dados_v1"):
             st.cache_data.clear(); st.rerun()
 
         st.markdown("---")
         st.markdown('<div class="nav-section">Salvar Snapshot</div>', unsafe_allow_html=True)
         lbl  = st.text_input("Rótulo", value=f"Snapshot {agora_sao_paulo_str('%d/%m %H:%M')}", key="snap_lbl")
         nota = st.text_area("Observações (opcional)", key="snap_nota", height=60)
-        if st.button("💾 Salvar snapshot"):
+        if st.button("💾 Salvar snapshot", key="sidebar_salvar_snapshot_v1"):
             try:
                 salvar_snapshot(lbl, nota, dados, df_origem)
                 st.success("Snapshot salvo!")
@@ -4322,6 +4322,7 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
             data=gerar_excel(dados),
             file_name=f"camerite_bi_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="sidebar_exportar_excel_v1",
         ):
             pass
 
@@ -4430,6 +4431,7 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
             file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
+            key=f"dl_detalhe_cliente_xlsx_{str(wl_id)}_top",
         )
     with dl_col2:
         st.download_button(
@@ -4438,6 +4440,7 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
             file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
             mime="text/csv",
             use_container_width=True,
+            key=f"dl_detalhe_cliente_csv_{str(wl_id)}_top",
         )
 
 
@@ -4931,6 +4934,7 @@ def main():
                     df_base_cameras_novas.to_excel(writer, index=False, sheet_name="Cameras Novas")
                 st.download_button(
                     "⬇ Baixar câmeras novas em Excel",
+                    key="dl_cameras_novas_excel_v1",
                     data=buffer_cams.getvalue(),
                     file_name=f"cameras_novas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -5178,7 +5182,7 @@ def main():
 
         fig_map, mapa_msg = montar_mapa_cidades(df_origem)
         if fig_map is not None:
-            st.plotly_chart(fig_map, use_container_width=True)
+            st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
             st.caption(mapa_msg)
         else:
             st.info(mapa_msg)
@@ -5212,7 +5216,7 @@ def main():
                        range=[0, max(df_heat["Pct"].max()*1.2, 10)]),
             margin=dict(l=10,r=10,t=10,b=110),
         )
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(fig_heat, use_container_width=True, key="heatmap_clientes_operacao_v1")
 
     # ════════════════════════════════════════════
     # ABA 1 — PAINEL DE CLIENTES
@@ -5329,6 +5333,7 @@ def main():
                     )
                     c_dl.download_button(
                         "⬇ Exportar recorte",
+                        key="dl_clientes_filtrados_recorte_v1",
                         data=buf_filtro.getvalue(),
                         file_name=f"clientes_filtrados_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -5440,6 +5445,7 @@ def main():
                             file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
+                            key=f"dl_detalhe_cliente_xlsx_{str(wl_id)}_aba",
                         )
                     with dl_col2:
                         st.download_button(
@@ -5448,6 +5454,7 @@ def main():
                             file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
                             mime="text/csv",
                             use_container_width=True,
+                            key=f"dl_detalhe_cliente_csv_{str(wl_id)}_aba",
                         )
 
                     # Mini-métricas de tempo
@@ -5483,7 +5490,7 @@ def main():
                 
                     if df_acoes is not None and not df_acoes.empty:
                         st.subheader("Ações registradas")
-                        for _, acao in df_acoes.iterrows():
+                        for idx_acao, (_, acao) in enumerate(df_acoes.iterrows()):
                             col_acao_data, col_acao_status, col_acao_del = st.columns([3, 1.5, 1])
                         
                             data_criacao = acao.get("data_criacao", "N/D")
@@ -5507,7 +5514,7 @@ def main():
                                     "Status",
                                     ["Pendente", "Concluído"],
                                     index=0 if status_atual == "Pendente" else 1,
-                                    key=f"status_{acao.get('id', '')}"
+                                    key=f"status_{acao.get('id', idx_acao)}_{idx_acao}"
                                 )
                                 if novo_status != status_atual:
                                     sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
@@ -5566,7 +5573,7 @@ def main():
                                 else:
                                     st.error(msg)
 
-                if st.button("← Voltar ao painel"):
+                if st.button("← Voltar ao painel", key="btn_voltar_painel_detalhe_cliente_v1"):
                     del st.session_state["detalhe"]; st.rerun()
 
         with clientes_subtabs[1]:
@@ -5856,7 +5863,8 @@ def main():
                 st.download_button("⬇ Exportar lista",
                     data=buf_t.getvalue(),
                     file_name=f"tempo_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_tempo_offline_lista_v1")
 
                 render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
 
@@ -5896,7 +5904,7 @@ def main():
             yaxis=dict(tickfont=dict(color="#6B5A7A",size=10), gridcolor="#FAF7FF"),
             margin=dict(l=10, r=80, t=30, b=10),
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True, key="pct_offline_por_cliente_bar_v1")
 
         st.markdown("---")
         st.markdown("#### Ranking de criticidade")
@@ -5939,7 +5947,7 @@ def main():
                             font=dict(color="#8B7AA3",size=11), bgcolor="rgba(0,0,0,0)"),
                 margin=dict(l=10, r=80, t=50, b=10),
             )
-            st.plotly_chart(fig_rank, use_container_width=True)
+            st.plotly_chart(fig_rank, use_container_width=True, key="ranking_criticidade_stack_v1")
 
             st.markdown("---")
             col_tbl, col_dl = st.columns([5,1])
@@ -5948,7 +5956,8 @@ def main():
             df_rank.to_excel(buf_r, index=True, engine="openpyxl")
             col_dl.download_button("⬇ Excel", data=buf_r.getvalue(),
                 file_name=f"ranking_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_ranking_criticidade_excel_v1")
 
             df_show = df_rank[["Cliente","Franqueado","Offline","Total","% Offline"]].copy()
             df_show["% Offline"] = df_show["% Offline"].apply(lambda x: f"{x:.1f}%")
@@ -6048,7 +6057,8 @@ def main():
                     st.download_button("⬇ Comparativo", data=buf_h.getvalue(),
                         file_name=f"comparativo_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True)
+                        use_container_width=True,
+                        key="dl_comparativo_historico_excel_v1")
 
                 total_off_a = int(df_comp["off_a"].sum())
                 total_off_b = int(df_comp["off_b"].sum())
@@ -6566,6 +6576,7 @@ def main():
                     file_name=f"lprs_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
                     mime="text/csv",
                     use_container_width=True,
+                    key="dl_lprs_offline_csv_v1",
                 )
 
 
