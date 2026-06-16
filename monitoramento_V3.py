@@ -4051,16 +4051,141 @@ def gerar_relatorio_franquia_html(nome_franquia: str, df_clientes_franquia: pd.D
 </div></body></html>"""
 
 
-def gerar_eml_relatorio_franquia(nome_franquia: str, html_body: str) -> bytes:
-    assunto = f"Relatório de Monitoramento - {nome_franquia}"
-    corpo_b64 = base64.b64encode(html_body.encode("utf-8")).decode("ascii")
-    eml = f"Subject: {assunto}\nMIME-Version: 1.0\nContent-Type: text/html; charset=utf-8\nContent-Transfer-Encoding: base64\n\n{corpo_b64}\n"
-    return eml.encode("utf-8")
+def _cidade_relatorio_franquia(wl_id: str, row: pd.Series | None, dados: dict) -> str:
+    """Define a cidade usada para separar os anexos XLSX do e-mail."""
+    info = dados.get(str(wl_id), {}) if isinstance(dados, dict) else {}
+    cidade = str(info.get("cidade_estado") or "").strip()
+    if not cidade:
+        cidade = str(info.get("cidade") or "").strip()
+        uf = str(info.get("uf") or "").strip()
+        if cidade and uf:
+            cidade = f"{cidade} - {uf}"
+    if not cidade and row is not None:
+        for col in ("Cidade", "Prefeitura", "Município", "Municipio", "Cliente"):
+            if col in row.index:
+                cidade = str(row.get(col) or "").strip()
+                if cidade:
+                    break
+    return cidade or "Sem cidade"
 
+
+def _df_excel_seguro(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove tipos que costumam quebrar ou ficar ruins no Excel gerado em memória."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out = df.copy()
+    for col in out.columns:
+        if pd.api.types.is_timedelta64_dtype(out[col]):
+            out[col] = out[col].apply(lambda x: fmt_tempo(x) if isinstance(x, timedelta) and x.total_seconds() >= 0 else "N/D")
+        elif col == "_tempo_off":
+            out[col] = out[col].apply(lambda x: fmt_tempo(x) if isinstance(x, timedelta) and x.total_seconds() >= 0 else "N/D")
+        elif pd.api.types.is_datetime64_any_dtype(out[col]):
+            out[col] = out[col].dt.strftime("%d/%m/%Y %H:%M").fillna("N/D")
+    return out.astype(object).where(pd.notna(out), "")
+
+
+def gerar_xlsx_cidade_franquia(nome_franquia: str, nome_cidade: str, df_cidade: pd.DataFrame, dados: dict) -> bytes:
+    """Gera um XLSX de uma cidade da franquia, com resumo e câmeras offline."""
+    resumo_rows = []
+    offline_rows = []
+
+    for _, row in df_cidade.iterrows():
+        wl_id = str(row.get("ID", "")).strip()
+        info = dados.get(wl_id, {})
+        total = int(row.get("Total", info.get("total", 0)) or 0)
+        offline = int(row.get("Offline", len(info.get("offline", pd.DataFrame()))) or 0)
+        online = int(row.get("Online", max(total - offline, 0)) or max(total - offline, 0))
+        pct = float(row.get("% Offline", (offline / total * 100 if total else 0)) or 0)
+        resumo_rows.append({
+            "Franqueado": nome_franquia,
+            "Cidade": nome_cidade,
+            "ID Cliente": wl_id,
+            "Cliente": row.get("Cliente", info.get("nome_cliente", "")),
+            "Total Câmeras": total,
+            "Online": online,
+            "Offline": offline,
+            "% Offline": round(pct, 2),
+            "Status": row.get("Status", status_cliente(pct, offline)),
+        })
+
+        df_off = info.get("offline", pd.DataFrame())
+        if df_off is not None and not df_off.empty:
+            df_tmp = df_off.copy()
+            for _, cam in df_tmp.iterrows():
+                td = cam.get("_tempo_off", timedelta(seconds=-1))
+                tempo = fmt_tempo(td) if isinstance(td, timedelta) and td.total_seconds() >= 0 else "N/D"
+                ult = cam.get(COL_ULT_ATU, "")
+                ult_txt = ult.strftime("%d/%m/%Y %H:%M") if isinstance(ult, pd.Timestamp) else str(ult or "N/D")
+                offline_rows.append({
+                    "Franqueado": nome_franquia,
+                    "Cidade": nome_cidade,
+                    "ID Cliente": wl_id,
+                    "Cliente": row.get("Cliente", info.get("nome_cliente", "")),
+                    "ID Câmera": cam.get(COL_ID_CAM, ""),
+                    "Nome da Câmera": cam.get(COL_NOME_CAM, ""),
+                    "Status": cam.get(COL_STATUS, "OFFLINE"),
+                    "Última vez online": ult_txt,
+                    "Tempo offline": tempo,
+                    "Observações": cam.get(COL_OBS, ""),
+                })
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        pd.DataFrame(resumo_rows).to_excel(writer, index=False, sheet_name="Resumo")
+        pd.DataFrame(offline_rows or [{"Mensagem": "Nenhuma câmera offline nesta cidade."}]).to_excel(
+            writer, index=False, sheet_name="Cameras Offline"
+        )
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def gerar_anexos_xlsx_cidades_franquia(nome_franquia: str, df_franquia: pd.DataFrame, dados: dict) -> list[tuple[str, bytes]]:
+    """Cria um XLSX por cidade para ser anexado no .eml da franquia."""
+    if df_franquia is None or df_franquia.empty:
+        return []
+    df_tmp = df_franquia.copy()
+    df_tmp["_Cidade Anexo"] = df_tmp.apply(lambda r: _cidade_relatorio_franquia(str(r.get("ID", "")), r, dados), axis=1)
+    anexos = []
+    carimbo = agora_sao_paulo_str('%Y%m%d_%H%M')
+    for cidade, df_cidade in df_tmp.groupby("_Cidade Anexo", dropna=False):
+        cidade = str(cidade or "Sem cidade").strip() or "Sem cidade"
+        nome_arquivo = f"cameras_{slug_arquivo(nome_franquia)}_{slug_arquivo(cidade)}_{carimbo}.xlsx"
+        conteudo = gerar_xlsx_cidade_franquia(nome_franquia, cidade, df_cidade.drop(columns=["_Cidade Anexo"], errors="ignore"), dados)
+        anexos.append((nome_arquivo, conteudo))
+    return anexos
+
+
+def gerar_eml_relatorio_franquia(nome_franquia: str, html_body: str, anexos: list[tuple[str, bytes]] | None = None) -> bytes:
+    """Gera .eml com corpo HTML e, opcionalmente, anexos XLSX por cidade."""
+    from email.mime.application import MIMEApplication
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.header import Header
+    from email.utils import formatdate
+
+    assunto = f"Relatório de Monitoramento - {nome_franquia}"
+    msg = MIMEMultipart("mixed")
+    msg["Subject"] = str(Header(assunto, "utf-8"))
+    msg["MIME-Version"] = "1.0"
+    msg["Date"] = formatdate(localtime=True)
+
+    msg_alt = MIMEMultipart("alternative")
+    msg_alt.attach(MIMEText(html_body, "html", "utf-8"))
+    msg.attach(msg_alt)
+
+    for nome_arquivo, conteudo in anexos or []:
+        part = MIMEApplication(
+            conteudo,
+            _subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        part.add_header("Content-Disposition", "attachment", filename=nome_arquivo)
+        msg.attach(part)
+
+    return msg.as_bytes()
 
 def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict, key_prefix: str = "relatorio_franquia") -> None:
     st.markdown("#### 📧 Relatório por franquia")
-    st.caption("Gere um HTML pronto para colar no corpo do e-mail ou um arquivo .eml para abrir no Outlook.")
+    st.caption("Gere um HTML pronto para colar no corpo do e-mail ou um arquivo .eml para abrir no Outlook. O .eml já vai com anexos XLSX separados por cidade da franquia.")
     if df_clientes_ops is None or df_clientes_ops.empty or "Franqueado" not in df_clientes_ops.columns:
         st.info("Nenhum dado de franquia encontrado. Confira se o arquivo nome_clientes.xlsx possui a coluna Franqueado.")
         return
@@ -4090,16 +4215,17 @@ def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict, ke
         franquia = str(row["Franqueado"])
         df_franquia = df_base[df_base["Franqueado"].eq(franquia)].copy()
         html_rel = gerar_relatorio_franquia_html(franquia, df_franquia, dados)
+        anexos_xlsx = gerar_anexos_xlsx_cidades_franquia(franquia, df_franquia, dados)
         nome_base = f"relatorio_monitoramento_{slug_arquivo(franquia)}_{agora_sao_paulo_str('%Y%m%d_%H%M')}"
         st.markdown(f"""
         <div style="background:#ffffff;border:1px solid #E9D5FF;border-radius:12px;padding:12px 14px;margin:8px 0;box-shadow:0 8px 22px rgba(91,33,182,.06)">
             <div style="font-size:14px;font-weight:800;color:#171126">{escape_html(franquia)}</div>
-            <div style="font-size:12px;color:#6B5A7A">{int(row['Clientes'])} clientes · {int(row['Total'])} câmeras · {int(row['Offline'])} offline · {float(row['% Offline']):.1f}% offline</div>
+            <div style="font-size:12px;color:#6B5A7A">{int(row['Clientes'])} clientes · {int(row['Total'])} câmeras · {int(row['Offline'])} offline · {float(row['% Offline']):.1f}% offline · {len(anexos_xlsx)} anexo(s) XLSX por cidade</div>
         </div>
         """, unsafe_allow_html=True)
         c_html, c_eml = st.columns(2)
         c_html.download_button("⬇ Baixar HTML", data=html_rel.encode("utf-8"), file_name=f"{nome_base}.html", mime="text/html", use_container_width=True, key=f"{key_prefix}_dl_html_{slug_arquivo(franquia)}")
-        c_eml.download_button("✉ Baixar e abrir no Outlook (.eml)", data=gerar_eml_relatorio_franquia(franquia, html_rel), file_name=f"{nome_base}.eml", mime="message/rfc822", use_container_width=True, key=f"{key_prefix}_dl_eml_{slug_arquivo(franquia)}")
+        c_eml.download_button("✉ Baixar Outlook (.eml + XLSX por cidade)", data=gerar_eml_relatorio_franquia(franquia, html_rel, anexos_xlsx), file_name=f"{nome_base}.eml", mime="message/rfc822", use_container_width=True, key=f"{key_prefix}_dl_eml_{slug_arquivo(franquia)}")
     if franquia_preview:
         st.markdown("##### Prévia do HTML")
         html_preview = gerar_relatorio_franquia_html(franquia_preview, df_base[df_base["Franqueado"].eq(franquia_preview)].copy(), dados)
