@@ -4058,7 +4058,7 @@ def gerar_eml_relatorio_franquia(nome_franquia: str, html_body: str) -> bytes:
     return eml.encode("utf-8")
 
 
-def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict) -> None:
+def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict, key_prefix: str = "relatorio_franquia") -> None:
     st.markdown("#### 📧 Relatório por franquia")
     st.caption("Gere um HTML pronto para colar no corpo do e-mail ou um arquivo .eml para abrir no Outlook.")
     if df_clientes_ops is None or df_clientes_ops.empty or "Franqueado" not in df_clientes_ops.columns:
@@ -4075,11 +4075,11 @@ def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict) ->
     resumo["% Offline"] = (resumo["Offline"] / resumo["Total"].replace({0: pd.NA}) * 100).fillna(0).round(1)
     col_sel, col_busca = st.columns([2, 1])
     with col_busca:
-        termo = st.text_input("Buscar franquia", key="busca_relatorio_franquia", placeholder="Digite parte do nome…").strip()
+        termo = st.text_input("Buscar franquia", key=f"{key_prefix}_busca", placeholder="Digite parte do nome…").strip()
     resumo_view = resumo[resumo["Franqueado"].str.upper().str.contains(re.escape(termo.upper()), na=False)].copy() if termo else resumo.copy()
     with col_sel:
         opcoes = resumo_view["Franqueado"].tolist()
-        franquia_preview = st.selectbox("Pré-visualizar franquia", opcoes, key="preview_relatorio_franquia") if opcoes else None
+        franquia_preview = st.selectbox("Pré-visualizar franquia", opcoes, key=f"{key_prefix}_preview") if opcoes else None
     if resumo_view.empty:
         st.info("Nenhuma franquia encontrada para a busca.")
         return
@@ -4098,8 +4098,8 @@ def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict) ->
         </div>
         """, unsafe_allow_html=True)
         c_html, c_eml = st.columns(2)
-        c_html.download_button("⬇ Baixar HTML", data=html_rel.encode("utf-8"), file_name=f"{nome_base}.html", mime="text/html", use_container_width=True, key=f"dl_html_franquia_{slug_arquivo(franquia)}")
-        c_eml.download_button("✉ Baixar e abrir no Outlook (.eml)", data=gerar_eml_relatorio_franquia(franquia, html_rel), file_name=f"{nome_base}.eml", mime="message/rfc822", use_container_width=True, key=f"dl_eml_franquia_{slug_arquivo(franquia)}")
+        c_html.download_button("⬇ Baixar HTML", data=html_rel.encode("utf-8"), file_name=f"{nome_base}.html", mime="text/html", use_container_width=True, key=f"{key_prefix}_dl_html_{slug_arquivo(franquia)}")
+        c_eml.download_button("✉ Baixar e abrir no Outlook (.eml)", data=gerar_eml_relatorio_franquia(franquia, html_rel), file_name=f"{nome_base}.eml", mime="message/rfc822", use_container_width=True, key=f"{key_prefix}_dl_eml_{slug_arquivo(franquia)}")
     if franquia_preview:
         st.markdown("##### Prévia do HTML")
         html_preview = gerar_relatorio_franquia_html(franquia_preview, df_base[df_base["Franqueado"].eq(franquia_preview)].copy(), dados)
@@ -5580,7 +5580,7 @@ def main():
                     del st.session_state["detalhe"]; st.rerun()
 
         with clientes_subtabs[1]:
-            render_relatorio_por_franquia(df_clientes_ops, dados)
+            render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="clientes_relatorio_franquia")
 
     # ════════════════════════════════════════════
     # ABA 2 — CENTRAL DE AÇÕES
@@ -6595,7 +6595,7 @@ def main():
     with tabs[8]:
         st.markdown("### ✉️ Relatório por franquia")
         st.caption("Atalho da mesma rotina disponível dentro de Clientes > Relatório por franquia.")
-        render_relatorio_por_franquia(df_clientes_ops, dados)
+        render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="atalho_relatorio_franquia")
 
 
 if __name__ == "__main__":
