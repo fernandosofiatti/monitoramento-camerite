@@ -1705,7 +1705,7 @@ def render_form_cadastro_acao(dados: dict, prefixo_key: str = "central") -> None
                 key=f"{prefixo_key}_status_acao",
             )
 
-        submitted = st.form_submit_button("💾 Salvar ação", use_container_width=True)
+        submitted = st.form_submit_button(f"💾 Salvar ação · {prefixo_key}", use_container_width=True)
 
     if submitted:
         if not str(acao_texto or "").strip():
@@ -2073,7 +2073,7 @@ def render_lista_acoes(df_todas_acoes: pd.DataFrame, dados: dict | None = None) 
                             index=idx,
                             key=f"edit_status_{acao_id}",
                         )
-                    salvar_edicao = st.form_submit_button("💾 Atualizar ação", use_container_width=True)
+                    salvar_edicao = st.form_submit_button(f"💾 Atualizar ação · {acao_id}", use_container_width=True)
 
                 if salvar_edicao:
                     prazo_str = novo_prazo.strftime("%Y-%m-%d") if novo_prazo else None
@@ -2176,7 +2176,7 @@ def render_manutencao_acoes(df_todas_acoes: pd.DataFrame | None) -> None:
         with col3:
             novo_prazo_data = st.date_input("Prazo", value=prazo_default, format="DD/MM/YYYY", key=f"manut_prazo_{acao_id}")
 
-        salvar = st.form_submit_button("💾 Atualizar ação", use_container_width=True)
+        salvar = st.form_submit_button(f"💾 Atualizar ação · manutenção", use_container_width=True)
 
     if salvar:
         prazo_str = novo_prazo_data.strftime("%Y-%m-%d") if manter_prazo else None
@@ -4232,7 +4232,7 @@ def tabela_clara(df: pd.DataFrame):
 
 
 def render_dataframe(df: pd.DataFrame, height: int):
-    st.dataframe(tabela_clara(df), use_container_width=True, height=height)
+    st.dataframe(tabela_clara(df), use_container_width=True, height=height, key=f"df_{uuid.uuid4().hex}")
 
 
 def render_card(col, wl_id, v, tendencia, delta_off):
@@ -5266,6 +5266,7 @@ def main():
                             "Buscar",
                             value=st.session_state.get("clientes_busca", ""),
                             placeholder="Buscar cliente, franqueado ou ID…",
+                            key="clientes_busca_input",
                         )
                     with col_franq:
                         filtro_franq_input = st.selectbox(
@@ -5273,6 +5274,7 @@ def main():
                             franqueados,
                             index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
                             if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
+                            key="clientes_franq_input",
                         )
                     with col_min:
                         min_opcoes = [0, 10, 50, 100, 200]
@@ -5281,8 +5283,9 @@ def main():
                             min_opcoes,
                             index=min_opcoes.index(st.session_state.get("clientes_min", 0))
                             if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
+                            key="clientes_min_input",
                         )
-                    aplicar_filtros = st.form_submit_button("Aplicar filtros", use_container_width=True)
+                    aplicar_filtros = st.form_submit_button("Aplicar filtros · Clientes", use_container_width=True)
     
                 if aplicar_filtros:
                     st.session_state["clientes_busca"] = busca_input
@@ -5555,7 +5558,7 @@ def main():
                                 key=f"status_nova_acao_{wl_id}"
                             )
                     
-                        if st.form_submit_button("➕ Registrar ação", use_container_width=True):
+                        if st.form_submit_button(f"➕ Registrar ação · {wl_id}", use_container_width=True):
                             if not acao_texto.strip():
                                 st.error("Descreva a ação a ser realizada")
                             else:
