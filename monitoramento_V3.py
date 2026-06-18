@@ -3129,174 +3129,260 @@ def carregar_evolucao_cliente_snapshots(wl_id: str, limite: int = 10) -> pd.Data
     return out[cols]
 
 
-
-def _debug_evolucao_cliente_supabase(wl_id: str, limite: int = 10) -> None:
-    """Mostra diagnóstico VISÍVEL no lugar do gráfico quando a evolução não aparece."""
-    st.error("⚠️ Diagnóstico do gráfico de evolução — este bloco aparece exatamente onde o gráfico deveria aparecer.")
-
-    with st.expander("Ver diagnóstico técnico da evolução do cliente", expanded=True):
-        st.write({
-            "id_whitelabel_recebido": str(wl_id),
-            "supabase_configurado": bool(supabase_configurado()),
-            "tabela_master_snapshots": SNAPSHOT_MASTER_TABLE,
-            "tabela_snapshot_clientes": SNAPSHOT_CLIENTES_TABLE,
-            "tabela_snapshot_cameras": SNAPSHOT_TABLE,
-            "limite_snapshots": int(limite),
-        })
-
-        if not supabase_configurado():
-            st.warning("Supabase não está configurado neste ambiente. Confira SUPABASE_URL e SUPABASE_KEY nos Secrets do Streamlit.")
-            return
-
-        def _debug_get(tabela: str, params: dict, titulo: str):
-            try:
-                url = supabase_table_url(tabela)
-                resp = requests.get(url, headers=supabase_headers(), params=params, timeout=30)
-                st.markdown(f"**{titulo}**")
-                st.write({
-                    "url_tabela": url.split('/rest/v1/')[0] + "/rest/v1/" + tabela,
-                    "status_code": resp.status_code,
-                    "params": params,
-                    "resposta_inicio": (resp.text or "")[:800],
-                })
-                if resp.status_code in (200, 206):
-                    try:
-                        data = resp.json() or []
-                    except Exception:
-                        data = []
-                    st.write({"linhas_retornadas": len(data)})
-                    if data:
-                        st.dataframe(pd.DataFrame(data).head(10), use_container_width=True)
-                    return pd.DataFrame(data)
-                return pd.DataFrame()
-            except Exception as e:
-                st.exception(e)
-                return pd.DataFrame()
-
-        df_master = _debug_get(
-            SNAPSHOT_MASTER_TABLE,
-            {"select": "id,label,gravado_em,notas", "order": "id.desc", "limit": str(int(limite))},
-            "1) Consulta na tabela mestre de snapshots",
-        )
-
-        if df_master.empty:
-            st.warning("Não veio nenhum snapshot da tabela mestre. O gráfico não tem eixo X para montar.")
-            st.info("Possíveis causas: tabela 'snapshots' com outro nome, RLS bloqueando SELECT, ou snapshots salvos em outra tabela.")
-            return
-
-        if "id" not in df_master.columns:
-            st.warning("A tabela mestre retornou dados, mas sem coluna 'id'.")
-            return
-
-        ids = pd.to_numeric(df_master["id"], errors="coerce").dropna().astype(int).tolist()[:int(limite)]
-        st.write({"snapshot_ids_encontrados": ids})
-        if not ids:
-            st.warning("Não consegui converter os IDs dos snapshots para número.")
-            return
-
-        # Testa o snapshot mais recente diretamente nas duas tabelas de detalhe.
-        sid = ids[0]
-        _debug_get(
-            SNAPSHOT_CLIENTES_TABLE,
-            {
-                "select": "*",
-                "snapshot_id": f"eq.{sid}",
-                "id_whitelabel": f"eq.{str(wl_id).strip()}",
-                "limit": "20",
-            },
-            f"2) Consulta em {SNAPSHOT_CLIENTES_TABLE} para snapshot_id={sid} e cliente={wl_id}",
-        )
-        _debug_get(
-            SNAPSHOT_CLIENTES_TABLE,
-            {
-                "select": "*",
-                "snapshot_id": f"eq.{sid}",
-                "limit": "20",
-            },
-            f"3) Amostra geral de {SNAPSHOT_CLIENTES_TABLE} para snapshot_id={sid}",
-        )
-        _debug_get(
-            SNAPSHOT_TABLE,
-            {
-                "select": "*",
-                "snapshot_id": f"eq.{sid}",
-                "id_whitelabel": f"eq.{str(wl_id).strip()}",
-                "limit": "20",
-            },
-            f"4) Consulta em {SNAPSHOT_TABLE} para snapshot_id={sid} e cliente={wl_id}",
-        )
-        _debug_get(
-            SNAPSHOT_TABLE,
-            {
-                "select": "*",
-                "snapshot_id": f"eq.{sid}",
-                "limit": "20",
-            },
-            f"5) Amostra geral de {SNAPSHOT_TABLE} para snapshot_id={sid}",
-        )
-
-        st.info("Se as consultas gerais trazem dados, mas as filtradas por cliente não trazem, o ID_Whitelabel salvo no snapshot está diferente do ID usado no detalhe.")
-
-
 def render_grafico_evolucao_cliente(wl_id: str) -> None:
-    """Desenha gráfico área + bolinhas da evolução individual do cliente, com erro visível."""
+    """Desenha gráfico área + bolinhas da evolução individual do cliente."""
+    df_evo = carregar_evolucao_cliente_snapshots(str(wl_id), limite=10)
+
     st.markdown("### 📈 Evolução do cliente")
     st.caption("Últimos 10 snapshots salvos. A área mostra o % offline e cada bolinha representa um snapshot gravado.")
 
-    try:
-        df_evo = carregar_evolucao_cliente_snapshots(str(wl_id), limite=10)
-    except Exception as e:
-        st.exception(e)
-        _debug_evolucao_cliente_supabase(str(wl_id), limite=10)
+    if df_evo.empty:
+        st.info("Ainda não há histórico de snapshots suficiente para montar a evolução deste cliente.")
         return
 
-    if df_evo is None or df_evo.empty:
-        st.warning("O gráfico não foi montado porque a consulta de evolução voltou vazia.")
-        _debug_evolucao_cliente_supabase(str(wl_id), limite=10)
-        return
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_evo["Data"],
+        y=df_evo["pct_offline"],
+        mode="lines+markers",
+        fill="tozeroy",
+        line=dict(color="#7C3AED", width=3),
+        marker=dict(size=9, color="#7C3AED", line=dict(width=2, color="#ffffff")),
+        customdata=df_evo[["Snapshot", "offline", "total"]].values,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "%{x}<br>"
+            "% Offline: %{y:.1f}%<br>"
+            "Offline: %{customdata[1]} de %{customdata[2]} câmeras"
+            "<extra></extra>"
+        ),
+        name="% offline",
+    ))
+    fig.update_layout(
+        **pdefaults(),
+        height=360,
+        margin=dict(l=10, r=10, t=20, b=10),
+        showlegend=False,
+        hovermode="x unified",
+        yaxis=dict(title="% offline", ticksuffix="%", rangemode="tozero", gridcolor="#F3E8FF"),
+        xaxis=dict(title="Snapshot", gridcolor="#F8F5FF"),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"grafico_evolucao_cliente_{str(wl_id)}")
 
-    try:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=df_evo["Data"],
-            y=df_evo["pct_offline"],
-            mode="lines+markers",
-            fill="tozeroy",
-            line=dict(color="#7C3AED", width=3),
-            marker=dict(size=9, color="#7C3AED", line=dict(width=2, color="#ffffff")),
-            customdata=df_evo[["Snapshot", "offline", "total"]].values,
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "%{x}<br>"
-                "% Offline: %{y:.1f}%<br>"
-                "Offline: %{customdata[1]} de %{customdata[2]} câmeras"
-                "<extra></extra>"
-            ),
-            name="% offline",
-        ))
-        fig.update_layout(
-            **pdefaults(),
-            height=360,
-            margin=dict(l=10, r=10, t=20, b=10),
-            showlegend=False,
-            hovermode="x unified",
-            yaxis=dict(title="% offline", ticksuffix="%", rangemode="tozero", gridcolor="#F3E8FF"),
-            xaxis=dict(title="Snapshot", gridcolor="#F8F5FF"),
-        )
-        st.plotly_chart(fig, use_container_width=True, key=f"grafico_evolucao_cliente_{str(wl_id)}")
+    df_evo_show = df_evo[["Snapshot", "Data", "total", "offline", "pct_offline"]].copy()
+    df_evo_show = df_evo_show.rename(columns={
+        "total": "Total",
+        "offline": "Offline",
+        "pct_offline": "% Offline",
+    })
+    df_evo_show["% Offline"] = df_evo_show["% Offline"].map(lambda v: f"{float(v):.1f}%")
+    with st.expander("Ver dados do gráfico", expanded=False):
+        render_dataframe(df_evo_show, height=min(420, (len(df_evo_show) + 1) * 35 + 3))
 
-        df_evo_show = df_evo[["Snapshot", "Data", "total", "offline", "pct_offline"]].copy()
-        df_evo_show = df_evo_show.rename(columns={
-            "total": "Total",
-            "offline": "Offline",
-            "pct_offline": "% Offline",
+
+
+# ─────────────────────────────────────────────
+# ABA: DETALHE CLIENTE SNAP
+# ─────────────────────────────────────────────
+def _df_clientes_para_busca_snap(dados: dict) -> pd.DataFrame:
+    """Monta uma base simples para busca de clientes na aba Detalhe Cliente Snap."""
+    rows = []
+    for wl_id, info in (dados or {}).items():
+        wl = str(wl_id or "").strip()
+        if not wl:
+            continue
+        total, offline, pct = calcular_metricas_cliente_info(info)
+        rows.append({
+            "ID_Whitelabel": wl,
+            "Cliente": str(info.get("cidade_estado") or info.get("nome_cliente") or f"ID {wl}").strip(),
+            "Franqueado": str(info.get("nome_empresa") or "").strip(),
+            "Total atual": total,
+            "Offline atual": offline,
+            "% Offline atual": pct,
+            "busca": f"{wl} {info.get('cidade_estado','')} {info.get('nome_cliente','')} {info.get('nome_empresa','')}".upper(),
         })
-        df_evo_show["% Offline"] = df_evo_show["% Offline"].map(lambda v: f"{float(v):.1f}%")
-        with st.expander("Ver dados do gráfico", expanded=False):
-            render_dataframe(df_evo_show, height=min(420, (len(df_evo_show) + 1) * 35 + 3))
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["ID_Whitelabel", "Cliente", "Franqueado", "Total atual", "Offline atual", "% Offline atual", "busca"])
+    return df.sort_values(["Cliente", "ID_Whitelabel"]).reset_index(drop=True)
+
+
+def _diagnostico_snap_cliente(wl_id: str) -> None:
+    """Mostra, na tela, dados crus usados para descobrir por que o gráfico não apareceu."""
+    wl_id = str(wl_id or "").strip()
+    st.markdown("#### 🧪 Diagnóstico dos snapshots")
+
+    diag = {
+        "Supabase configurado": supabase_configurado(),
+        "Tabela mestre": SNAPSHOT_MASTER_TABLE,
+        "Tabela resumo por cliente": SNAPSHOT_CLIENTES_TABLE,
+        "Tabela câmeras": SNAPSHOT_TABLE,
+        "ID_Whitelabel pesquisado": wl_id,
+    }
+    st.json(diag)
+
+    try:
+        df_snaps = _snapshot_datas_df()
+        st.write(f"Snapshots encontrados na tabela `{SNAPSHOT_MASTER_TABLE}`: **{len(df_snaps)}**")
+        if not df_snaps.empty:
+            st.dataframe(df_snaps.head(10), use_container_width=True, hide_index=True)
     except Exception as e:
-        st.exception(e)
-        _debug_evolucao_cliente_supabase(str(wl_id), limite=10)
+        st.error(f"Erro ao listar `{SNAPSHOT_MASTER_TABLE}`: {e}")
+
+    try:
+        df_cli, erro_cli = _supabase_select_all(
+            SNAPSHOT_CLIENTES_TABLE,
+            params={
+                "select": "*",
+                "id_whitelabel": f"eq.{wl_id}",
+                "order": "snapshot_id.desc",
+            },
+            page_size=20,
+        )
+        if erro_cli:
+            st.error(f"Erro consultando `{SNAPSHOT_CLIENTES_TABLE}`: {erro_cli}")
+        else:
+            st.write(f"Linhas encontradas em `{SNAPSHOT_CLIENTES_TABLE}` para este cliente: **{len(df_cli)}**")
+            if not df_cli.empty:
+                st.dataframe(df_cli.head(10), use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhuma linha na tabela de resumo por cliente para esse ID_Whitelabel.")
+    except Exception as e:
+        st.error(f"Erro inesperado ao consultar `{SNAPSHOT_CLIENTES_TABLE}`: {e}")
+
+    try:
+        df_cam, erro_cam = _supabase_select_all(
+            SNAPSHOT_TABLE,
+            params={
+                "select": "snapshot_id,id_whitelabel,id_camera,status_camera,nome_camera,data_snapshot",
+                "id_whitelabel": f"eq.{wl_id}",
+                "order": "snapshot_id.desc",
+            },
+            page_size=20,
+        )
+        if erro_cam:
+            st.error(f"Erro consultando `{SNAPSHOT_TABLE}`: {erro_cam}")
+        else:
+            st.write(f"Linhas encontradas em `{SNAPSHOT_TABLE}` para este cliente: **{len(df_cam)}**")
+            if not df_cam.empty:
+                st.dataframe(df_cam.head(10), use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhuma câmera encontrada na tabela de snapshots de câmeras para esse ID_Whitelabel.")
+    except Exception as e:
+        st.error(f"Erro inesperado ao consultar `{SNAPSHOT_TABLE}`: {e}")
+
+
+def render_aba_detalhe_cliente_snap(dados: dict) -> None:
+    """Aba independente para buscar um cliente e montar o gráfico de evolução via snapshots do Supabase."""
+    st.markdown("### 📈 Detalhe Cliente Snap")
+    st.caption("Busque um cliente por nome, franqueado ou ID_Whitelabel. O gráfico usa os últimos 10 snapshots gravados no Supabase.")
+
+    if not supabase_configurado():
+        st.error("Supabase não está configurado. Verifique SUPABASE_URL e SUPABASE_KEY nos Secrets.")
+        return
+
+    df_clientes = _df_clientes_para_busca_snap(dados)
+    if df_clientes.empty:
+        st.warning("Não encontrei clientes carregados na base atual para montar a busca.")
+        return
+
+    termo = st.text_input(
+        "Buscar cliente",
+        placeholder="Digite parte do nome, franqueado ou ID_Whitelabel...",
+        key="detalhe_cliente_snap_busca",
+    ).strip().upper()
+
+    if termo:
+        df_filtrado = df_clientes[df_clientes["busca"].str.contains(re.escape(termo), na=False)].copy()
+    else:
+        df_filtrado = df_clientes.copy()
+
+    if df_filtrado.empty:
+        st.warning("Nenhum cliente encontrado com esse termo.")
+        with st.expander("Ver primeiros clientes disponíveis", expanded=False):
+            st.dataframe(df_clientes.drop(columns=["busca"]).head(30), use_container_width=True, hide_index=True)
+        return
+
+    df_filtrado = df_filtrado.head(100).copy()
+    df_filtrado["opcao"] = df_filtrado.apply(
+        lambda r: f"{r['Cliente']} · ID {r['ID_Whitelabel']} · {r['Offline atual']}/{r['Total atual']} offline ({float(r['% Offline atual']):.1f}%)",
+        axis=1,
+    )
+
+    escolha = st.selectbox(
+        "Cliente",
+        df_filtrado["opcao"].tolist(),
+        key="detalhe_cliente_snap_select",
+    )
+    row = df_filtrado[df_filtrado["opcao"] == escolha].iloc[0]
+    wl_id = str(row["ID_Whitelabel"]).strip()
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("ID_Whitelabel", wl_id)
+    c2.metric("Total atual", int(row["Total atual"]))
+    c3.metric("Offline atual", int(row["Offline atual"]))
+    c4.metric("% Offline atual", f"{float(row['% Offline atual']):.1f}%")
+
+    st.markdown(f"#### {escape_html(row['Cliente'])}")
+    if str(row.get("Franqueado", "")).strip():
+        st.caption(f"Franqueado: {row['Franqueado']}")
+
+    try:
+        df_evo = carregar_evolucao_cliente_snapshots(wl_id, limite=10)
+    except Exception as e:
+        st.error(f"Erro ao carregar evolução do cliente: {e}")
+        _diagnostico_snap_cliente(wl_id)
+        return
+
+    st.markdown("### 📊 Evolução nos snapshots")
+    if df_evo.empty:
+        st.warning("A consulta rodou, mas não retornou histórico para este cliente. Veja o diagnóstico abaixo.")
+        _diagnostico_snap_cliente(wl_id)
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_evo["Data"],
+        y=df_evo["pct_offline"],
+        mode="lines+markers",
+        fill="tozeroy",
+        line=dict(color="#7C3AED", width=3),
+        marker=dict(size=10, color="#7C3AED", line=dict(width=2, color="#ffffff")),
+        customdata=df_evo[["Snapshot", "offline", "total", "snapshot_id"]].values,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "Snapshot ID: %{customdata[3]}<br>"
+            "%{x}<br>"
+            "% Offline: %{y:.1f}%<br>"
+            "Offline: %{customdata[1]} de %{customdata[2]} câmeras"
+            "<extra></extra>"
+        ),
+        name="% offline",
+    ))
+    fig.update_layout(
+        **pdefaults(),
+        height=430,
+        margin=dict(l=10, r=10, t=30, b=10),
+        showlegend=False,
+        hovermode="x unified",
+        yaxis=dict(title="% offline", ticksuffix="%", rangemode="tozero", gridcolor="#F3E8FF"),
+        xaxis=dict(title="Snapshot", gridcolor="#F8F5FF"),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"detalhe_snap_area_{wl_id}")
+
+    df_show = df_evo[["snapshot_id", "Snapshot", "Data", "total", "offline", "pct_offline"]].copy()
+    df_show = df_show.rename(columns={
+        "snapshot_id": "Snapshot ID",
+        "total": "Total",
+        "offline": "Offline",
+        "pct_offline": "% Offline",
+    })
+    df_show["% Offline"] = df_show["% Offline"].map(lambda v: f"{float(v):.1f}%")
+    st.markdown("#### Dados usados no gráfico")
+    st.dataframe(df_show, use_container_width=True, hide_index=True)
+
+    with st.expander("Diagnóstico técnico", expanded=False):
+        _diagnostico_snap_cliente(wl_id)
 
 def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> pd.DataFrame:
     """Monta a base de câmeras do snapshot atual para identificar novas câmeras futuramente."""
@@ -6969,7 +7055,7 @@ def main():
     </div></div>""", unsafe_allow_html=True)
 
     # ── Abas ──
-    tabs = st.tabs(["Auditoria", "Clientes", "Central de Ações", "Evidências", "📈 Tendência", "Atualizar Base"])
+    tabs = st.tabs(["Auditoria", "Clientes", "Central de Ações", "Evidências", "📈 Tendência", "Detalhe Cliente Snap", "Atualizar Base"])
 
     with tabs[0]:
         auditoria_subtabs = st.tabs(["📋 Visão Geral", "🕐 Tempo Offline", "📊 % por Cliente", "🚘 LPRs Offline"])
@@ -7006,6 +7092,9 @@ def main():
         render_aba_tendencia(ctx)
 
     with tabs[5]:
+        render_aba_detalhe_cliente_snap(dados)
+
+    with tabs[6]:
         render_aba_atualizar_base(df_origem)
 
 
