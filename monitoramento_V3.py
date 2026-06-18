@@ -3064,6 +3064,113 @@ def carregar_snapshot_clientes(sid: int, wl_ids_validos: set[str] | None = None)
     return out[["wl_id", "nome_cliente", "total", "offline", "pct_offline"]]
 
 
+
+@st.cache_data(ttl=60)
+def carregar_evolucao_cliente_snapshots(wl_id: str, limite: int = 10) -> pd.DataFrame:
+    """Retorna a evolução de um cliente nos últimos snapshots salvos.
+
+    Usa a tabela snapshot_clientes, que já guarda total, offline e % offline por cliente.
+    O limite padrão é 10 snapshots, conforme a visão solicitada para o detalhe do cliente.
+    """
+    wl_id = str(wl_id or "").strip()
+    if not wl_id or not supabase_configurado():
+        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
+
+    df_snaps = _snapshot_datas_df()
+    if df_snaps.empty:
+        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
+
+    df_snaps = df_snaps.copy()
+    df_snaps["id"] = pd.to_numeric(df_snaps["id"], errors="coerce")
+    df_snaps = df_snaps.dropna(subset=["id"]).copy()
+    df_snaps["id"] = df_snaps["id"].astype(int)
+    df_snaps = df_snaps.sort_values("id", ascending=False).head(int(limite))
+
+    if df_snaps.empty:
+        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
+
+    ids = df_snaps["id"].astype(str).tolist()
+    filtro_ids = "in.(" + ",".join(ids) + ")"
+    df_cli, erro = _supabase_select_all(
+        SNAPSHOT_CLIENTES_TABLE,
+        params={
+            "select": "snapshot_id,id_whitelabel,nome_cliente,total_cameras,total_offline,pct_offline",
+            "snapshot_id": filtro_ids,
+            "id_whitelabel": f"eq.{wl_id}",
+            "order": "snapshot_id.asc",
+        },
+        page_size=1000,
+    )
+    if erro or df_cli.empty:
+        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
+
+    out = pd.DataFrame()
+    out["snapshot_id"] = pd.to_numeric(df_cli.get("snapshot_id", 0), errors="coerce").fillna(0).astype(int)
+    out["total"] = pd.to_numeric(df_cli.get("total_cameras", 0), errors="coerce").fillna(0).astype(int)
+    out["offline"] = pd.to_numeric(df_cli.get("total_offline", 0), errors="coerce").fillna(0).astype(int)
+    out["pct_offline"] = pd.to_numeric(df_cli.get("pct_offline", 0), errors="coerce").fillna(0.0)
+
+    meta = df_snaps[["id", "label", "gravado_em"]].rename(columns={"id": "snapshot_id"})
+    out = out.merge(meta, on="snapshot_id", how="left")
+    out["gravado_em_dt"] = pd.to_datetime(out["gravado_em"], errors="coerce")
+    out = out.sort_values(["gravado_em_dt", "snapshot_id"], ascending=[True, True]).reset_index(drop=True)
+    out["Data"] = out["gravado_em_dt"].dt.strftime("%d/%m %H:%M")
+    out["Data"] = out["Data"].fillna(out["snapshot_id"].astype(str))
+    out["Snapshot"] = out["label"].astype(str).replace({"nan": ""})
+    out["Snapshot"] = out["Snapshot"].where(out["Snapshot"].str.strip() != "", "Snapshot " + out["snapshot_id"].astype(str))
+    return out[["snapshot_id", "Snapshot", "Data", "gravado_em", "total", "offline", "pct_offline"]]
+
+
+def render_grafico_evolucao_cliente(wl_id: str) -> None:
+    """Desenha gráfico área + bolinhas da evolução individual do cliente."""
+    df_evo = carregar_evolucao_cliente_snapshots(str(wl_id), limite=10)
+
+    st.markdown("### 📈 Evolução do cliente")
+    st.caption("Últimos 10 snapshots salvos. A área mostra o % offline e cada bolinha representa um snapshot gravado.")
+
+    if df_evo.empty:
+        st.info("Ainda não há histórico de snapshots suficiente para montar a evolução deste cliente.")
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_evo["Data"],
+        y=df_evo["pct_offline"],
+        mode="lines+markers",
+        fill="tozeroy",
+        line=dict(color="#7C3AED", width=3),
+        marker=dict(size=9, color="#7C3AED", line=dict(width=2, color="#ffffff")),
+        customdata=df_evo[["Snapshot", "offline", "total"]].values,
+        hovertemplate=(
+            "<b>%{customdata[0]}</b><br>"
+            "%{x}<br>"
+            "% Offline: %{y:.1f}%<br>"
+            "Offline: %{customdata[1]} de %{customdata[2]} câmeras"
+            "<extra></extra>"
+        ),
+        name="% offline",
+    ))
+    fig.update_layout(
+        **pdefaults(),
+        height=360,
+        margin=dict(l=10, r=10, t=20, b=10),
+        showlegend=False,
+        hovermode="x unified",
+        yaxis=dict(title="% offline", ticksuffix="%", rangemode="tozero", gridcolor="#F3E8FF"),
+        xaxis=dict(title="Snapshot", gridcolor="#F8F5FF"),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"grafico_evolucao_cliente_{str(wl_id)}")
+
+    df_evo_show = df_evo[["Snapshot", "Data", "total", "offline", "pct_offline"]].copy()
+    df_evo_show = df_evo_show.rename(columns={
+        "total": "Total",
+        "offline": "Offline",
+        "pct_offline": "% Offline",
+    })
+    df_evo_show["% Offline"] = df_evo_show["% Offline"].map(lambda v: f"{float(v):.1f}%")
+    with st.expander("Ver dados do gráfico", expanded=False):
+        render_dataframe(df_evo_show, height=min(420, (len(df_evo_show) + 1) * 35 + 3))
+
 def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> pd.DataFrame:
     """Monta a base de câmeras do snapshot atual para identificar novas câmeras futuramente."""
     if df_origem is None or df_origem.empty:
@@ -4028,6 +4135,8 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
 
     if df_det.empty:
         st.success("Nenhuma câmera offline.")
+        st.markdown("<hr>", unsafe_allow_html=True)
+        render_grafico_evolucao_cliente(wl_id)
         return
 
     col_map = {
@@ -4084,6 +4193,9 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
             use_container_width=True,
             key=f"dl_detalhe_cliente_csv_{str(wl_id)}_top",
         )
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    render_grafico_evolucao_cliente(wl_id)
 
 
 
@@ -5825,6 +5937,9 @@ def render_aba_clientes(ctx: 'ContextoMain') -> None:
                         col_t1.metric("⏱️ Mais tempo offline", fmt_tempo(mais_antigo))
                         col_t2.metric("📊 Tempo médio offline", fmt_tempo(media_td))
                         col_t3.metric("🔴 Acima de 24h", f"{acima_24h} câmeras")
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+            render_grafico_evolucao_cliente(wl_id)
 
             # ─────────────────────────────────────────────
             # SEÇÃO DE AÇÕES DO CLIENTE
