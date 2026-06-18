@@ -7055,9 +7055,17 @@ def main():
     </div></div>""", unsafe_allow_html=True)
 
     # ── Abas ──
-    # Aba independente para diagnóstico/evolução dos snapshots.
-    # Mantém o menu principal igual ao app atual e adiciona apenas "📈 Snapshots" antes de Atualizar Base.
-    tabs = st.tabs(["Auditoria", "Clientes", "Central de Ações", "Evidências", "📈 Snapshots", "Atualizar Base"])
+    # Cada rótulo precisa ter um bloco correspondente abaixo. Se uma nova aba for
+    # adicionada na lista, adicione também o respectivo renderizador.
+    tabs = st.tabs([
+        "Auditoria",
+        "Clientes",
+        "Central de Ações",
+        "Tendência",
+        "Evidências",
+        "Detalhe Cliente Snap",
+        "Atualizar Base",
+    ])
 
     with tabs[0]:
         auditoria_subtabs = st.tabs(["📋 Visão Geral", "🕐 Tempo Offline", "📊 % por Cliente", "🚘 LPRs Offline"])
@@ -7088,12 +7096,15 @@ def main():
         render_central_acoes(dados)
 
     with tabs[3]:
-        render_aba_evidencias(ctx)
+        render_aba_tendencia(ctx)
 
     with tabs[4]:
-        render_aba_detalhe_cliente_snap(dados)
+        render_aba_evidencias(ctx)
 
     with tabs[5]:
+        render_aba_detalhe_cliente_snap(dados)
+
+    with tabs[6]:
         render_aba_atualizar_base(df_origem)
 
 
