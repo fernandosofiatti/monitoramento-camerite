@@ -181,6 +181,24 @@ BRAZIL_STATE_CAPITAIS = {
 # Injeta o CSS do tema — chamado aqui para garantir que BASE_DIR e PASTA já existem
 _injetar_css()
 
+def _injetar_css_abas_visiveis() -> None:
+    """Evita que abas principais fiquem escondidas quando a barra passa da largura da tela."""
+    st.markdown(
+        """
+        <style>
+        div[data-baseweb="tab-list"] {
+            flex-wrap: wrap;
+            gap: 6px 8px;
+        }
+        div[data-baseweb="tab-list"] button[role="tab"] {
+            flex: 0 0 auto;
+            max-width: 100%;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # Mapeamento de colunas do CSV para nomes internos
 COL_STATUS     = "Status_da_Camera"
 COL_WL         = "ID_Whitelabel"
@@ -7055,9 +7073,8 @@ def main():
     </div></div>""", unsafe_allow_html=True)
 
     # ── Abas ──
-    # Cada rótulo precisa ter um bloco correspondente abaixo. Se uma nova aba for
-    # adicionada na lista, adicione também o respectivo renderizador.
-    tabs = st.tabs([
+    _injetar_css_abas_visiveis()
+    abas_principais = [
         "Auditoria",
         "Clientes",
         "Central de Ações",
@@ -7065,9 +7082,10 @@ def main():
         "Evidências",
         "Detalhe Cliente Snap",
         "Atualizar Base",
-    ])
+    ]
+    tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
-    with tabs[0]:
+    with tabs["Auditoria"]:
         auditoria_subtabs = st.tabs(["📋 Visão Geral", "🕐 Tempo Offline", "📊 % por Cliente", "🚘 LPRs Offline"])
         with auditoria_subtabs[0]:
             render_aba_auditoria_visao_geral(
@@ -7079,32 +7097,32 @@ def main():
                 audit_label=audit_label, audit_color=audit_color, acao_detalhe=acao_detalhe,
                 df_clientes_ops=df_clientes_ops, clientes_map=clientes_map, df_origem=df_origem,
             )
-    with tabs[0]:
+    with tabs["Auditoria"]:
      with auditoria_subtabs[1]:
         render_aba_auditoria_tempo_offline(dados=dados, df_origem=df_origem)
-    with tabs[0]:
+    with tabs["Auditoria"]:
      with auditoria_subtabs[2]:
         render_aba_auditoria_pct_cliente(dados=dados)
-    with tabs[0]:
+    with tabs["Auditoria"]:
      with auditoria_subtabs[3]:
         render_aba_auditoria_lprs(dados=dados, df_origem=df_origem)
 
-    with tabs[1]:
+    with tabs["Clientes"]:
         render_aba_clientes(ctx)
 
-    with tabs[2]:
+    with tabs["Central de Ações"]:
         render_central_acoes(dados)
 
-    with tabs[3]:
+    with tabs["Tendência"]:
         render_aba_tendencia(ctx)
 
-    with tabs[4]:
+    with tabs["Evidências"]:
         render_aba_evidencias(ctx)
 
-    with tabs[5]:
+    with tabs["Detalhe Cliente Snap"]:
         render_aba_detalhe_cliente_snap(dados)
 
-    with tabs[6]:
+    with tabs["Atualizar Base"]:
         render_aba_atualizar_base(df_origem)
 
 
