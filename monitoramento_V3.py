@@ -3069,18 +3069,21 @@ def carregar_snapshot_clientes(sid: int, wl_ids_validos: set[str] | None = None)
 def carregar_evolucao_cliente_snapshots(wl_id: str, limite: int = 10) -> pd.DataFrame:
     """Retorna a evolução de um cliente nos últimos snapshots salvos.
 
-    Primeira tentativa: tabela snapshot_clientes, que é o resumo correto por cliente.
-    Fallback: snapshot_cameras, para snapshots antigos ou ambientes onde a tabela
-    snapshot_clientes ainda não existia/foi criada depois.
+    Versão robusta:
+    - Usa a tabela mestre snapshots para descobrir os últimos snapshots.
+    - Para cada snapshot, usa carregar_snapshot(), que já tem fallback entre
+      snapshot_clientes e snapshot_cameras.
+    - Isso evita o gráfico sumir quando snapshot_clientes não existe, está vazia,
+      ou quando os snapshots antigos só existem em snapshot_cameras.
     """
-    colunas = ["snapshot_id", "Snapshot", "Data", "gravado_em", "total", "offline", "pct_offline"]
     wl_id = str(wl_id or "").strip()
+    cols = ["snapshot_id", "Snapshot", "Data", "gravado_em", "total", "offline", "pct_offline"]
     if not wl_id or not supabase_configurado():
-        return pd.DataFrame(columns=colunas)
+        return pd.DataFrame(columns=cols)
 
     df_snaps = _snapshot_datas_df()
     if df_snaps.empty:
-        return pd.DataFrame(columns=colunas)
+        return pd.DataFrame(columns=cols)
 
     df_snaps = df_snaps.copy()
     df_snaps["id"] = pd.to_numeric(df_snaps["id"], errors="coerce")
@@ -3088,89 +3091,43 @@ def carregar_evolucao_cliente_snapshots(wl_id: str, limite: int = 10) -> pd.Data
     df_snaps["id"] = df_snaps["id"].astype(int)
     df_snaps = df_snaps.sort_values("id", ascending=False).head(int(limite))
 
-    if df_snaps.empty:
-        return pd.DataFrame(columns=colunas)
-
-    def _finalizar_df_evolucao(df_base: pd.DataFrame) -> pd.DataFrame:
-        if df_base is None or df_base.empty:
-            return pd.DataFrame(columns=colunas)
-
-        out = df_base.copy()
-        out["snapshot_id"] = pd.to_numeric(out.get("snapshot_id", 0), errors="coerce")
-        out = out[out["snapshot_id"].notna()].copy()
-        if out.empty:
-            return pd.DataFrame(columns=colunas)
-        out["snapshot_id"] = out["snapshot_id"].astype(int)
-        out["total"] = pd.to_numeric(out.get("total", 0), errors="coerce").fillna(0).astype(int)
-        out["offline"] = pd.to_numeric(out.get("offline", 0), errors="coerce").fillna(0).astype(int)
-        out["pct_offline"] = pd.to_numeric(out.get("pct_offline", 0), errors="coerce").fillna(0.0)
-
-        meta = df_snaps[["id", "label", "gravado_em"]].rename(columns={"id": "snapshot_id"})
-        out = out.merge(meta, on="snapshot_id", how="left")
-        out["gravado_em_dt"] = pd.to_datetime(out["gravado_em"], errors="coerce")
-        out = out.sort_values(["gravado_em_dt", "snapshot_id"], ascending=[True, True]).reset_index(drop=True)
-        out["Data"] = out["gravado_em_dt"].dt.strftime("%d/%m %H:%M")
-        out["Data"] = out["Data"].fillna("Snapshot " + out["snapshot_id"].astype(str))
-        out["Snapshot"] = out["label"].astype(str).replace({"nan": ""})
-        out["Snapshot"] = out["Snapshot"].where(out["Snapshot"].str.strip() != "", "Snapshot " + out["snapshot_id"].astype(str))
-        return out[colunas]
-
-    # 1) Caminho novo/oficial: resumo por cliente salvo no snapshot.
-    ids = df_snaps["id"].astype(str).tolist()
-    filtro_ids = "in.(" + ",".join(ids) + ")"
-    df_cli, erro = _supabase_select_all(
-        SNAPSHOT_CLIENTES_TABLE,
-        params={
-            "select": "snapshot_id,id_whitelabel,nome_cliente,total_cameras,total_offline,pct_offline",
-            "snapshot_id": filtro_ids,
-            "id_whitelabel": f"eq.{wl_id}",
-            "order": "snapshot_id.asc",
-        },
-        page_size=1000,
-    )
-
-    if not erro and df_cli is not None and not df_cli.empty:
-        df_base = pd.DataFrame({
-            "snapshot_id": pd.to_numeric(df_cli.get("snapshot_id", 0), errors="coerce"),
-            "total": pd.to_numeric(df_cli.get("total_cameras", 0), errors="coerce"),
-            "offline": pd.to_numeric(df_cli.get("total_offline", 0), errors="coerce"),
-            "pct_offline": pd.to_numeric(df_cli.get("pct_offline", 0), errors="coerce"),
-        })
-        final = _finalizar_df_evolucao(df_base)
-        if not final.empty:
-            return final
-
-    # 2) Fallback essencial: snapshots antigos podem existir só em snapshot_cameras.
-    #    Aqui calculamos total/offline por cliente a partir das câmeras do snapshot.
     rows = []
-    for _, snap in df_snaps.sort_values("id", ascending=True).iterrows():
+    for _, snap in df_snaps.iterrows():
         sid = int(snap["id"])
-        try:
-            df_cams = carregar_snapshot_cameras(sid, wl_ids_validos={wl_id})
-        except Exception:
-            df_cams = pd.DataFrame()
-
-        if df_cams is None or df_cams.empty:
+        df_cli = carregar_snapshot(sid)
+        if df_cli is None or df_cli.empty or "wl_id" not in df_cli.columns:
             continue
 
-        df_cams = df_cams[df_cams["wl_id"].astype(str).str.strip() == wl_id].copy()
-        if df_cams.empty:
+        df_cli = df_cli.copy()
+        df_cli["wl_id"] = df_cli["wl_id"].astype(str).str.strip()
+        linha = df_cli[df_cli["wl_id"] == wl_id]
+        if linha.empty:
             continue
 
-        if "id_camera" in df_cams.columns:
-            df_cams = df_cams.drop_duplicates(subset=["id_camera"], keep="last")
+        r = linha.iloc[0]
+        gravado_em = str(snap.get("gravado_em", "") or "")
+        dt = pd.to_datetime(gravado_em, errors="coerce")
+        data_txt = dt.strftime("%d/%m %H:%M") if not pd.isna(dt) else f"Snapshot {sid}"
+        label = str(snap.get("label", "") or "").strip() or f"Snapshot {sid}"
 
-        total = int(len(df_cams))
-        offline = int((df_cams.get("status_camera", pd.Series(dtype=str)).astype(str).str.upper() == "OFFLINE").sum())
-        pct = round((offline / total * 100), 2) if total else 0.0
         rows.append({
             "snapshot_id": sid,
-            "total": total,
-            "offline": offline,
-            "pct_offline": pct,
+            "Snapshot": label,
+            "Data": data_txt,
+            "gravado_em": gravado_em,
+            "total": int(pd.to_numeric(r.get("total", 0), errors="coerce") or 0),
+            "offline": int(pd.to_numeric(r.get("offline", 0), errors="coerce") or 0),
+            "pct_offline": float(pd.to_numeric(r.get("pct_offline", 0), errors="coerce") or 0.0),
         })
 
-    return _finalizar_df_evolucao(pd.DataFrame(rows))
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    out = pd.DataFrame(rows)
+    out["_ordem"] = pd.to_numeric(out["snapshot_id"], errors="coerce").fillna(0).astype(int)
+    out = out.sort_values("_ordem", ascending=True).drop(columns=["_ordem"]).reset_index(drop=True)
+    return out[cols]
+
 
 def render_grafico_evolucao_cliente(wl_id: str) -> None:
     """Desenha gráfico área + bolinhas da evolução individual do cliente."""
