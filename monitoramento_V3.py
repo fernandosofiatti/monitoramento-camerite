@@ -16,6 +16,40 @@ import time
 import uuid
 import base64
 
+
+# ─────────────────────────────────────────────
+# CACHE — utilitários
+# ─────────────────────────────────────────────
+import hashlib as _hashlib
+
+def _hash_dados(dados: dict) -> str:
+    """Chave md5 derivada de total+offline por cliente.
+    Muda quando o CSV é recarregado com valores diferentes.
+    Usada para invalidar entradas de st.session_state usadas como cache.
+    """
+    partes = []
+    for wl_id in sorted(dados.keys()):
+        v = dados[wl_id]
+        partes.append(f"{wl_id}:{v.get('total',0)}:{len(v.get('offline', []))}")
+    return _hashlib.md5("|".join(partes).encode()).hexdigest()
+
+
+def _session_cache(chave: str, fn, *args, **kwargs):
+    """Cache simples via st.session_state para objetos não-hasháveis (dicts com DataFrames).
+
+    Executa fn(*args, **kwargs) apenas uma vez por valor de `chave` por sessão.
+    Quando `chave` muda (novo CSV carregado), o resultado é recomputado.
+
+    Uso:
+        df = _session_cache(f"montar_df_clientes:{hash_dados}", montar_df_clientes, dados, ...)
+    """
+    if st.session_state.get("_scache_key:" + chave) == chave:
+        return st.session_state["_scache_val:" + chave]
+    result = fn(*args, **kwargs)
+    st.session_state["_scache_key:" + chave] = chave
+    st.session_state["_scache_val:" + chave] = result
+    return result
+
 THEME_OPTIONS = {
     "theme.base": "light",
     "theme.primaryColor": "#7C3AED",
@@ -1313,7 +1347,12 @@ def card_executivo(titulo: str, valor: str, subtitulo: str, cor: str = "#7C3AED"
 
 def render_dashboard_acoes(df_todas_acoes: pd.DataFrame, dados: dict) -> None:
     """Dashboard executivo orientado a clientes, não a quantidade de ações."""
-    df_clientes = montar_df_clientes_central_acoes(dados, df_todas_acoes)
+    _hd = _hash_dados(dados)
+    _acoes_hash = str(len(df_todas_acoes)) if df_todas_acoes is not None else "none"
+    df_clientes = _session_cache(
+        f"montar_df_clientes_central:{_hd}:{_acoes_hash}",
+        montar_df_clientes_central_acoes, dados, df_todas_acoes,
+    )
     if df_clientes.empty:
         st.info("Nenhum cliente carregado.")
         return
@@ -2463,6 +2502,12 @@ def geocode_cidade(nome: str, estado: str | None = None) -> tuple[float, float] 
     salvar_cache_geocode(cache)
     return None
 
+@st.cache_data(
+    ttl=300,
+    hash_funcs={pd.DataFrame: lambda df: _hashlib.md5(
+        pd.util.hash_pandas_object(df, index=True).values.tobytes()
+    ).hexdigest()},
+)
 def montar_mapa_cidades(df: pd.DataFrame) -> tuple[go.Figure | None, str]:
     if df is None or df.empty:
         return None, "Sem dados de origem para criar o mapa."
@@ -3336,6 +3381,7 @@ def salvar_snapshot_automatico(
     return salvar_snapshot(label, notas, dados, df_origem)
 
 
+@st.cache_data(ttl=120)
 def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
     limite = agora_sao_paulo() - timedelta(days=dias)
     df_snaps = listar_snapshots()
@@ -3369,6 +3415,7 @@ def obter_datas_snapshots(snapshot_ids: list[int]) -> pd.DataFrame:
     ids = [int(x) for x in snapshot_ids]
     return df[df["id"].astype(int).isin(ids)][["id", "gravado_em"]].copy()
 
+@st.cache_data(ttl=120)
 def calcular_recorrencia(dias: int = 30) -> dict:
     df_hist = carregar_historico_clientes(dias)
     if df_hist.empty:
@@ -4086,16 +4133,79 @@ class ContextoMain:
     pct_clientes_atencao: float
     origem_local: bool = True
 
+def _diagnosticar_erro(erro: str) -> tuple[str, str, str]:
+    """Classifica a mensagem de erro retornada por carregar_dados() em:
+    (icone, titulo, instrucao_acao)
+    para exibição contextual na tela de erro.
+    """
+    e = (erro or "").lower()
+
+    if "pasta não encontrada" in e:
+        return (
+            "📁",
+            "Pasta de dados não encontrada",
+            f"A variável de ambiente `CAMERITE_MONITORAMENTO_PASTA` aponta para um caminho "
+            f"que não existe. Corrija o caminho ou copie os arquivos para:\n\n`{PASTA}`",
+        )
+
+    if "corrompido" in e or "encoding" in e or "não foi possível ler" in e:
+        return (
+            "💾",
+            "Arquivo corrompido ou com encoding inválido",
+            "O CSV foi encontrado mas não pode ser lido.\n\n"
+            "**Solução:** Abra o arquivo no Excel e salve como "
+            "*CSV UTF-8 (delimitado por vírgulas)*.",
+        )
+
+    if "colunas obrigatórias" in e or "colunas não encontradas" in e:
+        cols = ", ".join(f"`{c}`" for c in [COL_STATUS, COL_WL])
+        return (
+            "📋",
+            "Estrutura do CSV incompatível",
+            f"O CSV foi lido, mas faltam as colunas obrigatórias: {cols}.\n\n"
+            "Verifique se o arquivo exportado é o **GOV_extracao_cameras.csv** "
+            "correto — não uma exportação de outro módulo.",
+        )
+
+    if "xlsx" in e and "fallback" not in e:
+        return (
+            "📊",
+            "Erro nos arquivos XLSX individuais",
+            "Alguns arquivos XLSX em `_BKPS_importacao_individual` não puderam ser lidos. "
+            "Verifique se não estão abertos no Excel ou corrompidos.",
+        )
+
+    if "csv principal não encontrado" in e or not e:
+        return (
+            "📄",
+            "CSV principal não encontrado",
+            f"Esperado em:\n\n`{CSV_GOV}`\n\n"
+            "**Opções:**\n"
+            "1. Copie o arquivo para essa pasta com o nome exato `GOV_extracao_cameras.csv`\n"
+            "2. Configure a variável de ambiente `CAMERITE_MONITORAMENTO_PASTA` apontando "
+            "para a pasta onde o arquivo está\n"
+            "3. Use o upload manual ao lado →",
+        )
+
+    # Genérico: retorna o erro bruto mas formatado
+    return (
+        "⚠️",
+        "Erro ao carregar dados",
+        f"Detalhes técnicos:\n\n```\n{erro}\n```",
+    )
+
+
 def _render_sem_dados(dados: dict, erro: str, df_origem, saude: dict):
-    """Exibe sidebar mínima e upload manual. Retorna (dados, saude, False)
-    após upload bem-sucedido, ou None se ainda não há dados.
+    """Exibe sidebar mínima, diagnóstico contextual e upload manual.
+    Retorna (dados, saude, False) após upload bem-sucedido,
+    ou None se ainda não há dados para prosseguir.
     """
     if not dados:
-        # Mostrar diagnóstico e oferecer upload manual
         with st.sidebar:
             st.markdown('''
             <div class="sidebar-logo">
-                <img src="https://framerusercontent.com/images/YQ4euyeSqXxIJm99xQGGCBYWYpg.png" style="height:30px;width:auto" alt="Camerite">
+                <img src="https://framerusercontent.com/images/YQ4euyeSqXxIJm99xQGGCBYWYpg.png"
+                     style="height:30px;width:auto" alt="Camerite">
                 <div>
                     <div class="sidebar-logo-text">Camerite BI</div>
                     <div class="sidebar-logo-sub">Auditoria Operacional</div>
@@ -4107,26 +4217,65 @@ def _render_sem_dados(dados: dict, erro: str, df_origem, saude: dict):
         <div class="page-header">
             <div>
                 <div class="page-title">Central de Monitoramento</div>
-                <div class="page-sub">Configure a fonte de dados abaixo</div>
+                <div class="page-sub">Dados não carregados — veja o diagnóstico abaixo</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        col_err, col_up = st.columns([1, 1], gap="large")
+        col_diag, col_up = st.columns([1, 1], gap="large")
 
-        with col_err:
-            st.error(f"**Arquivo não carregado automaticamente**\n\n{erro}" if erro else "Nenhum dado carregado.")
-            st.info(
-                f"**Caminho configurado:** `{CSV_GOV}`\n\n"
-                "Verifique se o arquivo existe nesse caminho e se o nome está exatamente como "
-                "`GOV_extracao_cameras.csv`."
+        # ── Coluna de diagnóstico ──────────────────────────────────
+        with col_diag:
+            icone, titulo, instrucao = _diagnosticar_erro(erro)
+
+            st.markdown(f"### {icone} {titulo}")
+            st.markdown(instrucao)
+
+            # Checklist de ambiente — ajuda a depurar sem abrir terminal
+            csv_existe   = os.path.exists(CSV_GOV)
+            pasta_existe = os.path.exists(PASTA)
+            xlsx_existe  = caminho_xlsx_clientes() is not None
+            supabase_ok  = supabase_configurado()
+
+            st.markdown("---")
+            st.markdown("**Diagnóstico do ambiente:**")
+
+            def _check(ok: bool, label: str) -> str:
+                return f"{'✅' if ok else '❌'} {label}"
+
+            st.markdown(
+                "\n".join([
+                    _check(pasta_existe, f"Pasta existe: `{PASTA}`"),
+                    _check(csv_existe,   f"CSV encontrado: `{os.path.basename(CSV_GOV)}`"),
+                    _check(xlsx_existe,  "nome_clientes.xlsx encontrado"),
+                    _check(supabase_ok,  "Supabase configurado"),
+                ])
             )
 
+            if csv_existe:
+                tamanho = os.path.getsize(CSV_GOV)
+                mod     = datetime.fromtimestamp(os.path.getmtime(CSV_GOV)).strftime("%d/%m/%Y %H:%M")
+                st.caption(f"CSV: {tamanho / 1024:.1f} KB · modificado em {mod}")
+
+        # ── Coluna de upload manual ────────────────────────────────
         with col_up:
-            st.markdown("#### 📂 Upload manual do CSV")
-            st.caption("Se o arquivo não está sendo lido automaticamente, faça o upload aqui:")
-            arq_csv = st.file_uploader("GOV_extracao_cameras.csv", type=["csv"], key="upload_gov_csv")
-            arq_xlsx = st.file_uploader("nome_clientes.xlsx (opcional)", type=["xlsx"], key="upload_clientes")
+            st.markdown("#### 📂 Upload manual")
+            st.caption(
+                "Se o arquivo não está sendo lido automaticamente, "
+                "faça o upload aqui para continuar sem alterar o servidor."
+            )
+            arq_csv  = st.file_uploader(
+                "GOV_extracao_cameras.csv",
+                type=["csv"],
+                key="upload_gov_csv",
+                help="Exportação do sistema GOV com colunas Status_da_Camera e ID_Whitelabel.",
+            )
+            arq_xlsx = st.file_uploader(
+                "nome_clientes.xlsx (opcional)",
+                type=["xlsx"],
+                key="upload_clientes",
+                help="Planilha com ID_Whitelabel → Nome do cliente. Sem ela os clientes aparecem pelo ID.",
+            )
 
             if arq_csv is not None:
                 try:
@@ -4153,35 +4302,53 @@ def _render_sem_dados(dados: dict, erro: str, df_origem, saude: dict):
                             break
 
                     if df_up is None:
-                        st.error("Não foi possível ler o CSV. Tente salvar como UTF-8.")
-                        return
+                        st.error(
+                            "❌ Não foi possível ler o CSV com nenhum encoding testado "
+                            "(UTF-8, Latin-1, CP1252).\n\n"
+                            "Abra o arquivo no Excel e salve como **CSV UTF-8**."
+                        )
+                        return None
 
                     cols_faltando = [c for c in [COL_STATUS, COL_WL] if c not in df_up.columns]
                     if cols_faltando:
-                        st.error(f"Colunas não encontradas: `{'`, `'.join(cols_faltando)}`\n\nColunas no arquivo: `{'`, `'.join(df_up.columns.tolist())}`")
-                        return
+                        st.error(
+                            f"❌ Colunas obrigatórias ausentes: "
+                            f"`{'`, `'.join(cols_faltando)}`\n\n"
+                            f"Colunas encontradas no arquivo:\n"
+                            f"`{'`, `'.join(df_up.columns.tolist())}`\n\n"
+                            "Verifique se o arquivo exportado é o **GOV_extracao_cameras.csv** correto."
+                        )
+                        return None
 
                     cl_map_up = {}
                     if arq_xlsx is not None:
                         try:
-                            df_cl = pd.read_excel(arq_xlsx, engine="openpyxl")
+                            df_cl   = pd.read_excel(arq_xlsx, engine="openpyxl")
                             col_id  = next((c for c in df_cl.columns if "whitelabel" in c.lower() or "id" in c.lower()), df_cl.columns[0])
                             col_nom = next((c for c in df_cl.columns if "nome" in c.lower() or "client" in c.lower()), df_cl.columns[1])
-                            cl_map_up = dict(zip(df_cl[col_id].astype(str).str.strip(), df_cl[col_nom].astype(str).str.strip()))
+                            cl_map_up = dict(zip(
+                                df_cl[col_id].astype(str).str.strip(),
+                                df_cl[col_nom].astype(str).str.strip(),
+                            ))
                         except Exception as e:
-                            st.warning(f"Não foi possível ler o XLSX de clientes: {e}")
+                            st.warning(f"⚠️ XLSX de clientes ignorado — não foi possível ler: {e}")
 
                     dados = processar_df_gov(df_up, cl_map_up)
                     saude = calcular_saude_dataframe(df_up, cl_map_up, "Upload manual")
                     origem_local = False
-                    st.success(f"CSV carregado! {len(df_up)} linhas · {len(dados)} clientes encontrados.")
-                    # Não há st.rerun aqui — o código continua abaixo com dados preenchidos
+
+                    st.success(
+                        f"✅ CSV carregado com sucesso!  "
+                        f"**{len(df_up):,} linhas** · **{len(dados)} clientes** encontrados."
+                    )
+                    return dados, saude, origem_local
+
                 except Exception as e:
-                    st.error(f"Erro ao processar o arquivo: {e}")
-                    return
+                    st.error(f"❌ Erro inesperado ao processar o arquivo:\n\n```\n{e}\n```")
+                    return None
             else:
-                st.caption("Aguardando upload do CSV…")
-                return
+                st.info("⬆️ Aguardando upload do CSV para continuar…")
+                return None
 
 
 # ─────────────────────────────────────────────
@@ -6293,8 +6460,16 @@ def main():
     # ── Comparativo de snapshots ──
     comp = _calcular_comparativo(dados)
     recorrencia     = calcular_recorrencia(30)
-    df_clientes_ops = montar_df_clientes(dados, comp["tendencias"], comp["delta_offs"], recorrencia)
-    df_tempo_global = montar_df_tempo(dados)
+    _hd = _hash_dados(dados)
+    df_clientes_ops = _session_cache(
+        f"montar_df_clientes:{_hd}:{id(comp['tendencias'])}",
+        montar_df_clientes,
+        dados, comp["tendencias"], comp["delta_offs"], recorrencia,
+    )
+    df_tempo_global = _session_cache(
+        f"montar_df_tempo:{_hd}",
+        montar_df_tempo, dados,
+    )
 
     total_offline_anterior = 0
     if len(comp["snapshot_ids"]) == 2:
