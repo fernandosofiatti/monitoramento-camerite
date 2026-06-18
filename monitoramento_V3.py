@@ -4884,467 +4884,465 @@ def main():
         "Auditoria",
         "Clientes",
         "Central de Ações",
-        "Tempo offline",
-        "% por cliente",
         "Evidências",
-        "LPRs Offline",
         "Atualizar Base",
-        "Relatório Franquia",
     ])
 
     # ════════════════════════════════════════════
-    # ABA 0 — VISÃO EXECUTIVA
+    # ABA 0 — AUDITORIA (com sub-abas)
     # ════════════════════════════════════════════
     with tabs[0]:
-        st.markdown(f"""
-        <div class="audit-hero">
-            <div class="audit-hero-top">
-                <div>
-                    <div class="audit-title">Auditoria Clientes GOV</div>
-                    <div class="audit-sub">
-                        {acao_detalhe}<br>
-                        <span style="display:inline-block;margin-top:6px;font-family:'DM Mono',monospace;color:#6D28D9;background:#F3E8FF;border:1px solid #DDD6FE;border-radius:6px;padding:5px 8px">📅 {datas_comparativo_txt}</span>
+        auditoria_subtabs = st.tabs(["📋 Visão Geral", "🕐 Tempo Offline", "📊 % por Cliente", "🚘 LPRs Offline"])
+        with auditoria_subtabs[0]:
+            st.markdown(f"""
+            <div class="audit-hero">
+                <div class="audit-hero-top">
+                    <div>
+                        <div class="audit-title">Auditoria Clientes GOV</div>
+                        <div class="audit-sub">
+                            {acao_detalhe}<br>
+                            <span style="display:inline-block;margin-top:6px;font-family:'DM Mono',monospace;color:#6D28D9;background:#F3E8FF;border:1px solid #DDD6FE;border-radius:6px;padding:5px 8px">📅 {datas_comparativo_txt}</span>
+                        </div>
+                    </div>
+                    <div class="audit-badges">
+                        <div class="audit-badge" style="color:{audit_color}">{audit_label}</div>
                     </div>
                 </div>
-                <div class="audit-badges">
-                    <div class="audit-badge" style="color:{audit_color}">{audit_label}</div>
+            </div>
+            <div class="audit-strip">
+                <div class="audit-card">
+                    <div class="audit-card-label">Clientes críticos</div>
+                    <div class="audit-card-value" style="color:#dc2626">{n_critico}/{total_clientes}</div>
+                    <div class="audit-card-note">{pct_clientes_criticos:.1f}% da carteira auditada acima de 10% offline</div>
+                </div>
+                <div class="audit-card">
+                    <div class="audit-card-label">Clientes em atenção</div>
+                    <div class="audit-card-value" style="color:#d97706">{n_atencao}/{total_clientes}</div>
+                    <div class="audit-card-note">{pct_clientes_atencao:.1f}% da carteira auditada entre 5% e 10% offline</div>
+                </div>
+                <div class="audit-card">
+                    <div class="audit-card-label">Registros auditados</div>
+                    <div class="audit-card-value">{saude.get("linhas_processadas",0)}</div>
+                </div>
+                <div class="audit-card">
+                    <div class="audit-card-label">Data da Última Atualização</div>
+                    <div class="audit-card-value" style="font-size:20px;color:#171126">{saude.get("ultima_atualizacao_base","N/D")}</div>
+                    <div class="audit-card-note">Última importação/atualização registrada</div>
                 </div>
             </div>
-        </div>
-        <div class="audit-strip">
-            <div class="audit-card">
-                <div class="audit-card-label">Clientes críticos</div>
-                <div class="audit-card-value" style="color:#dc2626">{n_critico}/{total_clientes}</div>
-                <div class="audit-card-note">{pct_clientes_criticos:.1f}% da carteira auditada acima de 10% offline</div>
-            </div>
-            <div class="audit-card">
-                <div class="audit-card-label">Clientes em atenção</div>
-                <div class="audit-card-value" style="color:#d97706">{n_atencao}/{total_clientes}</div>
-                <div class="audit-card-note">{pct_clientes_atencao:.1f}% da carteira auditada entre 5% e 10% offline</div>
-            </div>
-            <div class="audit-card">
-                <div class="audit-card-label">Registros auditados</div>
-                <div class="audit-card-value">{saude.get("linhas_processadas",0)}</div>
-            </div>
-            <div class="audit-card">
-                <div class="audit-card-label">Data da Última Atualização</div>
-                <div class="audit-card-value" style="font-size:20px;color:#171126">{saude.get("ultima_atualizacao_base","N/D")}</div>
-                <div class="audit-card-note">Última importação/atualização registrada</div>
-            </div>
-        </div>
-        <div class="audit-riskbar">
-            <div>
-                <div style="font-size:11px;color:#7C6A91;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">Carteira acima do limite crítico</div>
-                <div class="audit-risk-track"><div class="audit-risk-fill" style="width:{pct_clientes_criticos}%;background:{audit_color}"></div></div>
-            </div>
-            <div class="audit-risk-label" style="color:{audit_color}">{pct_clientes_criticos:.1f}% dos clientes</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class="audit-section-title">
-            <strong>Indicadores de controle</strong>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Top KPIs: apenas 3 cards conforme solicitado
-        st.markdown(f"""
-        <div class="kpi-grid">
-            <div class="kpi-card kpi-neutral">
-                <div class="kpi-label">Total de Câmeras</div>
-                <div class="kpi-value val-purple">{total_cameras}</div>
-                <div class="kpi-sub">{total_clientes} clientes monitorados</div>
-			</div>
-			<div class="kpi-card kpi-alert"
-				 style="background:#ffffff !important;
-						border-color:#E9D5FF !important;">
-				<div class="kpi-label">
-					Câmeras Offline
-				</div>
-				<div class="kpi-value val-alert">
-					{total_offline}
-				</div>
-				<div class="kpi-sub">
-					{pct_global:.1f}% da frota total
-				</div>
-			</div>
-            <div class="kpi-card kpi-ok">
-                <div class="kpi-label">Câmeras Online</div>
-                <div class="kpi-value val-ok">{total_cameras - total_offline}</div>
-                <div class="kpi-sub">{100-pct_global:.1f}% operacionais</div>
-            </div>
-            <div class="kpi-card kpi-neutral">
-                <div class="kpi-label">Variação de Câmeras Offline</div>
-                <div class="kpi-value" style="font-size:28px;font-weight:700;color:{'#ef4444' if delta_global > 0 else ('#14b8a6' if delta_global < 0 else '#7C3AED')};">{delta_global:+.0f}</div>
-                <div class="kpi-sub">{clientes_melhoraram} melhoraram · {clientes_pioraram} pioraram</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Lower cards: novos cartões de categoria + Variação e Data da Última Atualização
-        if "audit_categoria" not in st.session_state:
-            st.session_state["audit_categoria"] = None
-
-        col_a, col_b, col_c, col_d = st.columns(4)
-        with col_a:
-            st.markdown(f"""
-                <div class="kpi-card kpi-ok" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes até 5% offline</div>
-                    <div style="font-size:24px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:700">{n_saudavel}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{n_saudavel} clientes · 0–5%</div>
+            <div class="audit-riskbar">
+                <div>
+                    <div style="font-size:11px;color:#7C6A91;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">Carteira acima do limite crítico</div>
+                    <div class="audit-risk-track"><div class="audit-risk-fill" style="width:{pct_clientes_criticos}%;background:{audit_color}"></div></div>
                 </div>
+                <div class="audit-risk-label" style="color:{audit_color}">{pct_clientes_criticos:.1f}% dos clientes</div>
+            </div>
             """, unsafe_allow_html=True)
-            if st.button("Ver clientes", key="audit_saudavel"):
-                st.session_state["audit_categoria"] = "Saudável (0-5%)"
-                st.session_state["mostrar_base_delta"] = False
-        with col_b:
-            st.markdown(f"""
-                <div class="kpi-card kpi-warn" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes em atenção (5 a 10% offline)</div>
-                    <div style="font-size:24px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:700">{n_atencao}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{n_atencao} clientes · 5–10%</div>
-                </div>
-            """, unsafe_allow_html=True)
-            if st.button("Ver clientes", key="audit_atencao"):
-                st.session_state["audit_categoria"] = "Atenção (5-10%)"
-                st.session_state["mostrar_base_delta"] = False
-        with col_c:
-            st.markdown(f"""
-                <div class="kpi-card kpi-neutral" style="background:#ffffff !important;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes acima de 10% offline</div>
-                    <div style="font-size:24px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:700">{n_critico}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{n_critico} clientes · &gt;10%</div>
-                </div>
-            """, unsafe_allow_html=True)
-            if st.button("Ver clientes", key="audit_critico"):
-                st.session_state["audit_categoria"] = "Crítico (>10%)"
-                st.session_state["mostrar_base_delta"] = False
-        with col_d:
-            st.markdown(f"""
-                <div class="kpi-card kpi-neutral" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Crescimento da Base</div>
-                    <div style="font-size:24px;color:{cor_delta_base};font-family:'DM Mono',monospace;font-weight:700">{texto_delta_base}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}</div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            if st.button("Ver clientes", key="base_delta_ver_clientes"):
-                st.session_state["mostrar_base_delta"] = True
-                st.session_state["audit_categoria"] = None
-
-
-        if st.session_state.get("mostrar_base_delta", False):
-            st.markdown("<hr>", unsafe_allow_html=True)
 
             st.markdown("""
             <div class="audit-section-title">
-                <strong>Clientes com alteração na base de câmeras</strong>
-                <span>Comparação entre o snapshot atual e o anterior</span>
+                <strong>Indicadores de controle</strong>
             </div>
             """, unsafe_allow_html=True)
 
-            col_base_a, col_base_b, col_base_c = st.columns(3)
-            col_base_a.metric("Clientes com novas câmeras", int(clientes_base_nova))
-            col_base_b.metric("Clientes com redução de base", int(clientes_base_reduzida))
-            col_base_c.metric("Variação total", f"{delta_total_cameras:+d}")
-
-            if not df_base_cameras_novas.empty:
-                st.markdown("#### Câmeras novas identificadas")
-                render_dataframe(
-                    df_base_cameras_novas,
-                    height=min(700, (len(df_base_cameras_novas) + 1) * 35 + 3)
-                )
-
-                buffer_cams = io.BytesIO()
-                with pd.ExcelWriter(buffer_cams, engine="openpyxl") as writer:
-                    df_base_cameras_novas.to_excel(writer, index=False, sheet_name="Cameras Novas")
-                st.download_button(
-                    "⬇ Baixar câmeras novas em Excel",
-                    key="dl_cameras_novas_excel_v1",
-                    data=buffer_cams.getvalue(),
-                    file_name=f"cameras_novas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                )
-            elif len(snapshot_ids) == 2 and detalhe_cameras_disponivel:
-                st.info("Nenhuma câmera nova foi identificada entre o snapshot atual e o anterior.")
-            elif len(snapshot_ids) == 2:
-                st.warning(
-                    "O resumo de crescimento existe, mas o detalhamento por ID de câmera ainda não está disponível "
-                    "para esses snapshots antigos. Salve um novo snapshot com esta versão e, na próxima comparação, "
-                    "o sistema exibirá Cliente, Franqueado, ID da Câmera, Nome da Câmera e Última Vez Online."
-                )
-
-                if not df_base_delta.empty:
-                    st.markdown("#### Resumo por cliente disponível")
-                    df_base_show = df_base_delta.copy()
-                    df_base_show["Variação"] = df_base_show["Variação"].apply(lambda v: f"{v:+d}")
-                    render_dataframe(
-                        df_base_show,
-                        height=min(620, (len(df_base_show) + 1) * 35 + 3)
-                    )
-            else:
-                st.info("Salve ao menos dois snapshots para comparar o crescimento da base.")
-
-            if st.button("Ocultar detalhamento", key="base_delta_ocultar"):
-                st.session_state["mostrar_base_delta"] = False
-                st.rerun()
-
-        if st.session_state["audit_categoria"]:
-            categoria = st.session_state["audit_categoria"]
-            df_audit = df_clientes_ops.copy()
-            if categoria == "Saudável (0-5%)":
-                mask = df_audit["% Offline"] <= 5
-            elif categoria == "Atenção (5-10%)":
-                mask = (df_audit["% Offline"] > 5) & (df_audit["% Offline"] <= 10)
-            else:
-                mask = df_audit["% Offline"] > 10
-
-            df_audit = df_audit.loc[mask, ["Cliente", "Franqueado", "% Offline"]].copy()
-            df_audit["% Offline"] = df_audit["% Offline"].round(1)
-            df_audit = df_audit.sort_values("% Offline", ascending=False).reset_index(drop=True)
-            st.markdown(f"### Clientes na faixa: {categoria}")
-            if df_audit.empty:
-                st.info("Nenhum cliente encontrado nessa faixa.")
-            else:
-                render_dataframe(df_audit, height=min(500, (len(df_audit)+1)*35 + 3))
-            if st.button("Limpar seleção", key="audit_clear"):
-                st.session_state["audit_categoria"] = None
-
-        if saude.get("colunas_faltando"):
-            st.warning(f"Colunas ausentes no CSV: {', '.join(saude['colunas_faltando'])}")
-        elif saude.get("datas_futuras", 0):
-            st.warning(f"{saude['datas_futuras']} registros têm data futura. Revise o formato de data da extração.")
-        elif saude.get("datas_invalidas", 0):
-            st.warning(f"{saude['datas_invalidas']} registros têm data inválida e foram marcados como N/D.")
-
-        st.markdown("""
-        <div class="audit-section-title">
-            <strong>Evidências visuais</strong>
-            <span>Distribuição do risco e clientes com maior exposição</span>
-        </div>
-        """, unsafe_allow_html=True)
-
-        col_gauge, col_pie, col_top = st.columns([1,1,1], gap="large")
-
-        with col_gauge:
-            # Gauge invertido: agora exibe o percentual ONLINE do GOV.
-            # Exemplo: 8% offline = 92% online.
-            pct_online_global = round(100 - pct_global, 2) if total_cameras else 0
-
-            st.markdown("**% Total de Câmeras ONLINE GOV**")
-
-            # Para o gauge online, quanto maior o percentual, melhor.
-            if pct_online_global >= 95:
-                cor_g = "#14b8a6"
-            elif pct_online_global >= 90:
-                cor_g = "#f59e0b"
-            else:
-                cor_g = "#ef4444"
-
-            fig_g = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=pct_online_global,
-                number=dict(suffix="%", font=dict(color=cor_g, size=48, family="DM Mono")),
-                gauge=dict(
-                    shape="angular",
-                    axis=dict(range=[0,100], showticklabels=False, ticks="", visible=False),
-                    bar=dict(color=cor_g, thickness=0.34),
-                    bgcolor="#FAF7FF",
-                    borderwidth=0,
-                    steps=[
-                        dict(range=[0,90],   color="#fecaca"),
-                        dict(range=[90,95],  color="#fde68a"),
-                        dict(range=[95,100], color="#a7f3d0"),
-                    ],
-                    threshold=dict(line=dict(color="#6B5A7A", width=4), thickness=0.75, value=pct_online_global),
-                ),
-            ))
-            layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-            fig_g.update_layout(
-                **layout_defaults,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                height=300,
-                margin=dict(l=0,r=0,t=10,b=0),
-                annotations=[
-                    dict(
-                        text=f"<span style='font-size:12px;color:#8B7AA3;font-family:DM Sans'>Câmeras operacionais</span>",
-                        x=0.5, y=0.08, showarrow=False, xanchor="center"
-                    )
-                ],
-            )
-            st.plotly_chart(fig_g, use_container_width=True, key="gauge_online_gov")
-
-        with col_pie:
-            pct_saudavel_card = round(n_saudavel / total_clientes * 100, 1) if total_clientes else 0
-            pct_atencao_card = round(n_atencao / total_clientes * 100, 1) if total_clientes else 0
-            pct_critico_card = round(n_critico / total_clientes * 100, 1) if total_clientes else 0
-
-            if n_critico > 0:
-                status_saude_titulo = "Atenção crítica"
-                status_saude_cor = "#dc2626"
-                status_saude_msg = f"{n_critico} cliente(s) acima de 10% offline"
-            elif n_atencao > 0:
-                status_saude_titulo = "Monitoramento"
-                status_saude_cor = "#d97706"
-                status_saude_msg = f"{n_atencao} cliente(s) entre 5% e 10% offline"
-            else:
-                status_saude_titulo = "Saudável"
-                status_saude_cor = "#059669"
-                status_saude_msg = "Todos os clientes até 5% offline"
-
-            st.markdown("**% Total de Câmeras ONLINE GOV**")
-
-            fig_pie = go.Figure(go.Pie(
-                labels=["Crítico", "Atenção", "Saudável"],
-                values=[n_critico, n_atencao, n_saudavel],
-                hole=0.68,
-                sort=False,
-                direction="clockwise",
-                marker=dict(
-                    colors=["#dc2626", "#f59e0b", "#14b8a6"],
-                    line=dict(color="#ffffff", width=4)
-                ),
-                textinfo="none",
-                hovertemplate="<b>%{label}</b><br>%{value} clientes<br>%{percent}<extra></extra>",
-            ))
-            fig_pie.update_traces(
-                rotation=90,
-                pull=[0.055 if n_critico else 0, 0.035 if n_atencao else 0, 0],
-            )
-            fig_pie.add_annotation(
-                text=(
-                    f"<span style='font-size:26px;font-weight:800;color:#171126;font-family:DM Mono'>{total_clientes}</span>"
-                    f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans'>clientes</span>"
-                    f"<br><span style='font-size:10px;color:#6B5A7A;font-family:DM Sans;font-weight:700'>{pct_saudavel_card:.1f}% saudáveis</span>"
-                ),
-                x=0.5, y=0.5, showarrow=False,
-            )
-            layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-            fig_pie.update_layout(
-                **layout_defaults,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                height=250,
-                showlegend=False,
-                margin=dict(l=4, r=4, t=8, b=4),
-            )
-            st.plotly_chart(fig_pie, use_container_width=True, key="pie_clientes_faixa_saude_moderno")
-
+            # Top KPIs: apenas 3 cards conforme solicitado
             st.markdown(f"""
-                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:-8px">
-                    <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:9px 8px;text-align:center">
-                        <div style="font-size:10px;color:#0f766e;font-weight:800;text-transform:uppercase">Saudável</div>
-                        <div style="font-size:20px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:800">{n_saudavel}</div>
-                        <div style="font-size:10px;color:#7C6A91">0–5% · {pct_saudavel_card:.1f}%</div>
-                    </div>
-                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 8px;text-align:center">
-                        <div style="font-size:10px;color:#b45309;font-weight:800;text-transform:uppercase">Atenção</div>
-                        <div style="font-size:20px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:800">{n_atencao}</div>
-                        <div style="font-size:10px;color:#7C6A91">5–10% · {pct_atencao_card:.1f}%</div>
-                    </div>
-                    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 8px;text-align:center">
-                        <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase">Crítico</div>
-                        <div style="font-size:20px;color:#dc2626;font-family:'DM Mono',monospace;font-weight:800">{n_critico}</div>
-                        <div style="font-size:10px;color:#7C6A91">&gt;10% · {pct_critico_card:.1f}%</div>
-                    </div>
+            <div class="kpi-grid">
+                <div class="kpi-card kpi-neutral">
+                    <div class="kpi-label">Total de Câmeras</div>
+                    <div class="kpi-value val-purple">{total_cameras}</div>
+                    <div class="kpi-sub">{total_clientes} clientes monitorados</div>
+    			</div>
+    			<div class="kpi-card kpi-alert"
+    				 style="background:#ffffff !important;
+    						border-color:#E9D5FF !important;">
+    				<div class="kpi-label">
+    					Câmeras Offline
+    				</div>
+    				<div class="kpi-value val-alert">
+    					{total_offline}
+    				</div>
+    				<div class="kpi-sub">
+    					{pct_global:.1f}% da frota total
+    				</div>
+    			</div>
+                <div class="kpi-card kpi-ok">
+                    <div class="kpi-label">Câmeras Online</div>
+                    <div class="kpi-value val-ok">{total_cameras - total_offline}</div>
+                    <div class="kpi-sub">{100-pct_global:.1f}% operacionais</div>
                 </div>
+                <div class="kpi-card kpi-neutral">
+                    <div class="kpi-label">Variação de Câmeras Offline</div>
+                    <div class="kpi-value" style="font-size:28px;font-weight:700;color:{'#ef4444' if delta_global > 0 else ('#14b8a6' if delta_global < 0 else '#7C3AED')};">{delta_global:+.0f}</div>
+                    <div class="kpi-sub">{clientes_melhoraram} melhoraram · {clientes_pioraram} pioraram</div>
+                </div>
+            </div>
             """, unsafe_allow_html=True)
 
-        with col_top:
-            st.markdown("**Top 5 clientes mais críticos**")
-            rows_top = [
-                {"Cliente": v["nome_cliente"],
-                 "Franqueado": v["nome_empresa"],
-                 "Pct": round(len(v["offline"])/v["total"]*100, 1) if v["total"] else 0,
-                 "Off": len(v["offline"]), "Tot": v["total"]}
-                for v in dados.values() if len(v["offline"]) > 0
-            ]
-            df_top = (
-                pd.DataFrame(rows_top).sort_values("Pct", ascending=False).head(5)
-                if rows_top else pd.DataFrame()
-            )
+            # Lower cards: novos cartões de categoria + Variação e Data da Última Atualização
+            if "audit_categoria" not in st.session_state:
+                st.session_state["audit_categoria"] = None
 
-            if df_top.empty:
-                st.success("🎉 Todos os clientes estão operacionais!")
-            else:
-                for _, row in df_top.iterrows():
-                    cor = cor_hex(row["Pct"])
-                    cliente_html = escape_html(row["Cliente"])
-                    franqueado_html = escape_html(row["Franqueado"])
-                    pct_html = f"{row['Pct']:.1f}%"
-                    width_pct = min(row["Pct"], 100)
-                    offline_text = f"{int(row['Off'])} offline de {int(row['Tot'])}"
-                    st.markdown(f"""
-                    <div style="margin-bottom:14px">
-                        <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                            <span style="font-size:12px;color:#171126;font-weight:600">{cliente_html}</span>
-                            <span style="font-family:'DM Mono',monospace;font-size:12px;color:{cor};font-weight:700">{pct_html}</span>
-                        </div>
-                        <div style="font-size:10px;color:#8B7AA3;margin-bottom:4px">{franqueado_html}</div>
-                        <div style="height:5px;background:#E9D5FF;border-radius:99px;overflow:hidden">
-                            <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
-                        </div>
-                        <div style="font-size:10px;color:#8B7AA3;margin-top:3px">{offline_text}</div>
+            col_a, col_b, col_c, col_d = st.columns(4)
+            with col_a:
+                st.markdown(f"""
+                    <div class="kpi-card kpi-ok" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                        <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes até 5% offline</div>
+                        <div style="font-size:24px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:700">{n_saudavel}</div>
+                        <div style="font-size:11px;color:#8B7AA3">{n_saudavel} clientes · 0–5%</div>
                     </div>
-                    """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
+                if st.button("Ver clientes", key="audit_saudavel"):
+                    st.session_state["audit_categoria"] = "Saudável (0-5%)"
+                    st.session_state["mostrar_base_delta"] = False
+            with col_b:
+                st.markdown(f"""
+                    <div class="kpi-card kpi-warn" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                        <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes em atenção (5 a 10% offline)</div>
+                        <div style="font-size:24px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:700">{n_atencao}</div>
+                        <div style="font-size:11px;color:#8B7AA3">{n_atencao} clientes · 5–10%</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                if st.button("Ver clientes", key="audit_atencao"):
+                    st.session_state["audit_categoria"] = "Atenção (5-10%)"
+                    st.session_state["mostrar_base_delta"] = False
+            with col_c:
+                st.markdown(f"""
+                    <div class="kpi-card kpi-neutral" style="background:#ffffff !important;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                        <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes acima de 10% offline</div>
+                        <div style="font-size:24px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:700">{n_critico}</div>
+                        <div style="font-size:11px;color:#8B7AA3">{n_critico} clientes · &gt;10%</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                if st.button("Ver clientes", key="audit_critico"):
+                    st.session_state["audit_categoria"] = "Crítico (>10%)"
+                    st.session_state["mostrar_base_delta"] = False
+            with col_d:
+                st.markdown(f"""
+                    <div class="kpi-card kpi-neutral" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                        <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Crescimento da Base</div>
+                        <div style="font-size:24px;color:{cor_delta_base};font-family:'DM Mono',monospace;font-weight:700">{texto_delta_base}</div>
+                        <div style="font-size:11px;color:#8B7AA3">{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
-        st.markdown("<hr>", unsafe_allow_html=True)
-        st.markdown("**Mapa de calor — % offline por cliente**")
-        # Inclui todos os clientes cadastrados no nome_clientes.xlsx,
-        # mesmo aqueles sem câmeras no CSV (aparecem com 0%).
-        rows_heat = []
-        for v in dados.values():
-            rows_heat.append({
-                "Cliente": v["nome_cliente"],
-                "Pct": round(len(v["offline"]) / v["total"] * 100, 2) if v["total"] else 0,
-            })
-        clientes_no_csv = {v["nome_cliente"] for v in dados.values()}
-        for wl_id, nome in clientes_map.items():
-            if nome not in clientes_no_csv:
-                rows_heat.append({"Cliente": nome, "Pct": 0.0})
-        df_heat = pd.DataFrame(rows_heat).sort_values("Pct", ascending=False)
+                if st.button("Ver clientes", key="base_delta_ver_clientes"):
+                    st.session_state["mostrar_base_delta"] = True
+                    st.session_state["audit_categoria"] = None
 
-        fig_map, mapa_msg = montar_mapa_cidades(df_origem)
-        if fig_map is not None:
-            st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
-            st.caption(mapa_msg)
-        else:
-            st.info(mapa_msg)
 
-        fig_heat = go.Figure(go.Bar(
-            x=df_heat["Cliente"], y=df_heat["Pct"],
-            marker=dict(
-                color=df_heat["Pct"],
-                colorscale=[
-                    [0.0, "#dff8f3"],
-                    [0.10, "#14b8a6"],
-                    [0.12, "#fde047"],
-                    [0.15, "#f59e0b"],
-                    [0.40, "#ef4444"],
-                    [1.0, "#b91c1c"],
-                ],
-                cmin=0, cmax=100, line=dict(width=0),
-            ),
-            hovertemplate="<b>%{x}</b><br>%{y:.1f}% offline<extra></extra>",
-        ))
-        layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-        _heat_height = max(300, min(len(df_heat) * 22, 600))
-        fig_heat.update_layout(
-            **layout_defaults,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=_heat_height,
-            xaxis=dict(tickfont=dict(color="#8B7AA3",size=10), tickangle=-45),
-            yaxis=dict(ticksuffix="%", gridcolor="#E9D5FF",
-                       tickfont=dict(color="#8B7AA3",size=10),
-                       range=[0, max(df_heat["Pct"].max()*1.2, 10)]),
-            margin=dict(l=10,r=10,t=10,b=110),
-        )
-        st.plotly_chart(fig_heat, use_container_width=True, key="heatmap_clientes_operacao_v1")
+            if st.session_state.get("mostrar_base_delta", False):
+                st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ════════════════════════════════════════════
+                st.markdown("""
+                <div class="audit-section-title">
+                    <strong>Clientes com alteração na base de câmeras</strong>
+                    <span>Comparação entre o snapshot atual e o anterior</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                col_base_a, col_base_b, col_base_c = st.columns(3)
+                col_base_a.metric("Clientes com novas câmeras", int(clientes_base_nova))
+                col_base_b.metric("Clientes com redução de base", int(clientes_base_reduzida))
+                col_base_c.metric("Variação total", f"{delta_total_cameras:+d}")
+
+                if not df_base_cameras_novas.empty:
+                    st.markdown("#### Câmeras novas identificadas")
+                    render_dataframe(
+                        df_base_cameras_novas,
+                        height=min(700, (len(df_base_cameras_novas) + 1) * 35 + 3)
+                    )
+
+                    buffer_cams = io.BytesIO()
+                    with pd.ExcelWriter(buffer_cams, engine="openpyxl") as writer:
+                        df_base_cameras_novas.to_excel(writer, index=False, sheet_name="Cameras Novas")
+                    st.download_button(
+                        "⬇ Baixar câmeras novas em Excel",
+                        key="dl_cameras_novas_excel_v1",
+                        data=buffer_cams.getvalue(),
+                        file_name=f"cameras_novas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                elif len(snapshot_ids) == 2 and detalhe_cameras_disponivel:
+                    st.info("Nenhuma câmera nova foi identificada entre o snapshot atual e o anterior.")
+                elif len(snapshot_ids) == 2:
+                    st.warning(
+                        "O resumo de crescimento existe, mas o detalhamento por ID de câmera ainda não está disponível "
+                        "para esses snapshots antigos. Salve um novo snapshot com esta versão e, na próxima comparação, "
+                        "o sistema exibirá Cliente, Franqueado, ID da Câmera, Nome da Câmera e Última Vez Online."
+                    )
+
+                    if not df_base_delta.empty:
+                        st.markdown("#### Resumo por cliente disponível")
+                        df_base_show = df_base_delta.copy()
+                        df_base_show["Variação"] = df_base_show["Variação"].apply(lambda v: f"{v:+d}")
+                        render_dataframe(
+                            df_base_show,
+                            height=min(620, (len(df_base_show) + 1) * 35 + 3)
+                        )
+                else:
+                    st.info("Salve ao menos dois snapshots para comparar o crescimento da base.")
+
+                if st.button("Ocultar detalhamento", key="base_delta_ocultar"):
+                    st.session_state["mostrar_base_delta"] = False
+                    st.rerun()
+
+            if st.session_state["audit_categoria"]:
+                categoria = st.session_state["audit_categoria"]
+                df_audit = df_clientes_ops.copy()
+                if categoria == "Saudável (0-5%)":
+                    mask = df_audit["% Offline"] <= 5
+                elif categoria == "Atenção (5-10%)":
+                    mask = (df_audit["% Offline"] > 5) & (df_audit["% Offline"] <= 10)
+                else:
+                    mask = df_audit["% Offline"] > 10
+
+                df_audit = df_audit.loc[mask, ["Cliente", "Franqueado", "% Offline"]].copy()
+                df_audit["% Offline"] = df_audit["% Offline"].round(1)
+                df_audit = df_audit.sort_values("% Offline", ascending=False).reset_index(drop=True)
+                st.markdown(f"### Clientes na faixa: {categoria}")
+                if df_audit.empty:
+                    st.info("Nenhum cliente encontrado nessa faixa.")
+                else:
+                    render_dataframe(df_audit, height=min(500, (len(df_audit)+1)*35 + 3))
+                if st.button("Limpar seleção", key="audit_clear"):
+                    st.session_state["audit_categoria"] = None
+
+            if saude.get("colunas_faltando"):
+                st.warning(f"Colunas ausentes no CSV: {', '.join(saude['colunas_faltando'])}")
+            elif saude.get("datas_futuras", 0):
+                st.warning(f"{saude['datas_futuras']} registros têm data futura. Revise o formato de data da extração.")
+            elif saude.get("datas_invalidas", 0):
+                st.warning(f"{saude['datas_invalidas']} registros têm data inválida e foram marcados como N/D.")
+
+            st.markdown("""
+            <div class="audit-section-title">
+                <strong>Evidências visuais</strong>
+                <span>Distribuição do risco e clientes com maior exposição</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col_gauge, col_pie, col_top = st.columns([1,1,1], gap="large")
+
+            with col_gauge:
+                # Gauge invertido: agora exibe o percentual ONLINE do GOV.
+                # Exemplo: 8% offline = 92% online.
+                pct_online_global = round(100 - pct_global, 2) if total_cameras else 0
+
+                st.markdown("**% Total de Câmeras ONLINE GOV**")
+
+                # Para o gauge online, quanto maior o percentual, melhor.
+                if pct_online_global >= 95:
+                    cor_g = "#14b8a6"
+                elif pct_online_global >= 90:
+                    cor_g = "#f59e0b"
+                else:
+                    cor_g = "#ef4444"
+
+                fig_g = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=pct_online_global,
+                    number=dict(suffix="%", font=dict(color=cor_g, size=48, family="DM Mono")),
+                    gauge=dict(
+                        shape="angular",
+                        axis=dict(range=[0,100], showticklabels=False, ticks="", visible=False),
+                        bar=dict(color=cor_g, thickness=0.34),
+                        bgcolor="#FAF7FF",
+                        borderwidth=0,
+                        steps=[
+                            dict(range=[0,90],   color="#fecaca"),
+                            dict(range=[90,95],  color="#fde68a"),
+                            dict(range=[95,100], color="#a7f3d0"),
+                        ],
+                        threshold=dict(line=dict(color="#6B5A7A", width=4), thickness=0.75, value=pct_online_global),
+                    ),
+                ))
+                layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+                fig_g.update_layout(
+                    **layout_defaults,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    height=300,
+                    margin=dict(l=0,r=0,t=10,b=0),
+                    annotations=[
+                        dict(
+                            text=f"<span style='font-size:12px;color:#8B7AA3;font-family:DM Sans'>Câmeras operacionais</span>",
+                            x=0.5, y=0.08, showarrow=False, xanchor="center"
+                        )
+                    ],
+                )
+                st.plotly_chart(fig_g, use_container_width=True, key="gauge_online_gov")
+
+            with col_pie:
+                pct_saudavel_card = round(n_saudavel / total_clientes * 100, 1) if total_clientes else 0
+                pct_atencao_card = round(n_atencao / total_clientes * 100, 1) if total_clientes else 0
+                pct_critico_card = round(n_critico / total_clientes * 100, 1) if total_clientes else 0
+
+                if n_critico > 0:
+                    status_saude_titulo = "Atenção crítica"
+                    status_saude_cor = "#dc2626"
+                    status_saude_msg = f"{n_critico} cliente(s) acima de 10% offline"
+                elif n_atencao > 0:
+                    status_saude_titulo = "Monitoramento"
+                    status_saude_cor = "#d97706"
+                    status_saude_msg = f"{n_atencao} cliente(s) entre 5% e 10% offline"
+                else:
+                    status_saude_titulo = "Saudável"
+                    status_saude_cor = "#059669"
+                    status_saude_msg = "Todos os clientes até 5% offline"
+
+                st.markdown("**% Total de Câmeras ONLINE GOV**")
+
+                fig_pie = go.Figure(go.Pie(
+                    labels=["Crítico", "Atenção", "Saudável"],
+                    values=[n_critico, n_atencao, n_saudavel],
+                    hole=0.68,
+                    sort=False,
+                    direction="clockwise",
+                    marker=dict(
+                        colors=["#dc2626", "#f59e0b", "#14b8a6"],
+                        line=dict(color="#ffffff", width=4)
+                    ),
+                    textinfo="none",
+                    hovertemplate="<b>%{label}</b><br>%{value} clientes<br>%{percent}<extra></extra>",
+                ))
+                fig_pie.update_traces(
+                    rotation=90,
+                    pull=[0.055 if n_critico else 0, 0.035 if n_atencao else 0, 0],
+                )
+                fig_pie.add_annotation(
+                    text=(
+                        f"<span style='font-size:26px;font-weight:800;color:#171126;font-family:DM Mono'>{total_clientes}</span>"
+                        f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans'>clientes</span>"
+                        f"<br><span style='font-size:10px;color:#6B5A7A;font-family:DM Sans;font-weight:700'>{pct_saudavel_card:.1f}% saudáveis</span>"
+                    ),
+                    x=0.5, y=0.5, showarrow=False,
+                )
+                layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+                fig_pie.update_layout(
+                    **layout_defaults,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    height=250,
+                    showlegend=False,
+                    margin=dict(l=4, r=4, t=8, b=4),
+                )
+                st.plotly_chart(fig_pie, use_container_width=True, key="pie_clientes_faixa_saude_moderno")
+
+                st.markdown(f"""
+                    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:-8px">
+                        <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:9px 8px;text-align:center">
+                            <div style="font-size:10px;color:#0f766e;font-weight:800;text-transform:uppercase">Saudável</div>
+                            <div style="font-size:20px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:800">{n_saudavel}</div>
+                            <div style="font-size:10px;color:#7C6A91">0–5% · {pct_saudavel_card:.1f}%</div>
+                        </div>
+                        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 8px;text-align:center">
+                            <div style="font-size:10px;color:#b45309;font-weight:800;text-transform:uppercase">Atenção</div>
+                            <div style="font-size:20px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:800">{n_atencao}</div>
+                            <div style="font-size:10px;color:#7C6A91">5–10% · {pct_atencao_card:.1f}%</div>
+                        </div>
+                        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 8px;text-align:center">
+                            <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase">Crítico</div>
+                            <div style="font-size:20px;color:#dc2626;font-family:'DM Mono',monospace;font-weight:800">{n_critico}</div>
+                            <div style="font-size:10px;color:#7C6A91">&gt;10% · {pct_critico_card:.1f}%</div>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            with col_top:
+                st.markdown("**Top 5 clientes mais críticos**")
+                rows_top = [
+                    {"Cliente": v["nome_cliente"],
+                     "Franqueado": v["nome_empresa"],
+                     "Pct": round(len(v["offline"])/v["total"]*100, 1) if v["total"] else 0,
+                     "Off": len(v["offline"]), "Tot": v["total"]}
+                    for v in dados.values() if len(v["offline"]) > 0
+                ]
+                df_top = (
+                    pd.DataFrame(rows_top).sort_values("Pct", ascending=False).head(5)
+                    if rows_top else pd.DataFrame()
+                )
+
+                if df_top.empty:
+                    st.success("🎉 Todos os clientes estão operacionais!")
+                else:
+                    for _, row in df_top.iterrows():
+                        cor = cor_hex(row["Pct"])
+                        cliente_html = escape_html(row["Cliente"])
+                        franqueado_html = escape_html(row["Franqueado"])
+                        pct_html = f"{row['Pct']:.1f}%"
+                        width_pct = min(row["Pct"], 100)
+                        offline_text = f"{int(row['Off'])} offline de {int(row['Tot'])}"
+                        st.markdown(f"""
+                        <div style="margin-bottom:14px">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                                <span style="font-size:12px;color:#171126;font-weight:600">{cliente_html}</span>
+                                <span style="font-family:'DM Mono',monospace;font-size:12px;color:{cor};font-weight:700">{pct_html}</span>
+                            </div>
+                            <div style="font-size:10px;color:#8B7AA3;margin-bottom:4px">{franqueado_html}</div>
+                            <div style="height:5px;background:#E9D5FF;border-radius:99px;overflow:hidden">
+                                <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
+                            </div>
+                            <div style="font-size:10px;color:#8B7AA3;margin-top:3px">{offline_text}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+            st.markdown("<hr>", unsafe_allow_html=True)
+            st.markdown("**Mapa de calor — % offline por cliente**")
+            # Inclui todos os clientes cadastrados no nome_clientes.xlsx,
+            # mesmo aqueles sem câmeras no CSV (aparecem com 0%).
+            rows_heat = []
+            for v in dados.values():
+                rows_heat.append({
+                    "Cliente": v["nome_cliente"],
+                    "Pct": round(len(v["offline"]) / v["total"] * 100, 2) if v["total"] else 0,
+                })
+            clientes_no_csv = {v["nome_cliente"] for v in dados.values()}
+            for wl_id, nome in clientes_map.items():
+                if nome not in clientes_no_csv:
+                    rows_heat.append({"Cliente": nome, "Pct": 0.0})
+            df_heat = pd.DataFrame(rows_heat).sort_values("Pct", ascending=False)
+
+            fig_map, mapa_msg = montar_mapa_cidades(df_origem)
+            if fig_map is not None:
+                st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
+                st.caption(mapa_msg)
+            else:
+                st.info(mapa_msg)
+
+            fig_heat = go.Figure(go.Bar(
+                x=df_heat["Cliente"], y=df_heat["Pct"],
+                marker=dict(
+                    color=df_heat["Pct"],
+                    colorscale=[
+                        [0.0, "#dff8f3"],
+                        [0.10, "#14b8a6"],
+                        [0.12, "#fde047"],
+                        [0.15, "#f59e0b"],
+                        [0.40, "#ef4444"],
+                        [1.0, "#b91c1c"],
+                    ],
+                    cmin=0, cmax=100, line=dict(width=0),
+                ),
+                hovertemplate="<b>%{x}</b><br>%{y:.1f}% offline<extra></extra>",
+            ))
+            layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+            _heat_height = max(300, min(len(df_heat) * 22, 600))
+            fig_heat.update_layout(
+                **layout_defaults,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                height=_heat_height,
+                xaxis=dict(tickfont=dict(color="#8B7AA3",size=10), tickangle=-45),
+                yaxis=dict(ticksuffix="%", gridcolor="#E9D5FF",
+                           tickfont=dict(color="#8B7AA3",size=10),
+                           range=[0, max(df_heat["Pct"].max()*1.2, 10)]),
+                margin=dict(l=10,r=10,t=10,b=110),
+            )
+            st.plotly_chart(fig_heat, use_container_width=True, key="heatmap_clientes_operacao_v1")
+
+        # ════════════════════════════════════════════
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
     with tabs[1]:
@@ -5715,9 +5713,10 @@ def main():
         render_central_acoes(dados)
 
     # ════════════════════════════════════════════
-    # ABA 3 — TEMPO OFFLINE
+    # AUDITORIA SUB-ABA 1 — TEMPO OFFLINE
     # ════════════════════════════════════════════
-    with tabs[3]:
+    with tabs[0]:
+     with auditoria_subtabs[1]:
         st.markdown("#### Câmeras offline por tempo sem sinal")
         st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
 
@@ -5998,9 +5997,10 @@ def main():
                 render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
 
     # ════════════════════════════════════════════
-    # ABA 4 — % OFFLINE POR CLIENTE
+    # AUDITORIA SUB-ABA 2 — % OFFLINE POR CLIENTE
     # ════════════════════════════════════════════
-    with tabs[4]:
+    with tabs[0]:
+     with auditoria_subtabs[2]:
         st.markdown("#### Percentual de câmeras offline por cliente")
         st.caption("Escala 0–100% · Verde 0–5% · Amarelo >5–10% · Vermelho >10%")
 
@@ -6094,9 +6094,9 @@ def main():
 
 
     # ════════════════════════════════════════════
-    # ABA 5 — HISTÓRICO & COMPARATIVO
+    # ABA 3 — HISTÓRICO & COMPARATIVO (EVIDÊNCIAS)
     # ════════════════════════════════════════════
-    with tabs[5]:
+    with tabs[3]:
         st.markdown("#### Histórico de snapshots")
         df_snaps = listar_snapshots()
 
@@ -6549,9 +6549,10 @@ def main():
 
 
     # ════════════════════════════════════════════
-    # ABA 6 — LPRS OFFLINE
+    # AUDITORIA SUB-ABA 3 — LPRS OFFLINE
     # ════════════════════════════════════════════
-    with tabs[6]:
+    with tabs[0]:
+     with auditoria_subtabs[3]:
         st.markdown("### LPRs Offline")
         st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
 
@@ -6710,18 +6711,11 @@ def main():
 
 
     # ════════════════════════════════════════════
-    # ABA 7 — ATUALIZAR BASE ONLINE
+    # ABA 4 — ATUALIZAR BASE ONLINE
     # ════════════════════════════════════════════
-    with tabs[7]:
+    with tabs[4]:
         render_aba_atualizar_base(df_origem)
 
-    # ════════════════════════════════════════════
-    # ABA 8 — RELATÓRIO FRANQUIA (atalho visível)
-    # ════════════════════════════════════════════
-    with tabs[8]:
-        st.markdown("### ✉️ Relatório por franquia")
-        st.caption("Atalho da mesma rotina disponível dentro de Clientes > Relatório por franquia.")
-        render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="atalho_relatorio_franquia")
 
 
 if __name__ == "__main__":
