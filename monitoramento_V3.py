@@ -5082,22 +5082,26 @@ def main():
     """, unsafe_allow_html=True)
 
     # ── ABAS ──
-    tabs = st.tabs([
+    _injetar_css_abas_visiveis()
+    abas_principais = [
         "Auditoria",
         "Clientes",
         "Central de Ações",
+        "Tendência",
         "Tempo offline",
         "% por cliente",
         "Evidências",
+        "Detalhe Cliente Snap",
         "LPRs Offline",
         "Atualizar Base",
         "Relatório Franquia",
-    ])
+    ]
+    tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
     # ════════════════════════════════════════════
     # ABA 0 — VISÃO EXECUTIVA
     # ════════════════════════════════════════════
-    with tabs[0]:
+    with tabs["Auditoria"]:
         st.markdown(f"""
         <div class="audit-hero">
             <div class="audit-hero-top">
@@ -5549,7 +5553,7 @@ def main():
     # ════════════════════════════════════════════
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
-    with tabs[1]:
+    with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
         clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia"])
@@ -5913,13 +5917,16 @@ def main():
     # ════════════════════════════════════════════
     # ABA 2 — CENTRAL DE AÇÕES
     # ════════════════════════════════════════════
-    with tabs[2]:
+    with tabs["Central de Ações"]:
         render_central_acoes(dados)
+
+    with tabs["Tendência"]:
+        render_aba_tendencia(dados)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
     # ════════════════════════════════════════════
-    with tabs[3]:
+    with tabs["Tempo offline"]:
         st.markdown("#### Câmeras offline por tempo sem sinal")
         st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
 
@@ -6202,7 +6209,7 @@ def main():
     # ════════════════════════════════════════════
     # ABA 4 — % OFFLINE POR CLIENTE
     # ════════════════════════════════════════════
-    with tabs[4]:
+    with tabs["% por cliente"]:
         st.markdown("#### Percentual de câmeras offline por cliente")
         st.caption("Escala 0–100% · Verde 0–5% · Amarelo >5–10% · Vermelho >10%")
 
@@ -6298,7 +6305,7 @@ def main():
     # ════════════════════════════════════════════
     # ABA 5 — HISTÓRICO & COMPARATIVO
     # ════════════════════════════════════════════
-    with tabs[5]:
+    with tabs["Evidências"]:
         st.markdown("#### Histórico de snapshots")
         df_snaps = listar_snapshots()
 
@@ -6753,7 +6760,10 @@ def main():
     # ════════════════════════════════════════════
     # ABA 6 — LPRS OFFLINE
     # ════════════════════════════════════════════
-    with tabs[6]:
+    with tabs["Detalhe Cliente Snap"]:
+        render_aba_detalhe_cliente_snap(dados)
+
+    with tabs["LPRs Offline"]:
         st.markdown("### LPRs Offline")
         st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
 
@@ -6914,13 +6924,13 @@ def main():
     # ════════════════════════════════════════════
     # ABA 7 — ATUALIZAR BASE ONLINE
     # ════════════════════════════════════════════
-    with tabs[7]:
+    with tabs["Atualizar Base"]:
         render_aba_atualizar_base(df_origem)
 
     # ════════════════════════════════════════════
     # ABA 8 — RELATÓRIO FRANQUIA (atalho visível)
     # ════════════════════════════════════════════
-    with tabs[8]:
+    with tabs["Relatório Franquia"]:
         st.markdown("### ✉️ Relatório por franquia")
         st.caption("Atalho da mesma rotina disponível dentro de Clientes > Relatório por franquia.")
         render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="atalho_relatorio_franquia")
