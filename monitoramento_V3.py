@@ -1140,6 +1140,16 @@ def _postgrest_in_filter_text(valores: list[str]) -> str:
     return "in.(" + ",".join(sorted(set(limpos))) + ")"
 
 
+def _postgrest_in_filter_int(valores) -> str:
+    limpos = []
+    for valor in valores:
+        try:
+            limpos.append(str(int(valor)))
+        except Exception:
+            continue
+    return "in.(" + ",".join(sorted(set(limpos), key=lambda x: int(x))) + ")"
+
+
 def apagar_cameras_origem_por_whitelabel(ids_whitelabel: list[str], progress_callback=None, total_registros: int = 0) -> tuple[bool, str]:
     """Remove da cameras_origem todos os registros dos whitelabels importados.
 
@@ -3456,6 +3466,7 @@ def _supabase_select_all(tabela: str, params: dict | None = None, page_size: int
     return pd.DataFrame(todos), ""
 
 
+@st.cache_data(ttl=120)
 def _snapshot_datas_df() -> pd.DataFrame:
     """Lista snapshots a partir da tabela mestre public.snapshots.
 
@@ -3857,6 +3868,7 @@ def salvar_snapshot_automatico(
     return salvar_snapshot(label, notas, dados, df_origem)
 
 
+@st.cache_data(ttl=120)
 def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
     limite = agora_sao_paulo() - timedelta(days=dias)
     df_snaps = listar_snapshots()
@@ -3865,6 +3877,38 @@ def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
 
     df_snaps["gravado_dt"] = pd.to_datetime(df_snaps["gravado_em"], errors="coerce")
     df_snaps = df_snaps[df_snaps["gravado_dt"] >= limite].copy()
+    if df_snaps.empty:
+        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "wl_id", "nome_cliente", "total", "offline", "pct_offline"])
+
+    snapshot_ids = df_snaps["id"].astype(int).tolist()
+    filtro_ids = _postgrest_in_filter_int(snapshot_ids)
+    if filtro_ids != "in.()":
+        df_cli, erro = _supabase_select_all(
+            SNAPSHOT_CLIENTES_TABLE,
+            params={
+                "select": "snapshot_id,id_whitelabel,nome_cliente,total_cameras,total_offline,pct_offline",
+                "snapshot_id": filtro_ids,
+                "order": "snapshot_id.asc,id_whitelabel.asc",
+            },
+            page_size=5000,
+        )
+        if not erro and not df_cli.empty:
+            meta = df_snaps[["id", "label", "gravado_em"]].copy()
+            meta["id"] = pd.to_numeric(meta["id"], errors="coerce").astype("Int64")
+
+            out = pd.DataFrame()
+            out["snapshot_id"] = pd.to_numeric(df_cli.get("snapshot_id", 0), errors="coerce").astype("Int64")
+            out["wl_id"] = df_cli.get("id_whitelabel", "").astype(str).str.strip()
+            out["nome_cliente"] = df_cli.get("nome_cliente", "").astype(str).replace({"nan": ""}).str.strip()
+            out["total"] = pd.to_numeric(df_cli.get("total_cameras", 0), errors="coerce").fillna(0).astype(int)
+            out["offline"] = pd.to_numeric(df_cli.get("total_offline", 0), errors="coerce").fillna(0).astype(int)
+            out["pct_offline"] = pd.to_numeric(df_cli.get("pct_offline", 0), errors="coerce").fillna(0.0)
+            out = out[(out["snapshot_id"].notna()) & (out["wl_id"] != "")].copy()
+            out = out.merge(meta, left_on="snapshot_id", right_on="id", how="left")
+            out = out.drop(columns=["id"], errors="ignore")
+            out["snapshot_id"] = out["snapshot_id"].astype(int)
+            out = out[["snapshot_id", "label", "gravado_em", "wl_id", "nome_cliente", "total", "offline", "pct_offline"]]
+            return out.sort_values(["snapshot_id", "wl_id"]).reset_index(drop=True)
 
     rows = []
     for _, snap in df_snaps.iterrows():
