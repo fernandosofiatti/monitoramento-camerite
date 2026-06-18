@@ -23,10 +23,7 @@ import base64
 import hashlib as _hashlib
 
 def _hash_dados(dados: dict) -> str:
-    """Chave md5 derivada de total+offline por cliente.
-    Muda quando o CSV é recarregado com valores diferentes.
-    Usada para invalidar entradas de st.session_state usadas como cache.
-    """
+    """Chave md5 derivada de total+offline por cliente."""
     partes = []
     for wl_id in sorted(dados.keys()):
         v = dados[wl_id]
@@ -35,14 +32,7 @@ def _hash_dados(dados: dict) -> str:
 
 
 def _session_cache(chave: str, fn, *args, **kwargs):
-    """Cache simples via st.session_state para objetos não-hasháveis (dicts com DataFrames).
-
-    Executa fn(*args, **kwargs) apenas uma vez por valor de `chave` por sessão.
-    Quando `chave` muda (novo CSV carregado), o resultado é recomputado.
-
-    Uso:
-        df = _session_cache(f"montar_df_clientes:{hash_dados}", montar_df_clientes, dados, ...)
-    """
+    """Cache simples via st.session_state para objetos não-hasháveis."""
     if st.session_state.get("_scache_key:" + chave) == chave:
         return st.session_state["_scache_val:" + chave]
     result = fn(*args, **kwargs)
@@ -5953,14 +5943,267 @@ def render_aba_clientes(ctx: 'ContextoMain') -> None:
 
 
 # ─────────────────────────────────────────────
+# Aba Evidências › Tendência por Cliente
+# ─────────────────────────────────────────────
+def render_tendencia_cliente(dados: dict) -> None:
+    """Plota a evolução do % offline ao longo dos snapshots para um cliente."""
+
+    col_periodo, col_cliente = st.columns([1, 2])
+
+    with col_periodo:
+        dias = st.selectbox(
+            "Período",
+            options=[7, 14, 30, 60, 90],
+            index=2,
+            format_func=lambda d: f"Últimos {d} dias",
+            key="tend_periodo",
+        )
+
+    with st.spinner("Carregando histórico de snapshots…"):
+        df_hist = carregar_historico_clientes(dias)
+
+    if df_hist.empty:
+        st.info(
+            f"Nenhum snapshot encontrado nos últimos {dias} dias. "
+            "Salve snapshots regularmente pelo painel lateral."
+        )
+        return
+
+    df_hist["gravado_dt"] = pd.to_datetime(df_hist["gravado_em"], errors="coerce")
+
+    # ── Lista de clientes ────────────────────────────────────────────────
+    clientes_hist = (
+        df_hist[["wl_id", "nome_cliente"]]
+        .drop_duplicates("wl_id")
+        .set_index("wl_id")["nome_cliente"]
+        .to_dict()
+    )
+    for wl_id, v in dados.items():
+        if str(wl_id) not in clientes_hist:
+            clientes_hist[str(wl_id)] = v.get("nome_cliente", f"ID {wl_id}")
+
+    opcoes_ids   = sorted(clientes_hist.keys())
+    opcoes_nomes = {wl: clientes_hist[wl] for wl in opcoes_ids}
+
+    with col_cliente:
+        wl_sel = st.selectbox(
+            "Cliente",
+            options=opcoes_ids,
+            format_func=lambda wl: opcoes_nomes.get(wl, wl),
+            key="tend_cliente",
+        )
+
+    df_cli = (
+        df_hist[df_hist["wl_id"].astype(str) == str(wl_sel)]
+        .sort_values("gravado_dt")
+        .copy()
+    )
+
+    if df_cli.empty:
+        nome_miss = opcoes_nomes.get(wl_sel, wl_sel)
+        st.warning(
+            f"Nenhum snapshot encontrado para **{nome_miss}** nos últimos {dias} dias."
+        )
+        return
+
+    nome_cliente = opcoes_nomes.get(wl_sel, wl_sel)
+
+    # ── KPIs ──────────────────────────────────────────────────────────────
+    pct_atual   = float(df_cli["pct_offline"].iloc[-1])
+    pct_inicio  = float(df_cli["pct_offline"].iloc[0])
+    pct_max     = float(df_cli["pct_offline"].max())
+    pct_min     = float(df_cli["pct_offline"].min())
+    pct_medio   = float(df_cli["pct_offline"].mean())
+    variacao    = pct_atual - pct_inicio
+    n_snapshots = len(df_cli)
+    cor_atual   = cor_hex(pct_atual)
+    cor_delta   = "#ef4444" if variacao > 0 else ("#14b8a6" if variacao < 0 else "#7C3AED")
+    sinal       = f"+{variacao:.1f}" if variacao > 0 else f"{variacao:.1f}"
+
+    st.markdown(f"""
+    <div style="margin:12px 0 18px">
+        <div style="font-size:13px;color:#7C6A91;font-weight:700;text-transform:uppercase;
+                    letter-spacing:.6px;margin-bottom:10px">{escape_html(nome_cliente)}</div>
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px">
+            <div class="audit-card">
+                <div class="audit-card-label">% Offline atual</div>
+                <div class="audit-card-value" style="color:{cor_atual}">{pct_atual:.1f}%</div>
+                <div class="audit-card-note">{int(df_cli['offline'].iloc[-1])} de {int(df_cli['total'].iloc[-1])} câmeras</div>
+            </div>
+            <div class="audit-card">
+                <div class="audit-card-label">Variação no período</div>
+                <div class="audit-card-value" style="color:{cor_delta}">{sinal}%</div>
+                <div class="audit-card-note">Início: {pct_inicio:.1f}%</div>
+            </div>
+            <div class="audit-card">
+                <div class="audit-card-label">Pior momento</div>
+                <div class="audit-card-value" style="color:#ef4444">{pct_max:.1f}%</div>
+                <div class="audit-card-note">Pico no período</div>
+            </div>
+            <div class="audit-card">
+                <div class="audit-card-label">Melhor momento</div>
+                <div class="audit-card-value" style="color:#14b8a6">{pct_min:.1f}%</div>
+                <div class="audit-card-note">Mínimo no período</div>
+            </div>
+            <div class="audit-card">
+                <div class="audit-card-label">Média do período</div>
+                <div class="audit-card-value" style="color:#7C3AED">{pct_medio:.1f}%</div>
+                <div class="audit-card-note">{n_snapshots} snapshots</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Gráfico de linha ───────────────────────────────────────────────────
+    cores_pontos = [cor_hex(p) for p in df_cli["pct_offline"]]
+    labels_x     = df_cli["gravado_dt"].dt.strftime("%d/%m %H:%M").tolist()
+
+    fig = go.Figure()
+
+    fig.add_hrect(y0=0,  y1=5,   fillcolor="#dff8f3", opacity=0.25, line_width=0, layer="below")
+    fig.add_hrect(y0=5,  y1=10,  fillcolor="#fef9c3", opacity=0.25, line_width=0, layer="below")
+    fig.add_hrect(y0=10, y1=100, fillcolor="#fee2e2", opacity=0.20, line_width=0, layer="below")
+
+    # Linha de fundo suave
+    fig.add_trace(go.Scatter(
+        x=labels_x, y=df_cli["pct_offline"].tolist(),
+        mode="lines",
+        line=dict(color="#C4B5FD", width=2),
+        showlegend=False, hoverinfo="skip",
+    ))
+
+    # Pontos coloridos por status
+    fig.add_trace(go.Scatter(
+        x=labels_x, y=df_cli["pct_offline"].tolist(),
+        mode="markers+lines",
+        marker=dict(color=cores_pontos, size=9, line=dict(color="#ffffff", width=2)),
+        line=dict(color="rgba(0,0,0,0)", width=0),
+        text=[
+            f"<b>{r['label']}</b><br>"
+            f"{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
+            f"% Offline: <b>{r['pct_offline']:.1f}%</b><br>"
+            f"Offline: {int(r['offline'])} · Total: {int(r['total'])}"
+            for _, r in df_cli.iterrows()
+        ],
+        hovertemplate="%{text}<extra></extra>",
+        showlegend=False,
+    ))
+
+    fig.add_hline(y=5,  line_dash="dot", line_color="#14b8a6", line_width=1,
+                  annotation_text="5%",  annotation_position="right",
+                  annotation_font=dict(color="#14b8a6", size=11))
+    fig.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1,
+                  annotation_text="10%", annotation_position="right",
+                  annotation_font=dict(color="#f59e0b", size=11))
+
+    ld = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+    fig.update_layout(
+        **ld,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=360, margin=dict(l=10, r=60, t=20, b=60),
+        xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-35, gridcolor="#F3E8FF"),
+        yaxis=dict(ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10),
+                   gridcolor="#F3E8FF", range=[0, max(pct_max * 1.25, 12)]),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"tend_line_{wl_sel}")
+
+    # ── Comparativo multi-cliente ──────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### Comparar com outros clientes")
+    st.caption("Selecione até 4 clientes para sobrepor no mesmo gráfico.")
+
+    outros = st.multiselect(
+        "Clientes para comparar",
+        options=[wl for wl in opcoes_ids if wl != wl_sel],
+        format_func=lambda wl: opcoes_nomes.get(wl, wl),
+        max_selections=4,
+        key="tend_comparar",
+    )
+
+    if outros:
+        PALETTE = ["#7C3AED", "#0ea5e9", "#f59e0b", "#ec4899"]
+        fig2 = go.Figure()
+
+        fig2.add_trace(go.Scatter(
+            x=labels_x, y=df_cli["pct_offline"].tolist(),
+            mode="lines+markers",
+            name=nome_cliente[:28],
+            line=dict(color="#ef4444", width=2.5),
+            marker=dict(size=7, color="#ef4444"),
+            hovertemplate=f"<b>{escape_html(nome_cliente)}</b><br>%{{y:.1f}}%<extra></extra>",
+        ))
+
+        for i, wl_outro in enumerate(outros):
+            df_outro = (
+                df_hist[df_hist["wl_id"].astype(str) == str(wl_outro)]
+                .sort_values("gravado_dt").copy()
+            )
+            if df_outro.empty:
+                continue
+            nome_outro   = opcoes_nomes.get(wl_outro, wl_outro)
+            labels_outro = df_outro["gravado_dt"].dt.strftime("%d/%m %H:%M").tolist()
+            cor_outro    = PALETTE[i % len(PALETTE)]
+            fig2.add_trace(go.Scatter(
+                x=labels_outro, y=df_outro["pct_offline"].tolist(),
+                mode="lines+markers", name=nome_outro[:28],
+                line=dict(color=cor_outro, width=2),
+                marker=dict(size=6, color=cor_outro),
+                hovertemplate=f"<b>{escape_html(nome_outro)}</b><br>%{{y:.1f}}%<extra></extra>",
+            ))
+
+        fig2.add_hline(y=5,  line_dash="dot", line_color="#14b8a6", line_width=1)
+        fig2.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1)
+        fig2.update_layout(
+            **ld,
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            height=380, margin=dict(l=10, r=20, t=20, b=60),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                        xanchor="left", x=0, font=dict(size=11, color="#6B5A7A")),
+            xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-35, gridcolor="#F3E8FF"),
+            yaxis=dict(ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10),
+                       gridcolor="#F3E8FF", range=[0, None]),
+        )
+        st.plotly_chart(fig2, use_container_width=True, key=f"tend_multi_{wl_sel}")
+
+    # ── Tabela de dados brutos ─────────────────────────────────────────────
+    with st.expander("Ver tabela de dados brutos"):
+        df_tabela = df_cli[["gravado_dt", "label", "total", "offline", "pct_offline"]].copy()
+        df_tabela["gravado_dt"] = df_tabela["gravado_dt"].dt.strftime("%d/%m/%Y %H:%M")
+        df_tabela.columns = ["Data", "Rótulo", "Total", "Offline", "% Offline"]
+        df_tabela["% Offline"] = df_tabela["% Offline"].apply(lambda v: f"{v:.1f}%")
+        render_dataframe(df_tabela, height=min(400, (len(df_tabela) + 1) * 35 + 3))
+
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+            df_tabela.to_excel(writer, index=False, sheet_name="Tendência")
+        st.download_button(
+            "⬇ Exportar Excel",
+            data=buf.getvalue(),
+            file_name=f"tendencia_{slug_arquivo(nome_cliente)}_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"dl_tend_{wl_sel}",
+            use_container_width=True,
+        )
+
+
+# ─────────────────────────────────────────────
 # Aba Evidências (Histórico & Comparativo)
 # ─────────────────────────────────────────────
 def render_aba_evidencias(ctx: 'ContextoMain') -> None:
-    """Aba Evidências: snapshots e comparativo entre períodos."""
+    """Aba Evidências: snapshots, comparativo e tendência por cliente."""
     dados = ctx.dados
     comp  = ctx.comp
 
-    st.markdown("#### Histórico de snapshots")
+    ev_subtabs = st.tabs(["📊 Comparativo de snapshots", "📈 Tendência por cliente"])
+
+    with ev_subtabs[1]:
+        render_tendencia_cliente(dados)
+
+    with ev_subtabs[0]:
+     pass  # conteúdo abaixo usa 4-space indent original
+
+    with ev_subtabs[0]:
+     st.markdown("#### Histórico de snapshots")
     df_snaps = listar_snapshots()
 
     if df_snaps.empty:
