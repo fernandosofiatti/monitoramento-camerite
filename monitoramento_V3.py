@@ -4570,6 +4570,208 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
         )
 
 
+def _injetar_css_abas_visiveis() -> None:
+    """Evita que abas principais fiquem escondidas quando a barra passa da largura da tela."""
+    st.markdown(
+        """
+        <style>
+        div[data-baseweb="tab-list"] {
+            flex-wrap: wrap;
+            gap: 6px 8px;
+        }
+        div[data-baseweb="tab-list"] button[role="tab"] {
+            flex: 0 0 auto;
+            max-width: 100%;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_aba_tendencia(dados: dict) -> None:
+    """Aba Tendencia: evolucao do percentual offline por cliente ao longo dos snapshots."""
+    st.markdown("### 📈 Tendência")
+    st.caption("Evolução do percentual offline por cliente a partir dos snapshots salvos.")
+
+    col_periodo, col_cliente = st.columns([1, 2])
+    with col_periodo:
+        dias = st.selectbox(
+            "Período",
+            options=[7, 14, 30, 60, 90],
+            index=2,
+            format_func=lambda d: f"Últimos {d} dias",
+            key="tend_periodo",
+        )
+
+    with st.spinner("Carregando histórico de snapshots..."):
+        df_hist = carregar_historico_clientes(dias)
+
+    if df_hist.empty:
+        st.info(f"Nenhum snapshot encontrado nos últimos {dias} dias.")
+        return
+
+    df_hist["gravado_dt"] = pd.to_datetime(df_hist["gravado_em"], errors="coerce")
+    df_hist = df_hist[df_hist["gravado_dt"].notna()].copy()
+    if df_hist.empty:
+        st.info("Os snapshots encontrados não possuem data válida para montar a tendência.")
+        return
+
+    clientes_hist = (
+        df_hist[["wl_id", "nome_cliente"]]
+        .drop_duplicates("wl_id")
+        .set_index("wl_id")["nome_cliente"]
+        .to_dict()
+    )
+    for wl_id, v in (dados or {}).items():
+        clientes_hist.setdefault(str(wl_id), v.get("cidade_estado") or v.get("nome_cliente", f"ID {wl_id}"))
+
+    opcoes_ids = sorted(clientes_hist.keys(), key=lambda wl: clientes_hist.get(wl, wl))
+    with col_cliente:
+        wl_sel = st.selectbox(
+            "Cliente",
+            options=opcoes_ids,
+            format_func=lambda wl: clientes_hist.get(wl, wl),
+            key="tend_cliente",
+        )
+
+    df_cli = (
+        df_hist[df_hist["wl_id"].astype(str) == str(wl_sel)]
+        .sort_values("gravado_dt")
+        .copy()
+    )
+    if df_cli.empty:
+        st.warning(f"Nenhum snapshot encontrado para **{clientes_hist.get(wl_sel, wl_sel)}** no período.")
+        return
+
+    nome_cliente = clientes_hist.get(wl_sel, wl_sel)
+    pct_atual = float(df_cli["pct_offline"].iloc[-1])
+    pct_inicio = float(df_cli["pct_offline"].iloc[0])
+    pct_max = float(df_cli["pct_offline"].max())
+    pct_min = float(df_cli["pct_offline"].min())
+    pct_medio = float(df_cli["pct_offline"].mean())
+    variacao = pct_atual - pct_inicio
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("% Offline atual", f"{pct_atual:.1f}%")
+    m2.metric("Variação", f"{variacao:+.1f} p.p.")
+    m3.metric("Pior momento", f"{pct_max:.1f}%")
+    m4.metric("Melhor momento", f"{pct_min:.1f}%")
+    m5.metric("Média", f"{pct_medio:.1f}%")
+
+    labels_x = df_cli["gravado_dt"].dt.strftime("%d/%m %H:%M").tolist()
+    fig = go.Figure()
+    fig.add_hrect(y0=0, y1=5, fillcolor="#dff8f3", opacity=0.25, line_width=0, layer="below")
+    fig.add_hrect(y0=5, y1=10, fillcolor="#fef9c3", opacity=0.25, line_width=0, layer="below")
+    fig.add_hrect(y0=10, y1=100, fillcolor="#fee2e2", opacity=0.20, line_width=0, layer="below")
+    fig.add_trace(go.Scatter(
+        x=labels_x,
+        y=df_cli["pct_offline"].tolist(),
+        mode="lines+markers",
+        line=dict(color="#7C3AED", width=2),
+        marker=dict(color=[cor_hex(v) for v in df_cli["pct_offline"]], size=9),
+        text=[
+            f"<b>{escape_html(r['label'])}</b><br>{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
+            f"% Offline: <b>{r['pct_offline']:.1f}%</b><br>Offline: {int(r['offline'])} de {int(r['total'])}"
+            for _, r in df_cli.iterrows()
+        ],
+        hovertemplate="%{text}<extra></extra>",
+        name=nome_cliente[:28],
+    ))
+    fig.add_hline(y=5, line_dash="dot", line_color="#14b8a6", line_width=1)
+    fig.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1)
+    fig.update_layout(
+        **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=380,
+        margin=dict(l=10, r=30, t=20, b=70),
+        xaxis=dict(tickangle=-35, gridcolor="#F3E8FF"),
+        yaxis=dict(ticksuffix="%", gridcolor="#F3E8FF", range=[0, max(pct_max * 1.25, 12)]),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"tend_line_{wl_sel}")
+
+    with st.expander("Ver tabela de dados brutos"):
+        df_tabela = df_cli[["gravado_dt", "label", "total", "offline", "pct_offline"]].copy()
+        df_tabela["gravado_dt"] = df_tabela["gravado_dt"].dt.strftime("%d/%m/%Y %H:%M")
+        df_tabela.columns = ["Data", "Rótulo", "Total", "Offline", "% Offline"]
+        df_tabela["% Offline"] = df_tabela["% Offline"].apply(lambda v: f"{v:.1f}%")
+        render_dataframe(df_tabela, height=min(400, (len(df_tabela) + 1) * 35 + 3))
+
+
+def render_aba_detalhe_cliente_snap(dados: dict) -> None:
+    """Aba Detalhe Cliente Snap: consulta de cliente dentro de um snapshot salvo."""
+    st.markdown("### 📈 Detalhe Cliente Snap")
+    st.caption("Consulte o resumo e, quando disponível, as câmeras de um cliente em um snapshot salvo.")
+
+    df_snaps = listar_snapshots()
+    if df_snaps.empty:
+        st.info("Nenhum snapshot gravado ainda.")
+        return
+
+    df_snaps = df_snaps.copy()
+    df_snaps["gravado_dt"] = pd.to_datetime(df_snaps["gravado_em"], errors="coerce")
+    df_snaps = df_snaps.sort_values("gravado_dt", ascending=False)
+
+    def fmt_snap(sid: int) -> str:
+        row = df_snaps[df_snaps["id"].astype(int) == int(sid)].iloc[0]
+        data = row["gravado_dt"].strftime("%d/%m/%Y %H:%M") if pd.notna(row["gravado_dt"]) else str(row["gravado_em"])
+        return f"{data} - {row.get('label', 'Snapshot')}"
+
+    snap_ids = df_snaps["id"].astype(int).tolist()
+    snap_id = st.selectbox("Snapshot", snap_ids, format_func=fmt_snap, key="det_snap_id")
+
+    wl_ids_validos = {str(k).strip() for k in (dados or {}).keys()}
+    df_cli = carregar_snapshot(int(snap_id), wl_ids_validos=wl_ids_validos)
+    if df_cli.empty:
+        st.warning("Nenhum cliente encontrado nesse snapshot.")
+        return
+
+    nomes_atuais = {
+        str(wl): (v.get("cidade_estado") or v.get("nome_cliente", f"ID {wl}"))
+        for wl, v in (dados or {}).items()
+    }
+    df_cli["nome_exibicao"] = df_cli["wl_id"].astype(str).map(nomes_atuais).fillna(df_cli["nome_cliente"].astype(str))
+    df_cli = df_cli.sort_values("nome_exibicao").copy()
+
+    wl_sel = st.selectbox(
+        "Cliente",
+        df_cli["wl_id"].astype(str).tolist(),
+        format_func=lambda wl: df_cli.loc[df_cli["wl_id"].astype(str) == str(wl), "nome_exibicao"].iloc[0],
+        key="det_snap_cliente",
+    )
+
+    row_cli = df_cli[df_cli["wl_id"].astype(str) == str(wl_sel)].iloc[0]
+    total = int(row_cli.get("total", 0) or 0)
+    offline = int(row_cli.get("offline", 0) or 0)
+    pct = float(row_cli.get("pct_offline", 0) or 0)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total", total)
+    c2.metric("Offline", offline)
+    c3.metric("% Offline", f"{pct:.1f}%")
+
+    df_cams = carregar_snapshot_cameras(int(snap_id), wl_ids_validos={str(wl_sel)})
+    if df_cams.empty:
+        st.info("Esse snapshot possui apenas o resumo por cliente; o detalhamento por câmera não está disponível.")
+        return
+
+    df_show = df_cams.copy()
+    if "status_camera" in df_show.columns:
+        df_show = df_show.sort_values(["status_camera", "nome_camera"], ascending=[True, True])
+    df_show = df_show.rename(columns={
+        "wl_id": "ID Whitelabel",
+        "nome_cliente": "Cliente",
+        "nome_empresa": "Franqueado",
+        "id_camera": "ID da Câmera",
+        "nome_camera": "Nome da Câmera",
+        "ultima_atualizacao": "Última vez Online",
+        "status_camera": "Status",
+    })
+    cols = [c for c in ["Cliente", "Franqueado", "ID da Câmera", "Nome da Câmera", "Última vez Online", "Status"] if c in df_show.columns]
+    render_dataframe(df_show[cols], height=min(620, (len(df_show) + 1) * 35 + 3))
+
+
 def main():
     init_db()
 
