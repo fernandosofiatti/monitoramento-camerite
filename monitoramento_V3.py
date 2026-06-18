@@ -3067,127 +3067,116 @@ def carregar_snapshot_clientes(sid: int, wl_ids_validos: set[str] | None = None)
 
 @st.cache_data(ttl=60)
 def carregar_evolucao_cliente_snapshots(wl_id: str, limite: int = 10) -> pd.DataFrame:
-    """Retorna a evolução de um cliente consultando os snapshots no Supabase.
+    """Retorna a evolução de um cliente diretamente do Supabase.
 
-    Importante: o histórico do app fica no Supabase. Por isso esta função não
-    depende do historico.db/local e também não depende obrigatoriamente da tabela
-    mestre snapshots. Ela tenta primeiro snapshot_clientes e, se não houver dados,
-    calcula a evolução direto pela snapshot_cameras.
+    IMPORTANTE:
+    Esta função NÃO depende mais da tabela mestre `snapshots`.
+    Primeiro busca o histórico direto em `snapshot_clientes` filtrando pelo
+    id_whitelabel do cliente. Se não houver resumo por cliente, faz fallback em
+    `snapshot_cameras` e recalcula total/offline por snapshot.
     """
-    wl_id = str(wl_id or "").strip().replace(".0", "")
     cols = ["snapshot_id", "Snapshot", "Data", "gravado_em", "total", "offline", "pct_offline"]
+    wl_id = str(wl_id or "").strip().replace(".0", "")
+    limite = int(limite or 10)
+
     if not wl_id or not supabase_configurado():
         return pd.DataFrame(columns=cols)
 
-    def _fmt_data(valor, fallback: str) -> tuple[str, str]:
-        bruto = str(valor or "").strip()
-        dt = pd.to_datetime(bruto, errors="coerce")
+    def _fmt_data(valor, sid):
+        dt = pd.to_datetime(valor, errors="coerce")
         if pd.isna(dt):
-            return fallback, bruto
-        return dt.strftime("%d/%m %H:%M"), dt.strftime("%Y-%m-%d %H:%M:%S")
+            return f"Snapshot {sid}"
+        return dt.strftime("%d/%m %H:%M")
 
-    def _normalizar_df_saida(rows: list[dict]) -> pd.DataFrame:
-        if not rows:
-            return pd.DataFrame(columns=cols)
-        out = pd.DataFrame(rows)
-        out["snapshot_id"] = pd.to_numeric(out["snapshot_id"], errors="coerce")
-        out = out[out["snapshot_id"].notna()].copy()
-        out["snapshot_id"] = out["snapshot_id"].astype(int)
-        out = out.drop_duplicates(subset=["snapshot_id"], keep="last")
-        out = out.sort_values("snapshot_id", ascending=True).tail(int(limite)).reset_index(drop=True)
-        return out[cols]
-
-    # 1) Fonte principal: resumo por cliente salvo no Supabase.
-    # Não usamos a tabela mestre snapshots como dependência, porque em algumas
-    # versões ela pode estar vazia/incompleta enquanto snapshot_clientes tem os dados.
-    params_clientes = {
-        "select": "*",
+    # 1) Fonte oficial: resumo por cliente salvo no Supabase.
+    params_cli = {
+        "select": "snapshot_id,data_snapshot,id_whitelabel,nome_cliente,total_cameras,total_offline,pct_offline",
         "id_whitelabel": f"eq.{wl_id}",
         "order": "snapshot_id.desc",
+        "limit": str(limite),
     }
-    df_cli_raw, erro_cli = _supabase_select_all(SNAPSHOT_CLIENTES_TABLE, params=params_clientes, page_size=5000)
+    df_cli_raw, erro_cli = _supabase_select_all(SNAPSHOT_CLIENTES_TABLE, params=params_cli, page_size=max(limite, 100))
 
-    rows = []
     if not erro_cli and df_cli_raw is not None and not df_cli_raw.empty:
-        df_cli_raw = df_cli_raw.copy()
-        if "snapshot_id" in df_cli_raw.columns:
-            df_cli_raw["snapshot_id"] = pd.to_numeric(df_cli_raw["snapshot_id"], errors="coerce")
-            df_cli_raw = df_cli_raw[df_cli_raw["snapshot_id"].notna()].copy()
-            df_cli_raw = df_cli_raw.sort_values("snapshot_id", ascending=False).head(max(int(limite), 10))
-            for _, r in df_cli_raw.iterrows():
-                sid = int(r.get("snapshot_id"))
-                data_base = r.get("data_snapshot") or r.get("gravado_em") or r.get("created_at") or ""
-                data_txt, gravado_em = _fmt_data(data_base, f"Snapshot {sid}")
-                label = str(r.get("label") or "").strip() or f"Snapshot {sid}"
-                total = int(pd.to_numeric(r.get("total_cameras", r.get("total", 0)), errors="coerce") or 0)
-                offline = int(pd.to_numeric(r.get("total_offline", r.get("offline", 0)), errors="coerce") or 0)
-                pct = pd.to_numeric(r.get("pct_offline", None), errors="coerce")
-                if pd.isna(pct):
-                    pct = round((offline / total * 100), 2) if total else 0.0
-                rows.append({
-                    "snapshot_id": sid,
-                    "Snapshot": label,
-                    "Data": data_txt,
-                    "gravado_em": gravado_em,
-                    "total": total,
-                    "offline": offline,
-                    "pct_offline": float(pct),
-                })
+        df = df_cli_raw.copy()
+        for col in ["snapshot_id", "data_snapshot", "total_cameras", "total_offline", "pct_offline"]:
+            if col not in df.columns:
+                df[col] = None
 
-    df_out = _normalizar_df_saida(rows)
-    if not df_out.empty:
-        return df_out
+        df["snapshot_id"] = pd.to_numeric(df["snapshot_id"], errors="coerce")
+        df = df[df["snapshot_id"].notna()].copy()
+        df["snapshot_id"] = df["snapshot_id"].astype(int)
+        df = df.drop_duplicates(subset=["snapshot_id"], keep="last")
+        df = df.sort_values("snapshot_id", ascending=False).head(limite)
 
-    # 2) Fallback: snapshots antigos ou bases que só têm detalhe por câmera.
-    params_cameras = {
-        "select": "*",
+        rows = []
+        for _, r in df.iterrows():
+            sid = int(r.get("snapshot_id", 0) or 0)
+            total = int(pd.to_numeric(r.get("total_cameras", 0), errors="coerce") or 0)
+            offline = int(pd.to_numeric(r.get("total_offline", 0), errors="coerce") or 0)
+            pct = pd.to_numeric(r.get("pct_offline", None), errors="coerce")
+            if pd.isna(pct):
+                pct = round((offline / total * 100), 2) if total else 0.0
+            gravado = str(r.get("data_snapshot", "") or "")
+            rows.append({
+                "snapshot_id": sid,
+                "Snapshot": f"Snapshot {sid}",
+                "Data": _fmt_data(gravado, sid),
+                "gravado_em": gravado,
+                "total": total,
+                "offline": offline,
+                "pct_offline": float(pct or 0.0),
+            })
+
+        if rows:
+            out = pd.DataFrame(rows)
+            return out.sort_values("snapshot_id", ascending=True).reset_index(drop=True)[cols]
+
+    # 2) Fallback: snapshots antigos podem existir apenas em snapshot_cameras.
+    params_cam = {
+        "select": "snapshot_id,data_snapshot,id_whitelabel,id_camera,status_camera",
         "id_whitelabel": f"eq.{wl_id}",
         "order": "snapshot_id.desc",
     }
-    df_cam_raw, erro_cam = _supabase_select_all(SNAPSHOT_TABLE, params=params_cameras, page_size=10000)
+    df_cam_raw, erro_cam = _supabase_select_all(SNAPSHOT_TABLE, params=params_cam, page_size=10000)
+
+    if erro_cam or df_cam_raw is None or df_cam_raw.empty:
+        return pd.DataFrame(columns=cols)
+
+    dfc = df_cam_raw.copy()
+    for col in ["snapshot_id", "data_snapshot", "id_camera", "status_camera"]:
+        if col not in dfc.columns:
+            dfc[col] = ""
+
+    dfc["snapshot_id"] = pd.to_numeric(dfc["snapshot_id"], errors="coerce")
+    dfc = dfc[dfc["snapshot_id"].notna()].copy()
+    dfc["snapshot_id"] = dfc["snapshot_id"].astype(int)
+    dfc["id_camera_norm"] = dfc["id_camera"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+    dfc = dfc[dfc["id_camera_norm"].ne("")].copy()
+    dfc = dfc.drop_duplicates(subset=["snapshot_id", "id_camera_norm"], keep="last")
+
+    ultimos_ids = sorted(dfc["snapshot_id"].drop_duplicates().sort_values(ascending=False).head(limite).tolist())
     rows = []
-    if erro_cam or df_cam_raw is None or df_cam_raw.empty or "snapshot_id" not in df_cam_raw.columns:
-        return pd.DataFrame(columns=cols)
-
-    df_cam_raw = df_cam_raw.copy()
-    df_cam_raw["snapshot_id"] = pd.to_numeric(df_cam_raw["snapshot_id"], errors="coerce")
-    df_cam_raw = df_cam_raw[df_cam_raw["snapshot_id"].notna()].copy()
-    if df_cam_raw.empty:
-        return pd.DataFrame(columns=cols)
-
-    # Pega os últimos IDs existentes para o cliente e calcula o percentual por snapshot.
-    ultimos_ids = sorted(df_cam_raw["snapshot_id"].astype(int).unique(), reverse=True)[:int(limite)]
-    df_cam_raw = df_cam_raw[df_cam_raw["snapshot_id"].astype(int).isin(ultimos_ids)].copy()
-
-    for sid, grupo in df_cam_raw.groupby(df_cam_raw["snapshot_id"].astype(int)):
-        grupo = grupo.copy()
-        if "id_camera" in grupo.columns:
-            grupo["id_camera_norm"] = grupo["id_camera"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
-            grupo = grupo.drop_duplicates(subset=["id_camera_norm"], keep="last")
-        total = int(len(grupo))
-        status = grupo.get("status_camera", pd.Series(dtype=str)).astype(str).str.strip().str.upper()
-        offline = int((status == "OFFLINE").sum()) if total else 0
+    for sid in ultimos_ids:
+        g = dfc[dfc["snapshot_id"] == sid].copy()
+        total = int(len(g))
+        offline = int((g["status_camera"].astype(str).str.upper().str.strip() == "OFFLINE").sum())
         pct = round((offline / total * 100), 2) if total else 0.0
-        data_base = ""
-        for col_data in ["data_snapshot", "gravado_em", "created_at", "updated_at"]:
-            if col_data in grupo.columns and grupo[col_data].notna().any():
-                data_base = grupo[col_data].dropna().astype(str).iloc[0]
-                break
-        data_txt, gravado_em = _fmt_data(data_base, f"Snapshot {int(sid)}")
-        label = ""
-        if "label" in grupo.columns and grupo["label"].notna().any():
-            label = str(grupo["label"].dropna().astype(str).iloc[0]).strip()
+        gravado = str(g["data_snapshot"].dropna().astype(str).iloc[0]) if "data_snapshot" in g.columns and not g.empty else ""
         rows.append({
             "snapshot_id": int(sid),
-            "Snapshot": label or f"Snapshot {int(sid)}",
-            "Data": data_txt,
-            "gravado_em": gravado_em,
+            "Snapshot": f"Snapshot {int(sid)}",
+            "Data": _fmt_data(gravado, sid),
+            "gravado_em": gravado,
             "total": total,
             "offline": offline,
             "pct_offline": float(pct),
         })
 
-    return _normalizar_df_saida(rows)
+    if not rows:
+        return pd.DataFrame(columns=cols)
+
+    return pd.DataFrame(rows).sort_values("snapshot_id", ascending=True).reset_index(drop=True)[cols]
 
 
 def render_grafico_evolucao_cliente(wl_id: str) -> None:
@@ -3198,7 +3187,15 @@ def render_grafico_evolucao_cliente(wl_id: str) -> None:
     st.caption("Últimos 10 snapshots salvos. A área mostra o % offline e cada bolinha representa um snapshot gravado.")
 
     if df_evo.empty:
-        st.info("Ainda não há histórico de snapshots suficiente para montar a evolução deste cliente.")
+        st.warning("Não encontrei histórico deste cliente nos snapshots do Supabase.")
+        st.caption("O gráfico busca em snapshot_clientes por id_whitelabel e, se não achar, recalcula por snapshot_cameras. Se aparecer esta mensagem, esse cliente ainda não existe nessas tabelas ou o ID_Whitelabel está diferente.")
+        with st.expander("Diagnóstico do gráfico", expanded=False):
+            st.write({
+                "id_whitelabel_procurado": str(wl_id),
+                "tabela_resumo": SNAPSHOT_CLIENTES_TABLE,
+                "tabela_cameras": SNAPSHOT_TABLE,
+                "supabase_configurado": supabase_configurado(),
+            })
         return
 
     fig = go.Figure()
