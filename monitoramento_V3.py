@@ -5091,10 +5091,8 @@ def main():
         "Tempo offline",
         "% por cliente",
         "Evidências",
-        "Detalhe Cliente Snap",
         "LPRs Offline",
         "Atualizar Base",
-        "Relatório Franquia",
     ]
     tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
@@ -6760,9 +6758,6 @@ def main():
     # ════════════════════════════════════════════
     # ABA 6 — LPRS OFFLINE
     # ════════════════════════════════════════════
-    with tabs["Detalhe Cliente Snap"]:
-        render_aba_detalhe_cliente_snap(dados)
-
     with tabs["LPRs Offline"]:
         st.markdown("### LPRs Offline")
         st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
@@ -6926,15 +6921,6 @@ def main():
     # ════════════════════════════════════════════
     with tabs["Atualizar Base"]:
         render_aba_atualizar_base(df_origem)
-
-    # ════════════════════════════════════════════
-    # ABA 8 — RELATÓRIO FRANQUIA (atalho visível)
-    # ════════════════════════════════════════════
-    with tabs["Relatório Franquia"]:
-        st.markdown("### ✉️ Relatório por franquia")
-        st.caption("Atalho da mesma rotina disponível dentro de Clientes > Relatório por franquia.")
-        render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="atalho_relatorio_franquia")
-
 
 if __name__ == "__main__":
     main()
