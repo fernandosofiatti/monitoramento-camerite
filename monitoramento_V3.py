@@ -16,30 +16,6 @@ import time
 import uuid
 import base64
 
-
-# ─────────────────────────────────────────────
-# CACHE — utilitários
-# ─────────────────────────────────────────────
-import hashlib as _hashlib
-
-def _hash_dados(dados: dict) -> str:
-    """Chave md5 derivada de total+offline por cliente."""
-    partes = []
-    for wl_id in sorted(dados.keys()):
-        v = dados[wl_id]
-        partes.append(f"{wl_id}:{v.get('total',0)}:{len(v.get('offline', []))}")
-    return _hashlib.md5("|".join(partes).encode()).hexdigest()
-
-
-def _session_cache(chave: str, fn, *args, **kwargs):
-    """Cache simples via st.session_state para objetos não-hasháveis."""
-    if st.session_state.get("_scache_key:" + chave) == chave:
-        return st.session_state["_scache_val:" + chave]
-    result = fn(*args, **kwargs)
-    st.session_state["_scache_key:" + chave] = chave
-    st.session_state["_scache_val:" + chave] = result
-    return result
-
 THEME_OPTIONS = {
     "theme.base": "light",
     "theme.primaryColor": "#7C3AED",
@@ -66,25 +42,549 @@ st.set_page_config(
 )
 
 
-# ─────────────────────────────────────────────
-# TEMA / CSS
-# Carregado de camerite.css, na mesma pasta do script.
-# Para editar cores ou layout, abra camerite.css — sem tocar no Python.
-# ─────────────────────────────────────────────
-def _injetar_css() -> None:
-    """Lê camerite.css e injeta no Streamlit via st.markdown.
-    Usa __file__ para localizar o CSS independente de onde o app é executado.
-    """
-    css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camerite.css")
-    try:
-        with open(css_path, "r", encoding="utf-8") as _f:
-            _css = _f.read()
-        st.markdown(f"<style>{_css}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        st.warning(
-            f"⚠️ Arquivo de tema não encontrado: {css_path}\n"
-            "Coloque camerite.css na mesma pasta que monitoramento_V3.py."
-        )
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, [data-testid="stAppViewContainer"] {
+    background-color: #FAF7FF !important;
+    color: #171126 !important;
+    font-family: 'DM Sans', sans-serif !important;
+}
+[data-testid="stHeader"]          { background: transparent !important; }
+[data-testid="stSidebar"]         { background: #ffffff !important; border-right: 1px solid #E9D5FF !important; }
+[data-testid="block-container"]   { padding: 2rem 2.5rem !important; max-width: 1600px; }
+section[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }
+
+/* ── Sidebar ── */
+.sidebar-logo {
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 0 1.5rem; border-bottom: 1px solid #E9D5FF; margin-bottom: 1.5rem;
+}
+.sidebar-logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, #7C3AED, #A855F7);
+    border-radius: 10px; display: flex; align-items: center;
+    justify-content: center; font-size: 18px; flex-shrink: 0;
+}
+.sidebar-logo-img { height: 30px; width: auto; }
+.sidebar-logo-text { font-size: 15px; font-weight: 700; color: #171126; line-height: 1; }
+.sidebar-logo-sub  { font-size: 10px; color: #7C3AED; margin-top: 2px; }
+.nav-section {
+    font-size: 10px; font-weight: 600; letter-spacing: 1px;
+    text-transform: uppercase; color: #7C3AED; margin: 1.2rem 0 .5rem;
+}
+
+/* ── Page header ── */
+.page-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #E9D5FF;
+}
+.page-title { font-size: 24px; font-weight: 700; color: #171126; letter-spacing: -.4px; }
+.page-sub   { font-size: 13px; color: #6B5A7A; margin-top: 3px; }
+.page-badge {
+    font-family: 'DM Mono', monospace; font-size: 11px; color: #6D28D9;
+    background: #F3E8FF; padding: 6px 14px; border-radius: 8px;
+    border: 1px solid #DDD6FE; white-space: nowrap;
+}
+
+/* ── KPI cards ── */
+.kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 1.5rem; }
+.kpi-card {
+    background: #ffffff; border: 1px solid #E9D5FF; border-radius: 8px;
+    padding: 20px 20px 16px; position: relative; overflow: hidden;
+    box-shadow: 0 10px 28px rgba(16, 42, 63, .06);
+}
+.kpi-card::after {
+    content:''; position:absolute; top:0; left:0; right:0; height:3px; border-radius:8px 8px 0 0;
+}
+.kpi-alert::after   { background: linear-gradient(90deg,#ef4444,#dc2626); }
+.kpi-warn::after    { background: linear-gradient(90deg,#f59e0b,#d97706); }
+.kpi-ok::after      { background: linear-gradient(90deg,#14b8a6,#059669); }
+.kpi-neutral::after { background: linear-gradient(90deg,#7C3AED,#A855F7); }
+
+/* SELETOR DEFINITIVO: Altera textos secundarios do card, exceto o valor principal */
+.kpi-card *:not(.kpi-value):not(.val-alert):not(.val-warn):not(.val-ok):not(.val-purple) {
+    color: #6B5A7A !important;
+    -webkit-text-fill-color: #6B5A7A !important;
+    opacity: 1 !important;
+}
+
+/* Garante que o valor principal (os números grandes) mantenha a cor de status */
+.kpi-value, .val-alert, .val-warn, .val-ok, .val-purple {
+    font-size: 40px !important;
+    font-weight: 700 !important;
+    font-family: 'DM Mono', monospace !important;
+    -webkit-text-fill-color: currentColor !important; /* Impede o texto secundario de sobrescrever o status */
+}
+
+.val-alert  { color: #f87171 !important; }
+.val-warn   { color: #fbbf24 !important; }
+.val-ok     { color: #14b8a6 !important; }
+.val-purple { color: #7C3AED !important; }
+            
+/* ── Unit cards ── */
+.unit-card {
+    background: #ffffff; border: 1px solid #E9D5FF; border-radius: 8px;
+    padding: 14px 12px 12px; position: relative; overflow: hidden;
+    box-shadow: 0 8px 22px rgba(16, 42, 63, .05);
+    display: flex; flex-direction: column; height: 100%;
+}
+.unit-card::before {
+    content:''; position:absolute; top:0; left:0; right:0;
+    height:3px; border-radius:8px 8px 0 0;
+}
+.card-red::before    { background: linear-gradient(90deg,#ef4444,#dc2626); }
+.card-yellow::before { background: linear-gradient(90deg,#f59e0b,#d97706); }
+.card-ok::before     { background: linear-gradient(90deg,#14b8a6,#059669); }
+.unit-name {
+    font-size:9px; font-weight:600; letter-spacing:.8px; text-transform:uppercase;
+    color:#6D28D9; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.unit-count { font-size:28px; font-weight:700; line-height:1.1; font-family:'DM Mono',monospace; margin-top:4px; margin-bottom:2px; }
+.count-red    { color:#f87171; }
+.count-yellow { color:#fbbf24; }
+.count-ok     { color:#14b8a6; }
+.unit-label { font-size:9px; margin-top:2px; margin-bottom:6px; font-weight:500; letter-spacing:.3px; color:#6B5A7A; line-height:1.3; }
+.label-red    { color:#ff8e8e; }
+.label-yellow { color:#c98500; }
+.label-ok     { color:#0f9f8f; }
+.prog-track { margin: 6px 0 6px 0; height:3px; background:#E9D5FF; border-radius:99px; overflow:hidden; }
+.prog-fill  { height:100%; border-radius:99px; }
+.trend-badge {
+    display:flex; align-items:center; gap:3px;
+    font-size:8px; font-weight:600; padding:2px 6px; border-radius:99px; margin-top:4px; margin-bottom:4px; width: 100%;
+}
+.trend-up   { background:rgba(248,113,113,.12); color:#f87171; }
+.trend-down { background:rgba(20,184,166,.12);  color:#0f9f8f; }
+.trend-same { background:rgba(0,136,204,.12); color:#6D28D9; }
+
+/* ── Tabelas ── */
+.stTable table { background:transparent !important; font-family:'DM Sans',sans-serif !important;
+    font-size:13px !important; width:100% !important; border-collapse:collapse !important; }
+.stTable thead th { background:#FAF7FF !important; color:#6D28D9 !important;
+    font-size:10px !important; font-weight:600 !important; letter-spacing:.7px !important;
+    text-transform:uppercase !important; padding:10px 14px !important; border-bottom:1px solid #E9D5FF !important; }
+.stTable tbody tr { background:#ffffff !important; }
+.stTable tbody td { padding:10px 14px !important; border-bottom:1px solid #F5F3FF !important; color:#171126 !important; }
+
+/* ── Botões ── */
+[data-testid="stDataFrame"] {
+    background:#ffffff !important;
+    border:1px solid #E9D5FF !important;
+    border-radius:8px !important;
+    overflow:hidden !important;
+    box-shadow:0 8px 22px rgba(16,42,63,.05) !important;
+}
+[data-testid="stDataFrame"] div,
+[data-testid="stDataFrame"] span,
+[data-testid="stDataFrame"] button,
+[data-testid="stDataFrame"] svg {
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
+}
+[data-testid="stDataFrame"] canvas,
+[data-testid="stDataFrame"] [role="grid"],
+[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {
+    background:#ffffff !important;
+}
+
+.stButton > button {
+    width:100% !important; margin-top:8px !important; background:#ffffff !important;
+    border:1px solid #C4B5FD !important; color:#6D28D9 !important; border-radius:8px !important;
+    font-family:'DM Sans',sans-serif !important; font-size:11px !important;
+    font-weight:500 !important; padding:5px 10px !important; transition:all .2s !important;
+}
+.stButton > button:hover:not(:disabled) {
+    background:#F3E8FF !important; border-color:#8B5CF6 !important; color:#5B21B6 !important;
+}
+
+/* ── Abas ── */
+/* Formularios e filtros */
+[data-testid="stTextInput"] label,
+[data-testid="stSelectbox"] label,
+[data-testid="stTextArea"] label,
+[data-testid="stDateInput"] label,
+[data-testid="stFileUploader"] label {
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
+    font-family:'DM Sans',sans-serif !important;
+    font-size:12px !important;
+    font-weight:600 !important;
+}
+[data-testid="stWidgetLabel"],
+[data-testid="stWidgetLabel"] * {
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
+}
+[data-testid="stCaptionContainer"],
+[data-testid="stCaptionContainer"] * {
+    color:#6B5A7A !important;
+    -webkit-text-fill-color:#6B5A7A !important;
+}
+[data-testid="stWidgetLabel"] {
+    min-height:22px !important;
+}
+[data-testid="stTextInput"] [data-baseweb="input"] > div,
+[data-testid="stDateInput"] [data-baseweb="input"] > div {
+    background:#ffffff !important;
+    border:1px solid #C4B5FD !important;
+    border-radius:8px !important;
+    box-shadow:none !important;
+}
+[data-testid="stTextInput"] input,
+[data-testid="stDateInput"] input,
+[data-testid="stTextArea"] textarea {
+    background:#ffffff !important;
+    border:1px solid #C4B5FD !important;
+    border-radius:8px !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
+    box-shadow:none !important;
+    caret-color:#7C3AED !important;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stDateInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+    border-color:#7C3AED !important;
+    box-shadow:0 0 0 1px #7C3AED !important;
+}
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stTextArea"] textarea::placeholder {
+    color:#8B7AA3 !important;
+    -webkit-text-fill-color:#8B7AA3 !important;
+    opacity:1 !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background:#ffffff !important;
+    border:1px solid #C4B5FD !important;
+    border-radius:8px !important;
+    box-shadow:none !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:hover,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+    border-color:#7C3AED !important;
+    box-shadow:0 0 0 1px #7C3AED !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] span,
+[data-testid="stSelectbox"] [data-baseweb="select"] svg,
+[data-testid="stSelectbox"] [data-baseweb="select"] div {
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
+}
+[data-testid="stFileUploader"] section {
+    background:#ffffff !important;
+    border:1px dashed #C4B5FD !important;
+    border-radius:8px !important;
+    color:#171126 !important;
+}
+[data-baseweb="popover"] [role="listbox"] {
+    background:#ffffff !important;
+    border:1px solid #C4B5FD !important;
+    border-radius:8px !important;
+    box-shadow:0 16px 36px rgba(16,42,63,.14) !important;
+}
+[data-baseweb="popover"] [role="option"] {
+    background:#ffffff !important;
+    color:#171126 !important;
+    -webkit-text-fill-color:#171126 !important;
+}
+[data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="popover"] [aria-selected="true"] {
+    background:#F3E8FF !important;
+}
+
+[data-testid="stTabs"] [role="tablist"] { border-bottom:1px solid #E9D5FF !important; gap:2px !important; }
+[data-testid="stTabs"] [role="tab"] {
+    background:transparent !important; border:1px solid transparent !important;
+    border-radius:8px 8px 0 0 !important; color:#6B5A7A !important;
+    font-family:'DM Sans',sans-serif !important; font-size:13px !important;
+    font-weight:500 !important; padding:8px 18px !important; transition:all .2s !important;
+}
+[data-testid="stTabContent"] { padding-top:1.5rem !important; }
+
+/* ── Expander ── */
+[data-testid="stExpander"] {
+    background:#ffffff !important; border:1px solid #E9D5FF !important;
+    border-radius:8px !important; margin-bottom:8px !important;
+}
+[data-testid="stExpander"] summary { font-weight:500 !important; color:#6D28D9 !important; font-size:13px !important; }
+
+/* ── Misc ── */
+hr { border-color:#E9D5FF !important; margin:1.5rem 0 !important; }
+[data-testid="stAlert"] {
+    background:#ffffff !important; border:1px solid #E9D5FF !important;
+    border-radius:8px !important; color:#171126 !important;
+}
+
+/* ── Download buttons ── */
+.stDownloadButton > button {
+    background:linear-gradient(135deg,rgba(0,136,204,.12),rgba(0,188,212,.12)) !important;
+    border:1px solid rgba(0,136,204,.25) !important; color:#6D28D9 !important;
+    border-radius:8px !important; font-size:12px !important; font-weight:600 !important;
+    padding:8px 16px !important; width:auto !important; margin-top:0 !important; transition:all .2s !important;
+}
+
+/* ── Tempo Offline badges ── */
+.tempo-critico  { background:rgba(220,38,38,.10);  color:#dc2626; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }
+.tempo-atencao  { background:rgba(217,119,6,.10);  color:#d97706; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }
+.tempo-ok       { background:rgba(5,150,105,.10);  color:#059669; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }
+.tempo-nd       { background:rgba(107,132,150,.10);color:#8B7AA3; font-weight:600; padding:2px 8px; border-radius:6px; font-size:11px; }
+
+/* Auditoria operacional */
+.audit-hero {
+    background:#ffffff; border:1px solid #E9D5FF; border-radius:8px;
+    padding:18px 20px; margin-bottom:14px; box-shadow:0 10px 24px rgba(16,42,63,.05);
+}
+.audit-hero-top {
+    display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;
+}
+.audit-title {
+    font-size:22px; font-weight:700; color:#171126; line-height:1.15; margin-bottom:4px;
+}
+.audit-sub {
+    font-size:12px; color:#6B5A7A; max-width:880px; line-height:1.45;
+}
+.audit-badges { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.audit-badge {
+    font-family:'DM Mono',monospace; font-size:10px; font-weight:700; text-transform:uppercase;
+    padding:6px 10px; border-radius:6px; border:1px solid currentColor; white-space:nowrap;
+}
+.audit-strip {
+    display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:12px 0 16px;
+}
+.audit-card {
+    background:#ffffff; border:1px solid #E9D5FF; border-radius:8px; padding:12px 14px;
+    min-height:92px; box-shadow:0 8px 18px rgba(16,42,63,.04);
+}
+.audit-card-label {
+    font-size:10px; color:#7C6A91; font-weight:700; text-transform:uppercase; letter-spacing:.6px;
+    margin-bottom:7px;
+}
+.audit-card-value {
+    font-family:'DM Mono',monospace; font-size:24px; line-height:1.05; color:#171126; font-weight:700;
+}
+.audit-card-note { font-size:11px; color:#7C6A91; margin-top:7px; line-height:1.35; }
+.audit-riskbar {
+    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center;
+    background:#FCFAFF; border:1px solid #E9D5FF; border-radius:8px; padding:12px 14px; margin-bottom:16px;
+}
+.audit-risk-track { height:10px; background:#EDE9FE; border-radius:99px; overflow:hidden; }
+.audit-risk-fill { height:100%; border-radius:99px; }
+.audit-risk-label { font-family:'DM Mono',monospace; font-size:12px; font-weight:700; white-space:nowrap; }
+.audit-section-title {
+    display:flex; align-items:center; justify-content:space-between; gap:12px; margin:18px 0 8px;
+}
+.audit-section-title strong { font-size:14px; color:#171126; }
+.audit-section-title span { font-size:11px; color:#7C6A91; }
+.audit-action-note {
+    background:#fffaf0; border:1px solid #fde3a7; border-radius:8px; padding:10px 12px;
+    color:#7a5200; font-size:12px; margin:8px 0 12px;
+}
+
+@media (max-width: 1100px) {
+    .audit-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 700px) {
+    [data-testid="block-container"] { padding:1rem !important; }
+    .audit-strip, .kpi-grid { grid-template-columns:1fr !important; }
+    .audit-riskbar { grid-template-columns:1fr; }
+    .audit-badges { justify-content:flex-start; }
+}
+
+
+/* ── Ajustes finais solicitados ── */
+.sidebar-stat-card {
+    background:#ffffff !important;
+    border:1px solid #E9D5FF !important;
+    border-radius:8px !important;
+    padding:12px 14px !important;
+    box-shadow:0 6px 18px rgba(16,42,63,.04) !important;
+}
+.sidebar-stat-card.offline-card {
+    background:#ffffff !important;
+    border-color:#E9D5FF !important;
+}
+.sidebar-stat-card .stat-label {
+    font-size:10px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.7px;
+}
+.sidebar-stat-card .stat-value {
+    font-size:24px;font-weight:700;color:#7C3AED;font-family:'DM Mono',monospace;
+}
+.sidebar-stat-card.offline-card .stat-value {
+    color:#dc2626 !important;
+    -webkit-text-fill-color:#dc2626 !important;
+}
+.sidebar-stat-card .stat-note { font-size:11px;color:#8B7AA3; }
+
+.compare-hero {
+    background:linear-gradient(135deg,#ffffff 0%,#FBF7FF 100%);
+    border:1px solid #E9D5FF;border-radius:14px;padding:18px 20px;margin:10px 0 16px;
+    box-shadow:0 12px 30px rgba(16,42,63,.07);
+}
+.compare-title { font-size:24px;font-weight:800;color:#171126;letter-spacing:-.4px; }
+.compare-sub { font-size:13px;color:#6B5A7A;margin-top:4px;line-height:1.45; }
+.compare-pill {
+    display:inline-flex;align-items:center;gap:6px;margin-top:10px;
+    font-family:'DM Mono',monospace;font-size:11px;color:#6D28D9;background:#F3E8FF;
+    border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;
+}
+.compare-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0 18px; }
+.compare-card {
+    background:#ffffff !important;border:1px solid #E9D5FF;border-radius:12px;padding:15px 16px;
+    box-shadow:0 10px 24px rgba(16,42,63,.055);position:relative;overflow:hidden;
+}
+.compare-card:before { content:'';position:absolute;left:0;right:0;top:0;height:4px;background:#7C3AED; }
+.compare-card.good:before { background:linear-gradient(90deg,#22c55e,#059669); }
+.compare-card.bad:before { background:linear-gradient(90deg,#ff1744,#dc2626); }
+.compare-card.warn:before { background:linear-gradient(90deg,#facc15,#f59e0b); }
+.compare-card.neutral:before { background:linear-gradient(90deg,#7C3AED,#A855F7); }
+.compare-label { font-size:10px;color:#8B7AA3;font-weight:800;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px; }
+.compare-value { font-family:'DM Mono',monospace;font-size:30px;font-weight:800;color:#171126;line-height:1; }
+.compare-note { font-size:11px;color:#7C6A91;margin-top:8px;line-height:1.35; }
+.compare-status-box {
+    margin-top:12px;padding:12px 14px;border-radius:10px;background:#ffffff;border:1px solid #E9D5FF;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+}
+.compare-status-text { font-size:13px;color:#6B5A7A; }
+.compare-status-tag { font-family:'DM Mono',monospace;font-size:11px;font-weight:800;border-radius:999px;padding:6px 10px;border:1px solid currentColor; }
+@media(max-width:1100px){ .compare-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
+@media(max-width:700px){ .compare-grid{grid-template-columns:1fr;} }
+
+
+
+/* ─────────────────────────────────────────────
+   Identidade visual Camerite · Roxo
+   Somente aparência: não altera regras, filtros ou funções.
+   ───────────────────────────────────────────── */
+:root {
+    --cam-primary: #7C3AED;
+    --cam-primary-dark: #5B21B6;
+    --cam-primary-soft: #A855F7;
+    --cam-bg: #FAF7FF;
+    --cam-card: #FFFFFF;
+    --cam-border: #E9D5FF;
+    --cam-text: #171126;
+    --cam-muted: #6B5A7A;
+}
+
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #FFFFFF 0%, #FAF7FF 100%) !important;
+    border-right: 1px solid var(--cam-border) !important;
+}
+
+.sidebar-logo-icon {
+    background: linear-gradient(135deg, #5B21B6 0%, #7C3AED 45%, #A855F7 100%) !important;
+    box-shadow: 0 10px 24px rgba(124,58,237,.24) !important;
+}
+
+.sidebar-logo-text,
+.page-title,
+.audit-title,
+.compare-title {
+    color: var(--cam-text) !important;
+}
+
+.sidebar-logo-sub,
+.nav-section,
+.unit-name,
+[data-testid="stExpander"] summary {
+    color: var(--cam-primary) !important;
+    -webkit-text-fill-color: var(--cam-primary) !important;
+}
+
+.page-badge,
+.compare-pill {
+    color: var(--cam-primary-dark) !important;
+    background: #F3E8FF !important;
+    border-color: #DDD6FE !important;
+}
+
+.kpi-card,
+.unit-card,
+.audit-hero,
+.audit-card,
+.compare-card,
+.sidebar-stat-card,
+[data-testid="stExpander"],
+[data-testid="stDataFrame"],
+[data-testid="stAlert"] {
+    border-color: var(--cam-border) !important;
+    box-shadow: 0 14px 34px rgba(91,33,182,.08) !important;
+}
+
+.kpi-neutral::after,
+.compare-card.neutral:before {
+    background: linear-gradient(90deg, #5B21B6, #7C3AED, #A855F7) !important;
+}
+
+.val-purple,
+.sidebar-stat-card .stat-value,
+.compare-card.neutral .compare-value {
+    color: var(--cam-primary) !important;
+    -webkit-text-fill-color: var(--cam-primary) !important;
+}
+
+.stButton > button,
+.stDownloadButton > button {
+    background: linear-gradient(135deg, #7C3AED, #8B5CF6) !important;
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+    border: 1px solid rgba(124,58,237,.35) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 22px rgba(124,58,237,.18) !important;
+}
+
+.stButton > button:hover:not(:disabled),
+.stDownloadButton > button:hover:not(:disabled) {
+    background: linear-gradient(135deg, #5B21B6, #7C3AED) !important;
+    border-color: #7C3AED !important;
+    transform: translateY(-1px);
+}
+
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    background: #F3E8FF !important;
+    color: var(--cam-primary-dark) !important;
+    border-color: #DDD6FE !important;
+    font-weight: 700 !important;
+}
+
+[data-testid="stTextInput"] input:focus,
+[data-testid="stDateInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:hover,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {
+    border-color: var(--cam-primary) !important;
+    box-shadow: 0 0 0 1px var(--cam-primary) !important;
+}
+
+[data-testid="stTextInput"] input,
+[data-testid="stDateInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stFileUploader"] section {
+    border-color: #C4B5FD !important;
+}
+
+[data-baseweb="popover"] [role="option"]:hover,
+[data-baseweb="popover"] [aria-selected="true"] {
+    background: #F3E8FF !important;
+}
+
+.prog-fill,
+.audit-risk-fill {
+    background: linear-gradient(90deg, #7C3AED, #A855F7) !important;
+}
+
+hr,
+.page-header {
+    border-color: var(--cam-border) !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
@@ -177,27 +677,6 @@ BRAZIL_STATE_CAPITAIS = {
     "Sergipe": {"city": "Aracaju", "lat": -10.9111, "lon": -37.0717},
     "Tocantins": {"city": "Palmas", "lat": -10.1846, "lon": -48.3336},
 }
-
-# Injeta o CSS do tema — chamado aqui para garantir que BASE_DIR e PASTA já existem
-_injetar_css()
-
-def _injetar_css_abas_visiveis() -> None:
-    """Evita que abas principais fiquem escondidas quando a barra passa da largura da tela."""
-    st.markdown(
-        """
-        <style>
-        div[data-baseweb="tab-list"] {
-            flex-wrap: wrap;
-            gap: 6px 8px;
-        }
-        div[data-baseweb="tab-list"] button[role="tab"] {
-            flex: 0 0 auto;
-            max-width: 100%;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 # Mapeamento de colunas do CSV para nomes internos
 COL_STATUS     = "Status_da_Camera"
@@ -1355,12 +1834,7 @@ def card_executivo(titulo: str, valor: str, subtitulo: str, cor: str = "#7C3AED"
 
 def render_dashboard_acoes(df_todas_acoes: pd.DataFrame, dados: dict) -> None:
     """Dashboard executivo orientado a clientes, não a quantidade de ações."""
-    _hd = _hash_dados(dados)
-    _acoes_hash = str(len(df_todas_acoes)) if df_todas_acoes is not None else "none"
-    df_clientes = _session_cache(
-        f"montar_df_clientes_central:{_hd}:{_acoes_hash}",
-        montar_df_clientes_central_acoes, dados, df_todas_acoes,
-    )
+    df_clientes = montar_df_clientes_central_acoes(dados, df_todas_acoes)
     if df_clientes.empty:
         st.info("Nenhum cliente carregado.")
         return
@@ -2510,12 +2984,6 @@ def geocode_cidade(nome: str, estado: str | None = None) -> tuple[float, float] 
     salvar_cache_geocode(cache)
     return None
 
-@st.cache_data(
-    ttl=300,
-    hash_funcs={pd.DataFrame: lambda df: _hashlib.md5(
-        pd.util.hash_pandas_object(df, index=True).values.tobytes()
-    ).hexdigest()},
-)
 def montar_mapa_cidades(df: pd.DataFrame) -> tuple[go.Figure | None, str]:
     if df is None or df.empty:
         return None, "Sem dados de origem para criar o mapa."
@@ -3082,326 +3550,6 @@ def carregar_snapshot_clientes(sid: int, wl_ids_validos: set[str] | None = None)
     return out[["wl_id", "nome_cliente", "total", "offline", "pct_offline"]]
 
 
-
-@st.cache_data(ttl=60)
-def carregar_evolucao_cliente_snapshots(wl_id: str, limite: int = 10) -> pd.DataFrame:
-    """Retorna a evolução de um cliente nos últimos snapshots salvos.
-
-    Versão robusta:
-    - Usa a tabela mestre snapshots para descobrir os últimos snapshots.
-    - Para cada snapshot, usa carregar_snapshot(), que já tem fallback entre
-      snapshot_clientes e snapshot_cameras.
-    - Isso evita o gráfico sumir quando snapshot_clientes não existe, está vazia,
-      ou quando os snapshots antigos só existem em snapshot_cameras.
-    """
-    wl_id = str(wl_id or "").strip()
-    cols = ["snapshot_id", "Snapshot", "Data", "gravado_em", "total", "offline", "pct_offline"]
-    if not wl_id or not supabase_configurado():
-        return pd.DataFrame(columns=cols)
-
-    df_snaps = _snapshot_datas_df()
-    if df_snaps.empty:
-        return pd.DataFrame(columns=cols)
-
-    df_snaps = df_snaps.copy()
-    df_snaps["id"] = pd.to_numeric(df_snaps["id"], errors="coerce")
-    df_snaps = df_snaps.dropna(subset=["id"]).copy()
-    df_snaps["id"] = df_snaps["id"].astype(int)
-    df_snaps = df_snaps.sort_values("id", ascending=False).head(int(limite))
-
-    rows = []
-    for _, snap in df_snaps.iterrows():
-        sid = int(snap["id"])
-        df_cli = carregar_snapshot(sid)
-        if df_cli is None or df_cli.empty or "wl_id" not in df_cli.columns:
-            continue
-
-        df_cli = df_cli.copy()
-        df_cli["wl_id"] = df_cli["wl_id"].astype(str).str.strip()
-        linha = df_cli[df_cli["wl_id"] == wl_id]
-        if linha.empty:
-            continue
-
-        r = linha.iloc[0]
-        gravado_em = str(snap.get("gravado_em", "") or "")
-        dt = pd.to_datetime(gravado_em, errors="coerce")
-        data_txt = dt.strftime("%d/%m %H:%M") if not pd.isna(dt) else f"Snapshot {sid}"
-        label = str(snap.get("label", "") or "").strip() or f"Snapshot {sid}"
-
-        rows.append({
-            "snapshot_id": sid,
-            "Snapshot": label,
-            "Data": data_txt,
-            "gravado_em": gravado_em,
-            "total": int(pd.to_numeric(r.get("total", 0), errors="coerce") or 0),
-            "offline": int(pd.to_numeric(r.get("offline", 0), errors="coerce") or 0),
-            "pct_offline": float(pd.to_numeric(r.get("pct_offline", 0), errors="coerce") or 0.0),
-        })
-
-    if not rows:
-        return pd.DataFrame(columns=cols)
-
-    out = pd.DataFrame(rows)
-    out["_ordem"] = pd.to_numeric(out["snapshot_id"], errors="coerce").fillna(0).astype(int)
-    out = out.sort_values("_ordem", ascending=True).drop(columns=["_ordem"]).reset_index(drop=True)
-    return out[cols]
-
-
-def render_grafico_evolucao_cliente(wl_id: str) -> None:
-    """Desenha gráfico área + bolinhas da evolução individual do cliente."""
-    df_evo = carregar_evolucao_cliente_snapshots(str(wl_id), limite=10)
-
-    st.markdown("### 📈 Evolução do cliente")
-    st.caption("Últimos 10 snapshots salvos. A área mostra o % offline e cada bolinha representa um snapshot gravado.")
-
-    if df_evo.empty:
-        st.info("Ainda não há histórico de snapshots suficiente para montar a evolução deste cliente.")
-        return
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df_evo["Data"],
-        y=df_evo["pct_offline"],
-        mode="lines+markers",
-        fill="tozeroy",
-        line=dict(color="#7C3AED", width=3),
-        marker=dict(size=9, color="#7C3AED", line=dict(width=2, color="#ffffff")),
-        customdata=df_evo[["Snapshot", "offline", "total"]].values,
-        hovertemplate=(
-            "<b>%{customdata[0]}</b><br>"
-            "%{x}<br>"
-            "% Offline: %{y:.1f}%<br>"
-            "Offline: %{customdata[1]} de %{customdata[2]} câmeras"
-            "<extra></extra>"
-        ),
-        name="% offline",
-    ))
-    fig.update_layout(
-        **pdefaults(),
-        height=360,
-        margin=dict(l=10, r=10, t=20, b=10),
-        showlegend=False,
-        hovermode="x unified",
-        yaxis=dict(title="% offline", ticksuffix="%", rangemode="tozero", gridcolor="#F3E8FF"),
-        xaxis=dict(title="Snapshot", gridcolor="#F8F5FF"),
-    )
-    st.plotly_chart(fig, use_container_width=True, key=f"grafico_evolucao_cliente_{str(wl_id)}")
-
-    df_evo_show = df_evo[["Snapshot", "Data", "total", "offline", "pct_offline"]].copy()
-    df_evo_show = df_evo_show.rename(columns={
-        "total": "Total",
-        "offline": "Offline",
-        "pct_offline": "% Offline",
-    })
-    df_evo_show["% Offline"] = df_evo_show["% Offline"].map(lambda v: f"{float(v):.1f}%")
-    with st.expander("Ver dados do gráfico", expanded=False):
-        render_dataframe(df_evo_show, height=min(420, (len(df_evo_show) + 1) * 35 + 3))
-
-
-
-# ─────────────────────────────────────────────
-# ABA: DETALHE CLIENTE SNAP
-# ─────────────────────────────────────────────
-def _df_clientes_para_busca_snap(dados: dict) -> pd.DataFrame:
-    """Monta uma base simples para busca de clientes na aba Detalhe Cliente Snap."""
-    rows = []
-    for wl_id, info in (dados or {}).items():
-        wl = str(wl_id or "").strip()
-        if not wl:
-            continue
-        total, offline, pct = calcular_metricas_cliente_info(info)
-        rows.append({
-            "ID_Whitelabel": wl,
-            "Cliente": str(info.get("cidade_estado") or info.get("nome_cliente") or f"ID {wl}").strip(),
-            "Franqueado": str(info.get("nome_empresa") or "").strip(),
-            "Total atual": total,
-            "Offline atual": offline,
-            "% Offline atual": pct,
-            "busca": f"{wl} {info.get('cidade_estado','')} {info.get('nome_cliente','')} {info.get('nome_empresa','')}".upper(),
-        })
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return pd.DataFrame(columns=["ID_Whitelabel", "Cliente", "Franqueado", "Total atual", "Offline atual", "% Offline atual", "busca"])
-    return df.sort_values(["Cliente", "ID_Whitelabel"]).reset_index(drop=True)
-
-
-def _diagnostico_snap_cliente(wl_id: str) -> None:
-    """Mostra, na tela, dados crus usados para descobrir por que o gráfico não apareceu."""
-    wl_id = str(wl_id or "").strip()
-    st.markdown("#### 🧪 Diagnóstico dos snapshots")
-
-    diag = {
-        "Supabase configurado": supabase_configurado(),
-        "Tabela mestre": SNAPSHOT_MASTER_TABLE,
-        "Tabela resumo por cliente": SNAPSHOT_CLIENTES_TABLE,
-        "Tabela câmeras": SNAPSHOT_TABLE,
-        "ID_Whitelabel pesquisado": wl_id,
-    }
-    st.json(diag)
-
-    try:
-        df_snaps = _snapshot_datas_df()
-        st.write(f"Snapshots encontrados na tabela `{SNAPSHOT_MASTER_TABLE}`: **{len(df_snaps)}**")
-        if not df_snaps.empty:
-            st.dataframe(df_snaps.head(10), use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(f"Erro ao listar `{SNAPSHOT_MASTER_TABLE}`: {e}")
-
-    try:
-        df_cli, erro_cli = _supabase_select_all(
-            SNAPSHOT_CLIENTES_TABLE,
-            params={
-                "select": "*",
-                "id_whitelabel": f"eq.{wl_id}",
-                "order": "snapshot_id.desc",
-            },
-            page_size=20,
-        )
-        if erro_cli:
-            st.error(f"Erro consultando `{SNAPSHOT_CLIENTES_TABLE}`: {erro_cli}")
-        else:
-            st.write(f"Linhas encontradas em `{SNAPSHOT_CLIENTES_TABLE}` para este cliente: **{len(df_cli)}**")
-            if not df_cli.empty:
-                st.dataframe(df_cli.head(10), use_container_width=True, hide_index=True)
-            else:
-                st.info("Nenhuma linha na tabela de resumo por cliente para esse ID_Whitelabel.")
-    except Exception as e:
-        st.error(f"Erro inesperado ao consultar `{SNAPSHOT_CLIENTES_TABLE}`: {e}")
-
-    try:
-        df_cam, erro_cam = _supabase_select_all(
-            SNAPSHOT_TABLE,
-            params={
-                "select": "snapshot_id,id_whitelabel,id_camera,status_camera,nome_camera,data_snapshot",
-                "id_whitelabel": f"eq.{wl_id}",
-                "order": "snapshot_id.desc",
-            },
-            page_size=20,
-        )
-        if erro_cam:
-            st.error(f"Erro consultando `{SNAPSHOT_TABLE}`: {erro_cam}")
-        else:
-            st.write(f"Linhas encontradas em `{SNAPSHOT_TABLE}` para este cliente: **{len(df_cam)}**")
-            if not df_cam.empty:
-                st.dataframe(df_cam.head(10), use_container_width=True, hide_index=True)
-            else:
-                st.info("Nenhuma câmera encontrada na tabela de snapshots de câmeras para esse ID_Whitelabel.")
-    except Exception as e:
-        st.error(f"Erro inesperado ao consultar `{SNAPSHOT_TABLE}`: {e}")
-
-
-def render_aba_detalhe_cliente_snap(dados: dict) -> None:
-    """Aba independente para buscar um cliente e montar o gráfico de evolução via snapshots do Supabase."""
-    st.markdown("### 📈 Detalhe Cliente Snap")
-    st.caption("Busque um cliente por nome, franqueado ou ID_Whitelabel. O gráfico usa os últimos 10 snapshots gravados no Supabase.")
-
-    if not supabase_configurado():
-        st.error("Supabase não está configurado. Verifique SUPABASE_URL e SUPABASE_KEY nos Secrets.")
-        return
-
-    df_clientes = _df_clientes_para_busca_snap(dados)
-    if df_clientes.empty:
-        st.warning("Não encontrei clientes carregados na base atual para montar a busca.")
-        return
-
-    termo = st.text_input(
-        "Buscar cliente",
-        placeholder="Digite parte do nome, franqueado ou ID_Whitelabel...",
-        key="detalhe_cliente_snap_busca",
-    ).strip().upper()
-
-    if termo:
-        df_filtrado = df_clientes[df_clientes["busca"].str.contains(re.escape(termo), na=False)].copy()
-    else:
-        df_filtrado = df_clientes.copy()
-
-    if df_filtrado.empty:
-        st.warning("Nenhum cliente encontrado com esse termo.")
-        with st.expander("Ver primeiros clientes disponíveis", expanded=False):
-            st.dataframe(df_clientes.drop(columns=["busca"]).head(30), use_container_width=True, hide_index=True)
-        return
-
-    df_filtrado = df_filtrado.head(100).copy()
-    df_filtrado["opcao"] = df_filtrado.apply(
-        lambda r: f"{r['Cliente']} · ID {r['ID_Whitelabel']} · {r['Offline atual']}/{r['Total atual']} offline ({float(r['% Offline atual']):.1f}%)",
-        axis=1,
-    )
-
-    escolha = st.selectbox(
-        "Cliente",
-        df_filtrado["opcao"].tolist(),
-        key="detalhe_cliente_snap_select",
-    )
-    row = df_filtrado[df_filtrado["opcao"] == escolha].iloc[0]
-    wl_id = str(row["ID_Whitelabel"]).strip()
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("ID_Whitelabel", wl_id)
-    c2.metric("Total atual", int(row["Total atual"]))
-    c3.metric("Offline atual", int(row["Offline atual"]))
-    c4.metric("% Offline atual", f"{float(row['% Offline atual']):.1f}%")
-
-    st.markdown(f"#### {escape_html(row['Cliente'])}")
-    if str(row.get("Franqueado", "")).strip():
-        st.caption(f"Franqueado: {row['Franqueado']}")
-
-    try:
-        df_evo = carregar_evolucao_cliente_snapshots(wl_id, limite=10)
-    except Exception as e:
-        st.error(f"Erro ao carregar evolução do cliente: {e}")
-        _diagnostico_snap_cliente(wl_id)
-        return
-
-    st.markdown("### 📊 Evolução nos snapshots")
-    if df_evo.empty:
-        st.warning("A consulta rodou, mas não retornou histórico para este cliente. Veja o diagnóstico abaixo.")
-        _diagnostico_snap_cliente(wl_id)
-        return
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df_evo["Data"],
-        y=df_evo["pct_offline"],
-        mode="lines+markers",
-        fill="tozeroy",
-        line=dict(color="#7C3AED", width=3),
-        marker=dict(size=10, color="#7C3AED", line=dict(width=2, color="#ffffff")),
-        customdata=df_evo[["Snapshot", "offline", "total", "snapshot_id"]].values,
-        hovertemplate=(
-            "<b>%{customdata[0]}</b><br>"
-            "Snapshot ID: %{customdata[3]}<br>"
-            "%{x}<br>"
-            "% Offline: %{y:.1f}%<br>"
-            "Offline: %{customdata[1]} de %{customdata[2]} câmeras"
-            "<extra></extra>"
-        ),
-        name="% offline",
-    ))
-    fig.update_layout(
-        **pdefaults(),
-        height=430,
-        margin=dict(l=10, r=10, t=30, b=10),
-        showlegend=False,
-        hovermode="x unified",
-        yaxis=dict(title="% offline", ticksuffix="%", rangemode="tozero", gridcolor="#F3E8FF"),
-        xaxis=dict(title="Snapshot", gridcolor="#F8F5FF"),
-    )
-    st.plotly_chart(fig, use_container_width=True, key=f"detalhe_snap_area_{wl_id}")
-
-    df_show = df_evo[["snapshot_id", "Snapshot", "Data", "total", "offline", "pct_offline"]].copy()
-    df_show = df_show.rename(columns={
-        "snapshot_id": "Snapshot ID",
-        "total": "Total",
-        "offline": "Offline",
-        "pct_offline": "% Offline",
-    })
-    df_show["% Offline"] = df_show["% Offline"].map(lambda v: f"{float(v):.1f}%")
-    st.markdown("#### Dados usados no gráfico")
-    st.dataframe(df_show, use_container_width=True, hide_index=True)
-
-    with st.expander("Diagnóstico técnico", expanded=False):
-        _diagnostico_snap_cliente(wl_id)
-
 def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> pd.DataFrame:
     """Monta a base de câmeras do snapshot atual para identificar novas câmeras futuramente."""
     if df_origem is None or df_origem.empty:
@@ -3709,7 +3857,6 @@ def salvar_snapshot_automatico(
     return salvar_snapshot(label, notas, dados, df_origem)
 
 
-@st.cache_data(ttl=120)
 def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
     limite = agora_sao_paulo() - timedelta(days=dias)
     df_snaps = listar_snapshots()
@@ -3743,7 +3890,6 @@ def obter_datas_snapshots(snapshot_ids: list[int]) -> pd.DataFrame:
     ids = [int(x) for x in snapshot_ids]
     return df[df["id"].astype(int).isin(ids)][["id", "gravado_em"]].copy()
 
-@st.cache_data(ttl=120)
 def calcular_recorrencia(dias: int = 30) -> dict:
     df_hist = carregar_historico_clientes(dias)
     if df_hist.empty:
@@ -4366,8 +4512,6 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
 
     if df_det.empty:
         st.success("Nenhuma câmera offline.")
-        st.markdown("<hr>", unsafe_allow_html=True)
-        render_grafico_evolucao_cliente(wl_id)
         return
 
     col_map = {
@@ -4425,120 +4569,22 @@ def render_cliente_detalhe_rapido(wl_id: str, dados: dict):
             key=f"dl_detalhe_cliente_csv_{str(wl_id)}_top",
         )
 
-    st.markdown("<hr>", unsafe_allow_html=True)
-    render_grafico_evolucao_cliente(wl_id)
 
+def main():
+    init_db()
 
+    # ── Carregar dados: tenta pasta, fallback para upload ──
+    dados, erro, df_origem = carregar_dados(PASTA)
+    clientes_map = carregar_clientes()
+    saude = calcular_saude_dados(PASTA)
+    origem_local = True
 
-
-# ─────────────────────────────────────────────
-# UI de upload quando não há dados no disco
-# ─────────────────────────────────────────────
-
-# ─────────────────────────────────────────────
-# Contexto partilhado entre main() e as funções de aba
-# ─────────────────────────────────────────────
-from dataclasses import dataclass
-
-@dataclass
-class ContextoMain:
-    """Agrupa as variáveis derivadas em main() que as abas precisam."""
-    dados: dict
-    saude: dict
-    comp: dict
-    df_clientes_ops: object
-    df_tempo_global: object
-    clientes_map: dict
-    df_origem: object
-    total_clientes: int
-    total_cameras: int
-    total_offline: int
-    pct_global: float
-    n_critico: int
-    n_atencao: int
-    n_saudavel: int
-    audit_label: str
-    audit_color: str
-    audit_reason: str
-    acao_curta: str
-    acao_detalhe: str
-    pct_clientes_criticos: float
-    pct_clientes_atencao: float
-    origem_local: bool = True
-
-def _diagnosticar_erro(erro: str) -> tuple[str, str, str]:
-    """Classifica a mensagem de erro retornada por carregar_dados() em:
-    (icone, titulo, instrucao_acao)
-    para exibição contextual na tela de erro.
-    """
-    e = (erro or "").lower()
-
-    if "pasta não encontrada" in e:
-        return (
-            "📁",
-            "Pasta de dados não encontrada",
-            f"A variável de ambiente `CAMERITE_MONITORAMENTO_PASTA` aponta para um caminho "
-            f"que não existe. Corrija o caminho ou copie os arquivos para:\n\n`{PASTA}`",
-        )
-
-    if "corrompido" in e or "encoding" in e or "não foi possível ler" in e:
-        return (
-            "💾",
-            "Arquivo corrompido ou com encoding inválido",
-            "O CSV foi encontrado mas não pode ser lido.\n\n"
-            "**Solução:** Abra o arquivo no Excel e salve como "
-            "*CSV UTF-8 (delimitado por vírgulas)*.",
-        )
-
-    if "colunas obrigatórias" in e or "colunas não encontradas" in e:
-        cols = ", ".join(f"`{c}`" for c in [COL_STATUS, COL_WL])
-        return (
-            "📋",
-            "Estrutura do CSV incompatível",
-            f"O CSV foi lido, mas faltam as colunas obrigatórias: {cols}.\n\n"
-            "Verifique se o arquivo exportado é o **GOV_extracao_cameras.csv** "
-            "correto — não uma exportação de outro módulo.",
-        )
-
-    if "xlsx" in e and "fallback" not in e:
-        return (
-            "📊",
-            "Erro nos arquivos XLSX individuais",
-            "Alguns arquivos XLSX em `_BKPS_importacao_individual` não puderam ser lidos. "
-            "Verifique se não estão abertos no Excel ou corrompidos.",
-        )
-
-    if "csv principal não encontrado" in e or not e:
-        return (
-            "📄",
-            "CSV principal não encontrado",
-            f"Esperado em:\n\n`{CSV_GOV}`\n\n"
-            "**Opções:**\n"
-            "1. Copie o arquivo para essa pasta com o nome exato `GOV_extracao_cameras.csv`\n"
-            "2. Configure a variável de ambiente `CAMERITE_MONITORAMENTO_PASTA` apontando "
-            "para a pasta onde o arquivo está\n"
-            "3. Use o upload manual ao lado →",
-        )
-
-    # Genérico: retorna o erro bruto mas formatado
-    return (
-        "⚠️",
-        "Erro ao carregar dados",
-        f"Detalhes técnicos:\n\n```\n{erro}\n```",
-    )
-
-
-def _render_sem_dados(dados: dict, erro: str, df_origem, saude: dict):
-    """Exibe sidebar mínima, diagnóstico contextual e upload manual.
-    Retorna (dados, saude, False) após upload bem-sucedido,
-    ou None se ainda não há dados para prosseguir.
-    """
     if not dados:
+        # Mostrar diagnóstico e oferecer upload manual
         with st.sidebar:
             st.markdown('''
             <div class="sidebar-logo">
-                <img src="https://framerusercontent.com/images/YQ4euyeSqXxIJm99xQGGCBYWYpg.png"
-                     style="height:30px;width:auto" alt="Camerite">
+                <img src="https://framerusercontent.com/images/YQ4euyeSqXxIJm99xQGGCBYWYpg.png" style="height:30px;width:auto" alt="Camerite">
                 <div>
                     <div class="sidebar-logo-text">Camerite BI</div>
                     <div class="sidebar-logo-sub">Auditoria Operacional</div>
@@ -4550,65 +4596,26 @@ def _render_sem_dados(dados: dict, erro: str, df_origem, saude: dict):
         <div class="page-header">
             <div>
                 <div class="page-title">Central de Monitoramento</div>
-                <div class="page-sub">Dados não carregados — veja o diagnóstico abaixo</div>
+                <div class="page-sub">Configure a fonte de dados abaixo</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-        col_diag, col_up = st.columns([1, 1], gap="large")
+        col_err, col_up = st.columns([1, 1], gap="large")
 
-        # ── Coluna de diagnóstico ──────────────────────────────────
-        with col_diag:
-            icone, titulo, instrucao = _diagnosticar_erro(erro)
-
-            st.markdown(f"### {icone} {titulo}")
-            st.markdown(instrucao)
-
-            # Checklist de ambiente — ajuda a depurar sem abrir terminal
-            csv_existe   = os.path.exists(CSV_GOV)
-            pasta_existe = os.path.exists(PASTA)
-            xlsx_existe  = caminho_xlsx_clientes() is not None
-            supabase_ok  = supabase_configurado()
-
-            st.markdown("---")
-            st.markdown("**Diagnóstico do ambiente:**")
-
-            def _check(ok: bool, label: str) -> str:
-                return f"{'✅' if ok else '❌'} {label}"
-
-            st.markdown(
-                "\n".join([
-                    _check(pasta_existe, f"Pasta existe: `{PASTA}`"),
-                    _check(csv_existe,   f"CSV encontrado: `{os.path.basename(CSV_GOV)}`"),
-                    _check(xlsx_existe,  "nome_clientes.xlsx encontrado"),
-                    _check(supabase_ok,  "Supabase configurado"),
-                ])
+        with col_err:
+            st.error(f"**Arquivo não carregado automaticamente**\n\n{erro}" if erro else "Nenhum dado carregado.")
+            st.info(
+                f"**Caminho configurado:** `{CSV_GOV}`\n\n"
+                "Verifique se o arquivo existe nesse caminho e se o nome está exatamente como "
+                "`GOV_extracao_cameras.csv`."
             )
 
-            if csv_existe:
-                tamanho = os.path.getsize(CSV_GOV)
-                mod     = datetime.fromtimestamp(os.path.getmtime(CSV_GOV)).strftime("%d/%m/%Y %H:%M")
-                st.caption(f"CSV: {tamanho / 1024:.1f} KB · modificado em {mod}")
-
-        # ── Coluna de upload manual ────────────────────────────────
         with col_up:
-            st.markdown("#### 📂 Upload manual")
-            st.caption(
-                "Se o arquivo não está sendo lido automaticamente, "
-                "faça o upload aqui para continuar sem alterar o servidor."
-            )
-            arq_csv  = st.file_uploader(
-                "GOV_extracao_cameras.csv",
-                type=["csv"],
-                key="upload_gov_csv",
-                help="Exportação do sistema GOV com colunas Status_da_Camera e ID_Whitelabel.",
-            )
-            arq_xlsx = st.file_uploader(
-                "nome_clientes.xlsx (opcional)",
-                type=["xlsx"],
-                key="upload_clientes",
-                help="Planilha com ID_Whitelabel → Nome do cliente. Sem ela os clientes aparecem pelo ID.",
-            )
+            st.markdown("#### 📂 Upload manual do CSV")
+            st.caption("Se o arquivo não está sendo lido automaticamente, faça o upload aqui:")
+            arq_csv = st.file_uploader("GOV_extracao_cameras.csv", type=["csv"], key="upload_gov_csv")
+            arq_xlsx = st.file_uploader("nome_clientes.xlsx (opcional)", type=["xlsx"], key="upload_clientes")
 
             if arq_csv is not None:
                 try:
@@ -4635,60 +4642,69 @@ def _render_sem_dados(dados: dict, erro: str, df_origem, saude: dict):
                             break
 
                     if df_up is None:
-                        st.error(
-                            "❌ Não foi possível ler o CSV com nenhum encoding testado "
-                            "(UTF-8, Latin-1, CP1252).\n\n"
-                            "Abra o arquivo no Excel e salve como **CSV UTF-8**."
-                        )
-                        return None
+                        st.error("Não foi possível ler o CSV. Tente salvar como UTF-8.")
+                        return
 
                     cols_faltando = [c for c in [COL_STATUS, COL_WL] if c not in df_up.columns]
                     if cols_faltando:
-                        st.error(
-                            f"❌ Colunas obrigatórias ausentes: "
-                            f"`{'`, `'.join(cols_faltando)}`\n\n"
-                            f"Colunas encontradas no arquivo:\n"
-                            f"`{'`, `'.join(df_up.columns.tolist())}`\n\n"
-                            "Verifique se o arquivo exportado é o **GOV_extracao_cameras.csv** correto."
-                        )
-                        return None
+                        st.error(f"Colunas não encontradas: `{'`, `'.join(cols_faltando)}`\n\nColunas no arquivo: `{'`, `'.join(df_up.columns.tolist())}`")
+                        return
 
                     cl_map_up = {}
                     if arq_xlsx is not None:
                         try:
-                            df_cl   = pd.read_excel(arq_xlsx, engine="openpyxl")
+                            df_cl = pd.read_excel(arq_xlsx, engine="openpyxl")
                             col_id  = next((c for c in df_cl.columns if "whitelabel" in c.lower() or "id" in c.lower()), df_cl.columns[0])
                             col_nom = next((c for c in df_cl.columns if "nome" in c.lower() or "client" in c.lower()), df_cl.columns[1])
-                            cl_map_up = dict(zip(
-                                df_cl[col_id].astype(str).str.strip(),
-                                df_cl[col_nom].astype(str).str.strip(),
-                            ))
+                            cl_map_up = dict(zip(df_cl[col_id].astype(str).str.strip(), df_cl[col_nom].astype(str).str.strip()))
                         except Exception as e:
-                            st.warning(f"⚠️ XLSX de clientes ignorado — não foi possível ler: {e}")
+                            st.warning(f"Não foi possível ler o XLSX de clientes: {e}")
 
                     dados = processar_df_gov(df_up, cl_map_up)
                     saude = calcular_saude_dataframe(df_up, cl_map_up, "Upload manual")
                     origem_local = False
-
-                    st.success(
-                        f"✅ CSV carregado com sucesso!  "
-                        f"**{len(df_up):,} linhas** · **{len(dados)} clientes** encontrados."
-                    )
-                    return dados, saude, origem_local
-
+                    st.success(f"CSV carregado! {len(df_up)} linhas · {len(dados)} clientes encontrados.")
+                    # Não há st.rerun aqui — o código continua abaixo com dados preenchidos
                 except Exception as e:
-                    st.error(f"❌ Erro inesperado ao processar o arquivo:\n\n```\n{e}\n```")
-                    return None
+                    st.error(f"Erro ao processar o arquivo: {e}")
+                    return
             else:
-                st.info("⬆️ Aguardando upload do CSV para continuar…")
-                return None
+                st.caption("Aguardando upload do CSV…")
+                return
+
+    if erro:
+        st.warning(erro)
+
+    # ── Métricas globais ──
+    total_clientes = len(dados)
+    total_cameras  = sum(v["total"] for v in dados.values())
+    total_offline  = sum(len(v["offline"]) for v in dados.values())
+    pct_global     = round(total_offline/total_cameras*100, 2) if total_cameras else 0
+    n_critico      = sum(1 for v in dados.values() if (len(v["offline"])/v["total"]*100 if v["total"] else 0) > 10)
+    n_atencao      = sum(1 for v in dados.values() if 5 < (len(v["offline"])/v["total"]*100 if v["total"] else 0) <= 10)
+    clientes_alert = sum(1 for v in dados.values() if len(v["offline"]) > 0)
+    n_saudavel     = total_clientes - n_critico - n_atencao
+    audit_label, audit_color, audit_reason = classificar_auditoria(pct_global, n_critico, n_atencao, saude)
+    acao_curta, acao_detalhe = recomendacao_auditoria(n_critico, n_atencao, saude)
+    pct_clientes_criticos = round(n_critico / total_clientes * 100, 1) if total_clientes else 0
+    pct_clientes_atencao = round(n_atencao / total_clientes * 100, 1) if total_clientes else 0
 
 
-# ─────────────────────────────────────────────
-# Cálculo de comparativo de snapshots
-# ─────────────────────────────────────────────
-def _calcular_comparativo(dados: dict) -> dict:
-    """Carrega snapshots, calcula tendências e deltas. Retorna dict com variáveis derivadas."""
+    # Modo detalhe rápido: evita carregar comparativos, gráficos e todas as abas ao abrir um cliente.
+    # Isso reduz bastante o tempo de resposta do botão "Ver detalhes do cliente".
+    if "detalhe" in st.session_state:
+        render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem)
+        st.markdown(f"""
+        <div class="page-header">
+            <div>
+                <div class="page-title">Detalhe do Cliente</div>
+                <div class="page-sub">Consulta direta sem carregar todos os dashboards</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        render_cliente_detalhe_rapido(str(st.session_state["detalhe"]), dados)
+        return
+
     # Comparar os snapshots escolhidos no Histórico quando houver seleção.
     # Se ainda não houver seleção, usa os dois últimos snapshots manuais.
     df_base_delta = pd.DataFrame()
@@ -4850,2280 +4866,1862 @@ def _calcular_comparativo(dados: dict) -> dict:
     clientes_melhoraram = sum(1 for v in delta_offs.values() if isinstance(v, (int, float)) and v < 0)
     clientes_pioraram = sum(1 for v in delta_offs.values() if isinstance(v, (int, float)) and v > 0)
 
-    return {
-        "snapshot_ids": snapshot_ids,
-        "datas_comparativo_txt": datas_comparativo_txt,
-        "tendencias": tendencias,
-        "delta_offs": delta_offs,
-        "delta_totais": delta_totais,
-        "df_base_delta": df_base_delta,
-        "df_base_cameras_novas": df_base_cameras_novas,
-        "total_cameras_anterior": total_cameras_anterior,
-        "total_cameras_recente_comparativo": total_cameras_recente_comparativo,
-        "total_offline_recente_comparativo": total_offline_recente_comparativo,
-        "delta_total_cameras": delta_total_cameras,
-        "clientes_base_nova": clientes_base_nova,
-        "clientes_base_reduzida": clientes_base_reduzida,
-        "detalhe_cameras_disponivel": detalhe_cameras_disponivel,
-    }
+    # ── Sidebar ──
+    render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem)
 
-
-# ─────────────────────────────────────────────
-# Aba Auditoria › Visão Geral
-# ─────────────────────────────────────────────
-def render_aba_auditoria_visao_geral(
-    dados: dict, saude: dict, comp: dict,
-    n_critico: int, n_atencao: int, n_saudavel: int,
-    total_clientes: int, total_cameras: int, total_offline: int,
-    pct_global: float, pct_clientes_criticos: float, pct_clientes_atencao: float,
-    audit_label: str, audit_color: str, acao_detalhe: str,
-    df_clientes_ops, clientes_map: dict, df_origem,
-) -> None:
-    """Sub-aba Visão Geral da aba Auditoria."""
-    snapshot_ids               = comp['snapshot_ids']
-    datas_comparativo_txt      = comp['datas_comparativo_txt']
-    total_offline_anterior     = comp.get('total_offline_anterior', total_offline)
-    delta_global               = total_offline - total_offline_anterior
-    delta_offs                 = comp['delta_offs']
-    delta_total_cameras        = comp['delta_total_cameras']
-    df_base_delta              = comp['df_base_delta']
-    df_base_cameras_novas      = comp['df_base_cameras_novas']
-    total_cameras_anterior     = comp['total_cameras_anterior']
-    total_cameras_recente_comparativo = comp['total_cameras_recente_comparativo']
-    detalhe_cameras_disponivel = comp['detalhe_cameras_disponivel']
-    clientes_base_nova         = comp['clientes_base_nova']
-    clientes_base_reduzida     = comp['clientes_base_reduzida']
-    clientes_melhoraram = sum(1 for v in delta_offs.values() if isinstance(v, (int, float)) and v < 0)
-    clientes_pioraram   = sum(1 for v in delta_offs.values() if isinstance(v, (int, float)) and v > 0)
-    if delta_total_cameras > 0:
-        texto_delta_base   = f"+{delta_total_cameras}"
-        cor_delta_base     = "#14b8a6"
-        detalhe_delta_base = f"{delta_total_cameras} câmeras novas"
-    elif delta_total_cameras < 0:
-        texto_delta_base   = str(delta_total_cameras)
-        cor_delta_base     = "#ef4444"
-        detalhe_delta_base = f"{abs(delta_total_cameras)} câmeras removidas"
-    else:
-        texto_delta_base   = "+0"
-        cor_delta_base     = "#7C3AED"
-        detalhe_delta_base = "Sem alteração na base"
-
+    # ── Page header ──
     st.markdown(f"""
-    <div class="audit-hero">
-        <div class="audit-hero-top">
-            <div>
-                <div class="audit-title">Auditoria Clientes GOV</div>
-                <div class="audit-sub">
-                    {acao_detalhe}<br>
-                    <span style="display:inline-block;margin-top:6px;font-family:'DM Mono',monospace;color:#6D28D9;background:#F3E8FF;border:1px solid #DDD6FE;border-radius:6px;padding:5px 8px">📅 {datas_comparativo_txt}</span>
+    <div class="page-header">
+        <div>
+            <div class="page-title">Monitoramento Operacional</div>
+            <div class="page-sub">{total_clientes} clientes · {total_cameras} câmeras monitoradas</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── ABAS ──
+    tabs = st.tabs([
+        "Auditoria",
+        "Clientes",
+        "Central de Ações",
+        "Tempo offline",
+        "% por cliente",
+        "Evidências",
+        "LPRs Offline",
+        "Atualizar Base",
+        "Relatório Franquia",
+    ])
+
+    # ════════════════════════════════════════════
+    # ABA 0 — VISÃO EXECUTIVA
+    # ════════════════════════════════════════════
+    with tabs[0]:
+        st.markdown(f"""
+        <div class="audit-hero">
+            <div class="audit-hero-top">
+                <div>
+                    <div class="audit-title">Auditoria Clientes GOV</div>
+                    <div class="audit-sub">
+                        {acao_detalhe}<br>
+                        <span style="display:inline-block;margin-top:6px;font-family:'DM Mono',monospace;color:#6D28D9;background:#F3E8FF;border:1px solid #DDD6FE;border-radius:6px;padding:5px 8px">📅 {datas_comparativo_txt}</span>
+                    </div>
+                </div>
+                <div class="audit-badges">
+                    <div class="audit-badge" style="color:{audit_color}">{audit_label}</div>
                 </div>
             </div>
-            <div class="audit-badges">
-                <div class="audit-badge" style="color:{audit_color}">{audit_label}</div>
+        </div>
+        <div class="audit-strip">
+            <div class="audit-card">
+                <div class="audit-card-label">Clientes críticos</div>
+                <div class="audit-card-value" style="color:#dc2626">{n_critico}/{total_clientes}</div>
+                <div class="audit-card-note">{pct_clientes_criticos:.1f}% da carteira auditada acima de 10% offline</div>
+            </div>
+            <div class="audit-card">
+                <div class="audit-card-label">Clientes em atenção</div>
+                <div class="audit-card-value" style="color:#d97706">{n_atencao}/{total_clientes}</div>
+                <div class="audit-card-note">{pct_clientes_atencao:.1f}% da carteira auditada entre 5% e 10% offline</div>
+            </div>
+            <div class="audit-card">
+                <div class="audit-card-label">Registros auditados</div>
+                <div class="audit-card-value">{saude.get("linhas_processadas",0)}</div>
+            </div>
+            <div class="audit-card">
+                <div class="audit-card-label">Data da Última Atualização</div>
+                <div class="audit-card-value" style="font-size:20px;color:#171126">{saude.get("ultima_atualizacao_base","N/D")}</div>
+                <div class="audit-card-note">Última importação/atualização registrada</div>
             </div>
         </div>
-    </div>
-    <div class="audit-strip">
-        <div class="audit-card">
-            <div class="audit-card-label">Clientes críticos</div>
-            <div class="audit-card-value" style="color:#dc2626">{n_critico}/{total_clientes}</div>
-            <div class="audit-card-note">{pct_clientes_criticos:.1f}% da carteira auditada acima de 10% offline</div>
-        </div>
-        <div class="audit-card">
-            <div class="audit-card-label">Clientes em atenção</div>
-            <div class="audit-card-value" style="color:#d97706">{n_atencao}/{total_clientes}</div>
-            <div class="audit-card-note">{pct_clientes_atencao:.1f}% da carteira auditada entre 5% e 10% offline</div>
-        </div>
-        <div class="audit-card">
-            <div class="audit-card-label">Registros auditados</div>
-            <div class="audit-card-value">{saude.get("linhas_processadas",0)}</div>
-        </div>
-        <div class="audit-card">
-            <div class="audit-card-label">Data da Última Atualização</div>
-            <div class="audit-card-value" style="font-size:20px;color:#171126">{saude.get("ultima_atualizacao_base","N/D")}</div>
-            <div class="audit-card-note">Última importação/atualização registrada</div>
-        </div>
-    </div>
-    <div class="audit-riskbar">
-        <div>
-            <div style="font-size:11px;color:#7C6A91;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">Carteira acima do limite crítico</div>
-            <div class="audit-risk-track"><div class="audit-risk-fill" style="width:{pct_clientes_criticos}%;background:{audit_color}"></div></div>
-        </div>
-        <div class="audit-risk-label" style="color:{audit_color}">{pct_clientes_criticos:.1f}% dos clientes</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("""
-    <div class="audit-section-title">
-        <strong>Indicadores de controle</strong>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Top KPIs: apenas 3 cards conforme solicitado
-    st.markdown(f"""
-    <div class="kpi-grid">
-        <div class="kpi-card kpi-neutral">
-            <div class="kpi-label">Total de Câmeras</div>
-            <div class="kpi-value val-purple">{total_cameras}</div>
-            <div class="kpi-sub">{total_clientes} clientes monitorados</div>
-    			</div>
-    			<div class="kpi-card kpi-alert"
-    				 style="background:#ffffff !important;
-    						border-color:#E9D5FF !important;">
-    				<div class="kpi-label">
-    					Câmeras Offline
-    				</div>
-    				<div class="kpi-value val-alert">
-    					{total_offline}
-    				</div>
-    				<div class="kpi-sub">
-    					{pct_global:.1f}% da frota total
-    				</div>
-    			</div>
-        <div class="kpi-card kpi-ok">
-            <div class="kpi-label">Câmeras Online</div>
-            <div class="kpi-value val-ok">{total_cameras - total_offline}</div>
-            <div class="kpi-sub">{100-pct_global:.1f}% operacionais</div>
-        </div>
-        <div class="kpi-card kpi-neutral">
-            <div class="kpi-label">Variação de Câmeras Offline</div>
-            <div class="kpi-value" style="font-size:28px;font-weight:700;color:{'#ef4444' if delta_global > 0 else ('#14b8a6' if delta_global < 0 else '#7C3AED')};">{delta_global:+.0f}</div>
-            <div class="kpi-sub">{clientes_melhoraram} melhoraram · {clientes_pioraram} pioraram</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Lower cards: novos cartões de categoria + Variação e Data da Última Atualização
-    if "audit_categoria" not in st.session_state:
-        st.session_state["audit_categoria"] = None
-
-    col_a, col_b, col_c, col_d = st.columns(4)
-    with col_a:
-        st.markdown(f"""
-            <div class="kpi-card kpi-ok" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes até 5% offline</div>
-                <div style="font-size:24px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:700">{n_saudavel}</div>
-                <div style="font-size:11px;color:#8B7AA3">{n_saudavel} clientes · 0–5%</div>
+        <div class="audit-riskbar">
+            <div>
+                <div style="font-size:11px;color:#7C6A91;font-weight:700;text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">Carteira acima do limite crítico</div>
+                <div class="audit-risk-track"><div class="audit-risk-fill" style="width:{pct_clientes_criticos}%;background:{audit_color}"></div></div>
             </div>
+            <div class="audit-risk-label" style="color:{audit_color}">{pct_clientes_criticos:.1f}% dos clientes</div>
+        </div>
         """, unsafe_allow_html=True)
-        if st.button("Ver clientes", key="audit_saudavel"):
-            st.session_state["audit_categoria"] = "Saudável (0-5%)"
-            st.session_state["mostrar_base_delta"] = False
-    with col_b:
-        st.markdown(f"""
-            <div class="kpi-card kpi-warn" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes em atenção (5 a 10% offline)</div>
-                <div style="font-size:24px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:700">{n_atencao}</div>
-                <div style="font-size:11px;color:#8B7AA3">{n_atencao} clientes · 5–10%</div>
-            </div>
-        """, unsafe_allow_html=True)
-        if st.button("Ver clientes", key="audit_atencao"):
-            st.session_state["audit_categoria"] = "Atenção (5-10%)"
-            st.session_state["mostrar_base_delta"] = False
-    with col_c:
-        st.markdown(f"""
-            <div class="kpi-card kpi-neutral" style="background:#ffffff !important;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes acima de 10% offline</div>
-                <div style="font-size:24px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:700">{n_critico}</div>
-                <div style="font-size:11px;color:#8B7AA3">{n_critico} clientes · &gt;10%</div>
-            </div>
-        """, unsafe_allow_html=True)
-        if st.button("Ver clientes", key="audit_critico"):
-            st.session_state["audit_categoria"] = "Crítico (>10%)"
-            st.session_state["mostrar_base_delta"] = False
-    with col_d:
-        st.markdown(f"""
-            <div class="kpi-card kpi-neutral" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Crescimento da Base</div>
-                <div style="font-size:24px;color:{cor_delta_base};font-family:'DM Mono',monospace;font-weight:700">{texto_delta_base}</div>
-                <div style="font-size:11px;color:#8B7AA3">{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if st.button("Ver clientes", key="base_delta_ver_clientes"):
-            st.session_state["mostrar_base_delta"] = True
-            st.session_state["audit_categoria"] = None
-
-
-    if st.session_state.get("mostrar_base_delta", False):
-        st.markdown("<hr>", unsafe_allow_html=True)
 
         st.markdown("""
         <div class="audit-section-title">
-            <strong>Clientes com alteração na base de câmeras</strong>
-            <span>Comparação entre o snapshot atual e o anterior</span>
+            <strong>Indicadores de controle</strong>
         </div>
         """, unsafe_allow_html=True)
 
-        col_base_a, col_base_b, col_base_c = st.columns(3)
-        col_base_a.metric("Clientes com novas câmeras", int(clientes_base_nova))
-        col_base_b.metric("Clientes com redução de base", int(clientes_base_reduzida))
-        col_base_c.metric("Variação total", f"{delta_total_cameras:+d}")
+        # Top KPIs: apenas 3 cards conforme solicitado
+        st.markdown(f"""
+        <div class="kpi-grid">
+            <div class="kpi-card kpi-neutral">
+                <div class="kpi-label">Total de Câmeras</div>
+                <div class="kpi-value val-purple">{total_cameras}</div>
+                <div class="kpi-sub">{total_clientes} clientes monitorados</div>
+			</div>
+			<div class="kpi-card kpi-alert"
+				 style="background:#ffffff !important;
+						border-color:#E9D5FF !important;">
+				<div class="kpi-label">
+					Câmeras Offline
+				</div>
+				<div class="kpi-value val-alert">
+					{total_offline}
+				</div>
+				<div class="kpi-sub">
+					{pct_global:.1f}% da frota total
+				</div>
+			</div>
+            <div class="kpi-card kpi-ok">
+                <div class="kpi-label">Câmeras Online</div>
+                <div class="kpi-value val-ok">{total_cameras - total_offline}</div>
+                <div class="kpi-sub">{100-pct_global:.1f}% operacionais</div>
+            </div>
+            <div class="kpi-card kpi-neutral">
+                <div class="kpi-label">Variação de Câmeras Offline</div>
+                <div class="kpi-value" style="font-size:28px;font-weight:700;color:{'#ef4444' if delta_global > 0 else ('#14b8a6' if delta_global < 0 else '#7C3AED')};">{delta_global:+.0f}</div>
+                <div class="kpi-sub">{clientes_melhoraram} melhoraram · {clientes_pioraram} pioraram</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        if not df_base_cameras_novas.empty:
-            st.markdown("#### Câmeras novas identificadas")
-            render_dataframe(
-                df_base_cameras_novas,
-                height=min(700, (len(df_base_cameras_novas) + 1) * 35 + 3)
-            )
-
-            buffer_cams = io.BytesIO()
-            with pd.ExcelWriter(buffer_cams, engine="openpyxl") as writer:
-                df_base_cameras_novas.to_excel(writer, index=False, sheet_name="Cameras Novas")
-            st.download_button(
-                "⬇ Baixar câmeras novas em Excel",
-                key="dl_cameras_novas_excel_v1",
-                data=buffer_cams.getvalue(),
-                file_name=f"cameras_novas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-        elif len(snapshot_ids) == 2 and detalhe_cameras_disponivel:
-            st.info("Nenhuma câmera nova foi identificada entre o snapshot atual e o anterior.")
-        elif len(snapshot_ids) == 2:
-            st.warning(
-                "O resumo de crescimento existe, mas o detalhamento por ID de câmera ainda não está disponível "
-                "para esses snapshots antigos. Salve um novo snapshot com esta versão e, na próxima comparação, "
-                "o sistema exibirá Cliente, Franqueado, ID da Câmera, Nome da Câmera e Última Vez Online."
-            )
-
-            if not df_base_delta.empty:
-                st.markdown("#### Resumo por cliente disponível")
-                df_base_show = df_base_delta.copy()
-                df_base_show["Variação"] = df_base_show["Variação"].apply(lambda v: f"{v:+d}")
-                render_dataframe(
-                    df_base_show,
-                    height=min(620, (len(df_base_show) + 1) * 35 + 3)
-                )
-        else:
-            st.info("Salve ao menos dois snapshots para comparar o crescimento da base.")
-
-        if st.button("Ocultar detalhamento", key="base_delta_ocultar"):
-            st.session_state["mostrar_base_delta"] = False
-            st.rerun()
-
-    if st.session_state["audit_categoria"]:
-        categoria = st.session_state["audit_categoria"]
-        df_audit = df_clientes_ops.copy()
-        if categoria == "Saudável (0-5%)":
-            mask = df_audit["% Offline"] <= 5
-        elif categoria == "Atenção (5-10%)":
-            mask = (df_audit["% Offline"] > 5) & (df_audit["% Offline"] <= 10)
-        else:
-            mask = df_audit["% Offline"] > 10
-
-        df_audit = df_audit.loc[mask, ["Cliente", "Franqueado", "% Offline"]].copy()
-        df_audit["% Offline"] = df_audit["% Offline"].round(1)
-        df_audit = df_audit.sort_values("% Offline", ascending=False).reset_index(drop=True)
-        st.markdown(f"### Clientes na faixa: {categoria}")
-        if df_audit.empty:
-            st.info("Nenhum cliente encontrado nessa faixa.")
-        else:
-            render_dataframe(df_audit, height=min(500, (len(df_audit)+1)*35 + 3))
-        if st.button("Limpar seleção", key="audit_clear"):
+        # Lower cards: novos cartões de categoria + Variação e Data da Última Atualização
+        if "audit_categoria" not in st.session_state:
             st.session_state["audit_categoria"] = None
 
-    if saude.get("colunas_faltando"):
-        st.warning(f"Colunas ausentes no CSV: {', '.join(saude['colunas_faltando'])}")
-    elif saude.get("datas_futuras", 0):
-        st.warning(f"{saude['datas_futuras']} registros têm data futura. Revise o formato de data da extração.")
-    elif saude.get("datas_invalidas", 0):
-        st.warning(f"{saude['datas_invalidas']} registros têm data inválida e foram marcados como N/D.")
-
-    st.markdown("""
-    <div class="audit-section-title">
-        <strong>Evidências visuais</strong>
-        <span>Distribuição do risco e clientes com maior exposição</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    col_gauge, col_pie, col_top = st.columns([1,1,1], gap="large")
-
-    with col_gauge:
-        # Gauge invertido: agora exibe o percentual ONLINE do GOV.
-        # Exemplo: 8% offline = 92% online.
-        pct_online_global = round(100 - pct_global, 2) if total_cameras else 0
-
-        st.markdown("**% Total de Câmeras ONLINE GOV**")
-
-        # Para o gauge online, quanto maior o percentual, melhor.
-        if pct_online_global >= 95:
-            cor_g = "#14b8a6"
-        elif pct_online_global >= 90:
-            cor_g = "#f59e0b"
-        else:
-            cor_g = "#ef4444"
-
-        fig_g = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=pct_online_global,
-            number=dict(suffix="%", font=dict(color=cor_g, size=48, family="DM Mono")),
-            gauge=dict(
-                shape="angular",
-                axis=dict(range=[0,100], showticklabels=False, ticks="", visible=False),
-                bar=dict(color=cor_g, thickness=0.34),
-                bgcolor="#FAF7FF",
-                borderwidth=0,
-                steps=[
-                    dict(range=[0,90],   color="#fecaca"),
-                    dict(range=[90,95],  color="#fde68a"),
-                    dict(range=[95,100], color="#a7f3d0"),
-                ],
-                threshold=dict(line=dict(color="#6B5A7A", width=4), thickness=0.75, value=pct_online_global),
-            ),
-        ))
-        layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-        fig_g.update_layout(
-            **layout_defaults,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=300,
-            margin=dict(l=0,r=0,t=10,b=0),
-            annotations=[
-                dict(
-                    text=f"<span style='font-size:12px;color:#8B7AA3;font-family:DM Sans'>Câmeras operacionais</span>",
-                    x=0.5, y=0.08, showarrow=False, xanchor="center"
-                )
-            ],
-        )
-        st.plotly_chart(fig_g, use_container_width=True, key="gauge_online_gov")
-
-    with col_pie:
-        pct_saudavel_card = round(n_saudavel / total_clientes * 100, 1) if total_clientes else 0
-        pct_atencao_card = round(n_atencao / total_clientes * 100, 1) if total_clientes else 0
-        pct_critico_card = round(n_critico / total_clientes * 100, 1) if total_clientes else 0
-
-        if n_critico > 0:
-            status_saude_titulo = "Atenção crítica"
-            status_saude_cor = "#dc2626"
-            status_saude_msg = f"{n_critico} cliente(s) acima de 10% offline"
-        elif n_atencao > 0:
-            status_saude_titulo = "Monitoramento"
-            status_saude_cor = "#d97706"
-            status_saude_msg = f"{n_atencao} cliente(s) entre 5% e 10% offline"
-        else:
-            status_saude_titulo = "Saudável"
-            status_saude_cor = "#059669"
-            status_saude_msg = "Todos os clientes até 5% offline"
-
-        st.markdown("**% Total de Câmeras ONLINE GOV**")
-
-        fig_pie = go.Figure(go.Pie(
-            labels=["Crítico", "Atenção", "Saudável"],
-            values=[n_critico, n_atencao, n_saudavel],
-            hole=0.68,
-            sort=False,
-            direction="clockwise",
-            marker=dict(
-                colors=["#dc2626", "#f59e0b", "#14b8a6"],
-                line=dict(color="#ffffff", width=4)
-            ),
-            textinfo="none",
-            hovertemplate="<b>%{label}</b><br>%{value} clientes<br>%{percent}<extra></extra>",
-        ))
-        fig_pie.update_traces(
-            rotation=90,
-            pull=[0.055 if n_critico else 0, 0.035 if n_atencao else 0, 0],
-        )
-        fig_pie.add_annotation(
-            text=(
-                f"<span style='font-size:26px;font-weight:800;color:#171126;font-family:DM Mono'>{total_clientes}</span>"
-                f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans'>clientes</span>"
-                f"<br><span style='font-size:10px;color:#6B5A7A;font-family:DM Sans;font-weight:700'>{pct_saudavel_card:.1f}% saudáveis</span>"
-            ),
-            x=0.5, y=0.5, showarrow=False,
-        )
-        layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-        fig_pie.update_layout(
-            **layout_defaults,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=250,
-            showlegend=False,
-            margin=dict(l=4, r=4, t=8, b=4),
-        )
-        st.plotly_chart(fig_pie, use_container_width=True, key="pie_clientes_faixa_saude_moderno")
-
-        st.markdown(f"""
-            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:-8px">
-                <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:9px 8px;text-align:center">
-                    <div style="font-size:10px;color:#0f766e;font-weight:800;text-transform:uppercase">Saudável</div>
-                    <div style="font-size:20px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:800">{n_saudavel}</div>
-                    <div style="font-size:10px;color:#7C6A91">0–5% · {pct_saudavel_card:.1f}%</div>
+        col_a, col_b, col_c, col_d = st.columns(4)
+        with col_a:
+            st.markdown(f"""
+                <div class="kpi-card kpi-ok" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes até 5% offline</div>
+                    <div style="font-size:24px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:700">{n_saudavel}</div>
+                    <div style="font-size:11px;color:#8B7AA3">{n_saudavel} clientes · 0–5%</div>
                 </div>
-                <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 8px;text-align:center">
-                    <div style="font-size:10px;color:#b45309;font-weight:800;text-transform:uppercase">Atenção</div>
-                    <div style="font-size:20px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:800">{n_atencao}</div>
-                    <div style="font-size:10px;color:#7C6A91">5–10% · {pct_atencao_card:.1f}%</div>
+            """, unsafe_allow_html=True)
+            if st.button("Ver clientes", key="audit_saudavel"):
+                st.session_state["audit_categoria"] = "Saudável (0-5%)"
+                st.session_state["mostrar_base_delta"] = False
+        with col_b:
+            st.markdown(f"""
+                <div class="kpi-card kpi-warn" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes em atenção (5 a 10% offline)</div>
+                    <div style="font-size:24px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:700">{n_atencao}</div>
+                    <div style="font-size:11px;color:#8B7AA3">{n_atencao} clientes · 5–10%</div>
                 </div>
-                <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 8px;text-align:center">
-                    <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase">Crítico</div>
-                    <div style="font-size:20px;color:#dc2626;font-family:'DM Mono',monospace;font-weight:800">{n_critico}</div>
-                    <div style="font-size:10px;color:#7C6A91">&gt;10% · {pct_critico_card:.1f}%</div>
+            """, unsafe_allow_html=True)
+            if st.button("Ver clientes", key="audit_atencao"):
+                st.session_state["audit_categoria"] = "Atenção (5-10%)"
+                st.session_state["mostrar_base_delta"] = False
+        with col_c:
+            st.markdown(f"""
+                <div class="kpi-card kpi-neutral" style="background:#ffffff !important;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes acima de 10% offline</div>
+                    <div style="font-size:24px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:700">{n_critico}</div>
+                    <div style="font-size:11px;color:#8B7AA3">{n_critico} clientes · &gt;10%</div>
                 </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    with col_top:
-        st.markdown("**Top 5 clientes mais críticos**")
-        rows_top = [
-            {"Cliente": v["nome_cliente"],
-             "Franqueado": v["nome_empresa"],
-             "Pct": round(len(v["offline"])/v["total"]*100, 1) if v["total"] else 0,
-             "Off": len(v["offline"]), "Tot": v["total"]}
-            for v in dados.values() if len(v["offline"]) > 0
-        ]
-        df_top = (
-            pd.DataFrame(rows_top).sort_values("Pct", ascending=False).head(5)
-            if rows_top else pd.DataFrame()
-        )
-
-        if df_top.empty:
-            st.success("🎉 Todos os clientes estão operacionais!")
-        else:
-            for _, row in df_top.iterrows():
-                cor = cor_hex(row["Pct"])
-                cliente_html = escape_html(row["Cliente"])
-                franqueado_html = escape_html(row["Franqueado"])
-                pct_html = f"{row['Pct']:.1f}%"
-                width_pct = min(row["Pct"], 100)
-                offline_text = f"{int(row['Off'])} offline de {int(row['Tot'])}"
-                st.markdown(f"""
-                <div style="margin-bottom:14px">
-                    <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                        <span style="font-size:12px;color:#171126;font-weight:600">{cliente_html}</span>
-                        <span style="font-family:'DM Mono',monospace;font-size:12px;color:{cor};font-weight:700">{pct_html}</span>
-                    </div>
-                    <div style="font-size:10px;color:#8B7AA3;margin-bottom:4px">{franqueado_html}</div>
-                    <div style="height:5px;background:#E9D5FF;border-radius:99px;overflow:hidden">
-                        <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
-                    </div>
-                    <div style="font-size:10px;color:#8B7AA3;margin-top:3px">{offline_text}</div>
+            """, unsafe_allow_html=True)
+            if st.button("Ver clientes", key="audit_critico"):
+                st.session_state["audit_categoria"] = "Crítico (>10%)"
+                st.session_state["mostrar_base_delta"] = False
+        with col_d:
+            st.markdown(f"""
+                <div class="kpi-card kpi-neutral" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
+                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Crescimento da Base</div>
+                    <div style="font-size:24px;color:{cor_delta_base};font-family:'DM Mono',monospace;font-weight:700">{texto_delta_base}</div>
+                    <div style="font-size:11px;color:#8B7AA3">{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}</div>
                 </div>
-                """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-    st.markdown("<hr>", unsafe_allow_html=True)
-    st.markdown("**Mapa de calor — % offline por cliente**")
-    # Inclui todos os clientes cadastrados no nome_clientes.xlsx,
-    # mesmo aqueles sem câmeras no CSV (aparecem com 0%).
-    rows_heat = []
-    for v in dados.values():
-        rows_heat.append({
-            "Cliente": v["nome_cliente"],
-            "Pct": round(len(v["offline"]) / v["total"] * 100, 2) if v["total"] else 0,
-        })
-    clientes_no_csv = {v["nome_cliente"] for v in dados.values()}
-    for wl_id, nome in clientes_map.items():
-        if nome not in clientes_no_csv:
-            rows_heat.append({"Cliente": nome, "Pct": 0.0})
-    df_heat = pd.DataFrame(rows_heat).sort_values("Pct", ascending=False)
-
-    fig_map, mapa_msg = montar_mapa_cidades(df_origem)
-    if fig_map is not None:
-        st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
-        st.caption(mapa_msg)
-    else:
-        st.info(mapa_msg)
-
-    fig_heat = go.Figure(go.Bar(
-        x=df_heat["Cliente"], y=df_heat["Pct"],
-        marker=dict(
-            color=df_heat["Pct"],
-            colorscale=[
-                [0.0, "#dff8f3"],
-                [0.10, "#14b8a6"],
-                [0.12, "#fde047"],
-                [0.15, "#f59e0b"],
-                [0.40, "#ef4444"],
-                [1.0, "#b91c1c"],
-            ],
-            cmin=0, cmax=100, line=dict(width=0),
-        ),
-        hovertemplate="<b>%{x}</b><br>%{y:.1f}% offline<extra></extra>",
-    ))
-    layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-    _heat_height = max(300, min(len(df_heat) * 22, 600))
-    fig_heat.update_layout(
-        **layout_defaults,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        height=_heat_height,
-        xaxis=dict(tickfont=dict(color="#8B7AA3",size=10), tickangle=-45),
-        yaxis=dict(ticksuffix="%", gridcolor="#E9D5FF",
-                   tickfont=dict(color="#8B7AA3",size=10),
-                   range=[0, max(df_heat["Pct"].max()*1.2, 10)]),
-        margin=dict(l=10,r=10,t=10,b=110),
-    )
-    st.plotly_chart(fig_heat, use_container_width=True, key="heatmap_clientes_operacao_v1")
+            if st.button("Ver clientes", key="base_delta_ver_clientes"):
+                st.session_state["mostrar_base_delta"] = True
+                st.session_state["audit_categoria"] = None
 
 
+        if st.session_state.get("mostrar_base_delta", False):
+            st.markdown("<hr>", unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# Aba Auditoria › Tempo Offline
-# ─────────────────────────────────────────────
-def render_aba_auditoria_tempo_offline(dados: dict, df_origem) -> None:
-    """Sub-aba Tempo Offline da aba Auditoria."""
-    st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
-
-    # Montar DataFrame global com todas as câmeras offline
-    rows_tempo = []
-    agora = agora_sao_paulo()
-    for wl_id, v in dados.items():
-        df_off = v["offline"]
-        if df_off.empty: continue
-        for _, row in df_off.iterrows():
-            td = row.get("_tempo_off", timedelta(seconds=-1))
-            if not isinstance(td, timedelta): td = timedelta(seconds=-1)
-            horas = td.total_seconds()/3600 if td.total_seconds() >= 0 else -1
-            rows_tempo.append({
-                "ID do Cliente": wl_id,
-                "Nome Cliente":  v["nome_cliente"],
-                "Cidade": v.get("cidade_estado") or v.get("cidade") or v["nome_cliente"],
-                "Nome Franqueado": v["nome_empresa"],
-                "ID da Câmera":  row.get(COL_ID_CAM,  "N/D"),
-                "Nome da Câmera":row.get(COL_NOME_CAM,"N/D"),
-                "Última vez Online": row.get(COL_ULT_ATU, pd.NaT),
-                "Observações":   row.get(COL_OBS, ""),
-                "Faixa":         faixa_tempo_dias(horas),
-                "_horas":        horas,
-                "_td":           td,
-            })
-
-    if not rows_tempo:
-        st.success("🎉 Nenhuma câmera offline no momento!")
-    else:
-        df_tempo = pd.DataFrame(rows_tempo).sort_values("_horas", ascending=False)
-
-        # KPIs de tempo
-        validos       = df_tempo[df_tempo["_horas"] >= 0]
-        menos_1d      = (validos["_horas"] < 24).sum()
-        entre_1_3d    = ((validos["_horas"] >= 24) & (validos["_horas"] < 72)).sum()
-        entre_3_7d    = ((validos["_horas"] >= 72) & (validos["_horas"] < 168)).sum()
-        acima_7d      = (validos["_horas"] >= 168).sum()
-        nd_count      = (df_tempo["_horas"] < 0).sum()
-
-        k1, k2, k3, k4 = st.columns(4)
-
-        def card_tempo_moderno(titulo, valor, subtitulo, cor):
-            return f'''
-            <div style="
-                background:#ffffff;
-                border:1px solid #E9D5FF;
-                border-radius:14px;
-                padding:18px 18px 16px;
-                text-align:center;
-                box-shadow:0 10px 26px rgba(16,42,63,.06);
-                position:relative;
-                overflow:hidden;
-                min-height:118px;
-            ">
-                <div style="position:absolute;top:0;left:0;right:0;height:4px;background:{cor};"></div>
-                <div style="font-size:10px;color:#7C6A91;font-weight:800;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">{titulo}</div>
-                <div style="font-size:34px;font-weight:800;color:{cor};font-family:DM Mono,monospace;line-height:1.15;margin-top:10px">{valor}</div>
-                <div style="font-size:11px;color:#7C6A91;margin-top:6px">{subtitulo}</div>
+            st.markdown("""
+            <div class="audit-section-title">
+                <strong>Clientes com alteração na base de câmeras</strong>
+                <span>Comparação entre o snapshot atual e o anterior</span>
             </div>
-            '''
+            """, unsafe_allow_html=True)
 
-        k1.markdown(card_tempo_moderno("Menos de 1 dia", menos_1d, "câmeras recentes", "#10b981"), unsafe_allow_html=True)
-        k2.markdown(card_tempo_moderno("Entre 1 e 3 dias", entre_1_3d, "câmeras em atenção", "#f59e0b"), unsafe_allow_html=True)
-        k3.markdown(card_tempo_moderno("3 a 7 dias", entre_3_7d, "câmeras críticas", "#ef4444"), unsafe_allow_html=True)
-        k4.markdown(card_tempo_moderno("Acima de 7 dias", acima_7d, "câmeras mais antigas", "#ef4444"), unsafe_allow_html=True)
+            col_base_a, col_base_b, col_base_c = st.columns(3)
+            col_base_a.metric("Clientes com novas câmeras", int(clientes_base_nova))
+            col_base_b.metric("Clientes com redução de base", int(clientes_base_reduzida))
+            col_base_c.metric("Variação total", f"{delta_total_cameras:+d}")
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        if "tempo_offline_categoria" not in st.session_state:
-            st.session_state["tempo_offline_categoria"] = "Todas"
-
-        st.markdown("#### Filtrar por faixa de tempo")
-        cards = [
-            ("Menos de 1 dia", menos_1d),
-            ("Entre 1 e 3 dias", entre_1_3d),
-            ("3 a 7 dias", entre_3_7d),
-            ("Acima de 7 dias", acima_7d),
-            ("Sem data", nd_count),
-        ]
-        cols_cat = st.columns(len(cards))
-        for (label, count), col in zip(cards, cols_cat):
-            with col:
-                if st.button(f"{label} ({count})", key=f"tempo_cat_{label}"):
-                    st.session_state["tempo_offline_categoria"] = label
-
-        selected = st.session_state["tempo_offline_categoria"]
-        if selected != "Todas":
-            st.markdown(f"**Filtro ativo:** {selected}")
-            if st.button("Limpar filtro", key="tempo_cat_clear"):
-                st.session_state["tempo_offline_categoria"] = "Todas"
-
-        col_f1, col_f2 = st.columns([3,1])
-        with col_f1:
-            busca_t = st.text_input("Buscar", key="busca_tempo",
-                                    placeholder="Buscar câmera ou cliente…")
-        with col_f2:
-            top_n_t = st.selectbox("Exibir", ["Top 50","Top 100","Top 200","Todas"],
-                                   key="top_n_tempo")
-
-        df_exib = df_tempo.copy()
-        if selected != "Todas":
-            if selected == "Sem data":
-                df_exib = df_exib[df_exib["_horas"] < 0]
-            elif selected == "Menos de 1 dia":
-                df_exib = df_exib[(df_exib["_horas"] >= 0) & (df_exib["_horas"] < 24)]
-            elif selected == "Entre 1 e 3 dias":
-                df_exib = df_exib[(df_exib["_horas"] >= 24) & (df_exib["_horas"] < 72)]
-            elif selected == "3 a 7 dias":
-                df_exib = df_exib[(df_exib["_horas"] >= 72) & (df_exib["_horas"] < 168)]
-            elif selected == "Acima de 7 dias":
-                df_exib = df_exib[df_exib["_horas"] >= 168]
-
-        if busca_t:
-            termo = busca_t.upper()
-            df_exib = df_exib[
-                df_exib["Nome da Câmera"].astype(str).str.upper().str.contains(termo) |
-                df_exib["Nome Cliente"].str.upper().str.contains(termo) |
-                df_exib["Nome Franqueado"].astype(str).str.upper().str.contains(termo) |
-                df_exib["ID do Cliente"].astype(str).str.upper().str.contains(termo) |
-                df_exib["ID da Câmera"].astype(str).str.upper().str.contains(termo)
-            ]
-
-        lim = {"Top 50":50,"Top 100":100,"Top 200":200}.get(top_n_t, len(df_exib))
-        df_exib = df_exib.head(lim)
-
-        if df_exib.empty:
-            st.info("Nenhuma câmera encontrada com os filtros aplicados.")
-        else:
-            # Gráfico executivo — Top 30 por dias offline
-            df_graf = df_exib[df_exib["_horas"] >= 0].copy()
-            df_graf = df_graf.sort_values("_horas", ascending=False).head(30).copy()
-            if not df_graf.empty:
-                df_graf["_dias"] = (df_graf["_horas"] / 24).round(1)
-                df_graf["_rank"] = range(1, len(df_graf) + 1)
-                df_graf["_y"] = list(range(len(df_graf), 0, -1))
-
-                def _truncar_label_top30(id_camera, cidade, limite=34):
-                    id_camera = str(id_camera or "N/D").strip()
-                    cidade = str(cidade or "N/D").replace("\n", " ").strip()
-                    label = f"{id_camera} · {cidade}"
-                    return label if len(label) <= limite else label[:limite - 1].rstrip() + "…"
-
-                if "Cidade" not in df_graf.columns:
-                    df_graf["Cidade"] = df_graf["Nome Cliente"]
-
-                df_graf["_label_curto"] = df_graf.apply(
-                    lambda r: _truncar_label_top30(r["ID da Câmera"], r["Cidade"]), axis=1
-                )
-                df_graf["_tempo_fmt"] = df_graf["_td"].apply(lambda td: fmt_tempo(td))
-                df_graf["_criticidade"] = df_graf["_horas"].apply(
-                    lambda h: "Crítico · acima de 7 dias" if h >= 168 else (
-                        "Alto · 3 a 7 dias" if h >= 72 else (
-                            "Atenção · 1 a 3 dias" if h >= 24 else "Recente · menos de 1 dia"
-                        )
-                    )
-                )
-                df_graf["_cor"] = df_graf["_horas"].apply(
-                    lambda h: "#dc2626" if h >= 168 else (
-                        "#ea580c" if h >= 72 else (
-                            "#d97706" if h >= 24 else "#059669"
-                        )
-                    )
+            if not df_base_cameras_novas.empty:
+                st.markdown("#### Câmeras novas identificadas")
+                render_dataframe(
+                    df_base_cameras_novas,
+                    height=min(700, (len(df_base_cameras_novas) + 1) * 35 + 3)
                 )
 
-                st.markdown(f"**Top {len(df_graf)} câmeras — tempo offline em dias**")
-                st.caption("Visão em área por ID da câmera e cidade. Passe o mouse para ver o nome completo da câmera, cliente e tempo detalhado.")
-
-                max_dias = float(df_graf["_dias"].max()) if not df_graf.empty else 1.0
-
-                # Visão de área moderna — ranking por tempo offline em dias.
-                # Mantém o gráfico limpo: eixo X por posição no ranking e detalhes completos no hover.
-                fig_t = go.Figure()
-                x_rank = df_graf["_rank"].tolist()
-                y_dias = df_graf["_dias"].tolist()
-
-                fig_t.add_trace(go.Scatter(
-                    x=x_rank,
-                    y=y_dias,
-                    mode="lines",
-                    line=dict(color="#dc2626", width=0),
-                    fill="tozeroy",
-                    fillcolor="rgba(220, 38, 38, 0.14)",
-                    hoverinfo="skip",
-                    showlegend=False,
-                ))
-
-                fig_t.add_trace(go.Scatter(
-                    x=x_rank,
-                    y=y_dias,
-                    mode="lines+markers",
-                    line=dict(color="#991b1b", width=3, shape="spline", smoothing=0.65),
-                    marker=dict(
-                        size=8,
-                        color=df_graf["_cor"],
-                        line=dict(color="#ffffff", width=1.5),
-                    ),
-                    customdata=df_graf[["_rank", "ID da Câmera", "Cidade", "Nome da Câmera", "Nome Cliente", "_tempo_fmt", "_criticidade"]].values,
-                    hovertemplate=(
-                        "<b>ID %{customdata[1]} · %{customdata[2]}</b><br>"
-                        "Nome da câmera: %{customdata[3]}<br>"
-                        "Cliente: %{customdata[4]}<br>"
-                        "Ranking: #%{customdata[0]}<br>"
-                        "Tempo offline: <b>%{y:.1f} dias</b><br>"
-                        "Tempo detalhado: %{customdata[5]}<br>"
-                        "Status: %{customdata[6]}"
-                        "<extra></extra>"
-                    ),
-                    name="Dias offline",
-                ))
-
-                # Labels fixos removidos para evitar caixas sobrepostas nos pontos.
-                # A identificação completa permanece no eixo X e no hover.
-
-                layout_padrao_top30 = {
-                    k: v for k, v in pdefaults().items()
-                    if k not in ["plot_bgcolor", "paper_bgcolor", "margin"]
-                }
-                tickvals = df_graf["_rank"].tolist()
-                ticktext = df_graf["_label_curto"].tolist()
-                fig_t.update_layout(
-                    **layout_padrao_top30,
-                    height=560,
-                    showlegend=False,
-                    plot_bgcolor="#ffffff",
-                    paper_bgcolor="#ffffff",
-                    hovermode="closest",
-                    xaxis=dict(
-                        title="ID da câmera · Cidade",
-                        tickmode="array",
-                        tickvals=tickvals,
-                        ticktext=ticktext,
-                        gridcolor="rgba(148,163,184,.10)",
-                        tickfont=dict(color="#8B7AA3", size=9),
-                        tickangle=-45,
-                        zeroline=False,
-                        range=[0.5, len(df_graf) + 0.5],
-                    ),
-                    yaxis=dict(
-                        title="Dias offline",
-                        gridcolor="rgba(148,163,184,.16)",
-                        tickfont=dict(color="#8B7AA3", size=10),
-                        zeroline=False,
-                        rangemode="tozero",
-                        ticksuffix="d",
-                    ),
-                    margin=dict(l=70, r=35, t=44, b=145),
-                )
-                st.plotly_chart(fig_t, use_container_width=True, key="top30_cameras_tempo_offline_area_moderno")
-
-            # Tabela detalhada
-            st.markdown(f"**Lista detalhada — {len(df_exib)} câmeras**")
-            df_tbl_t = df_exib[["Nome Cliente","Nome Franqueado","ID da Câmera","Nome da Câmera","Faixa","Última vez Online","Observações","_horas","_td"]].copy()
-            df_tbl_t["Tempo Offline"] = df_tbl_t["_td"].apply(lambda td: fmt_tempo(td) if isinstance(td,timedelta) and td.total_seconds()>=0 else "N/D")
-            df_tbl_t["Última vez Online"] = formatar_ultima_atualizacao(df_tbl_t["Última vez Online"])
-            df_tbl_t["Criticidade"] = df_tbl_t["_horas"].apply(
-                lambda h: "🔴 Crítico (>7 dias)" if h>=168 else (
-                    "🟠 Alto (3–7 dias)" if h>=72 else (
-                        "🟡 Atenção (1–3 dias)" if h>=24 else (
-                            "🟢 Recente (<1 dia)" if h>=0 else "⚫ Sem data"
-                        )
-                    )
-                )
-            )
-            df_tbl_t = df_tbl_t.drop(columns=["_horas","_td"]).reset_index(drop=True)
-            df_tbl_t.index += 1
-            # Reordenar colunas
-            df_tbl_t = df_tbl_t[["Criticidade","Faixa","Tempo Offline","Nome da Câmera","ID da Câmera","Nome Cliente","Nome Franqueado","Última vez Online","Observações"]]
-
-            # Download
-            buf_t = io.BytesIO()
-            df_tbl_t.to_excel(buf_t, index=True, engine="openpyxl")
-            st.download_button("⬇ Exportar lista",
-                data=buf_t.getvalue(),
-                file_name=f"tempo_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_tempo_offline_lista_v1")
-
-            render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
-
-
-
-# ─────────────────────────────────────────────
-# Aba Auditoria › % por Cliente
-# ─────────────────────────────────────────────
-def render_aba_auditoria_pct_cliente(dados: dict) -> None:
-    """Sub-aba % por Cliente da aba Auditoria."""
-    st.caption("Escala 0–100% · Verde 0–5% · Amarelo >5–10% · Vermelho >10%")
-
-    df_bar = pd.DataFrame([
-        {"Cliente": v["nome_cliente"], "Offline": len(v["offline"]),
-         "Total": v["total"],
-         "Pct": round(len(v["offline"])/v["total"]*100, 2) if v["total"] else 0}
-        for v in dados.values()
-    ]).sort_values("Pct", ascending=True)
-
-    fig_bar = go.Figure()
-    fig_bar.add_vrect(x0=0,   x1=10,  fillcolor="rgba(5,150,105,0.06)",  layer="below", line_width=0)
-    fig_bar.add_vrect(x0=10,  x1=15,  fillcolor="rgba(217,119,6,0.06)",  layer="below", line_width=0)
-    fig_bar.add_vrect(x0=15,  x1=100, fillcolor="rgba(220,38,38,0.06)",  layer="below", line_width=0)
-    for xv, lbl in [(5,"5%"),(10,"10%")]:
-        fig_bar.add_vline(x=xv, line_dash="dot", line_color="#C4B5FD", line_width=1.5,
-            annotation_text=lbl, annotation_position="top",
-            annotation_font=dict(color="#8B7AA3", size=10))
-    fig_bar.add_trace(go.Bar(
-        y=df_bar["Cliente"], x=df_bar["Pct"], orientation="h",
-        marker=dict(color=[cor_hex(p) for p in df_bar["Pct"]], line=dict(width=0)),
-        text=[f"{p:.1f}% ({o}/{t})" for p,o,t in zip(df_bar["Pct"],df_bar["Offline"],df_bar["Total"])],
-        textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
-        hovertemplate="<b>%{y}</b><br>%{x:.1f}% offline<extra></extra>",
-    ))
-    fig_bar.update_layout(
-        **pdefaults(), height=max(360, len(df_bar)*34), showlegend=False,
-        xaxis=dict(range=[0,100], ticksuffix="%", gridcolor="#E9D5FF",
-                   tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-        yaxis=dict(tickfont=dict(color="#6B5A7A",size=10), gridcolor="#FAF7FF"),
-        margin=dict(l=10, r=80, t=30, b=10),
-    )
-    st.plotly_chart(fig_bar, use_container_width=True, key="pct_offline_por_cliente_bar_v1")
-
-    st.markdown("---")
-    st.markdown("#### Ranking de criticidade")
-    st.caption("Online (verde) + Offline (vermelho) · Ordenado por % offline")
-
-    df_rank = pd.DataFrame([
-        {"Cliente": v["nome_cliente"], "Franqueado": v["nome_empresa"],
-         "Offline": len(v["offline"]), "Total": v["total"],
-         "% Offline": round(len(v["offline"])/v["total"]*100,2) if v["total"] else 0,
-         "Online": v["total"]-len(v["offline"])}
-        for v in dados.values() if len(v["offline"]) > 0
-    ]).sort_values("% Offline", ascending=False).reset_index(drop=True)
-    df_rank.index += 1
-
-    if df_rank.empty:
-        st.success("🎉 Nenhum cliente com câmeras offline no momento!")
-    else:
-        fig_rank = go.Figure()
-        fig_rank.add_trace(go.Bar(
-            name="Online", y=df_rank["Cliente"], x=df_rank["Online"],
-            orientation="h", marker_color="#14b8a6",
-            hovertemplate="%{y}<br>Online: %{x}<extra></extra>",
-        ))
-        fig_rank.add_trace(go.Bar(
-            name="Offline", y=df_rank["Cliente"], x=df_rank["Offline"],
-            orientation="h", marker_color="#ef4444",
-            text=[f'{p:.1f}%' for p in df_rank["% Offline"]],
-            textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
-            hovertemplate="%{y}<br>Offline: %{x} (%{text})<extra></extra>",
-        ))
-        fig_rank.update_layout(
-            **pdefaults(), barmode="stack",
-            height=max(360, len(df_rank)*40),
-            xaxis=dict(title="Quantidade de câmeras", gridcolor="#E9D5FF",
-                       tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-            yaxis=dict(tickfont=dict(color="#6B5A7A",size=10),
-                       categoryorder="array",
-                       categoryarray=df_rank["Cliente"].tolist()[::-1]),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                        font=dict(color="#8B7AA3",size=11), bgcolor="rgba(0,0,0,0)"),
-            margin=dict(l=10, r=80, t=50, b=10),
-        )
-        st.plotly_chart(fig_rank, use_container_width=True, key="ranking_criticidade_stack_v1")
-
-        st.markdown("---")
-        col_tbl, col_dl = st.columns([5,1])
-        col_tbl.markdown("**Tabela resumo**")
-        buf_r = io.BytesIO()
-        df_rank.to_excel(buf_r, index=True, engine="openpyxl")
-        col_dl.download_button("⬇ Excel", data=buf_r.getvalue(),
-            file_name=f"ranking_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_ranking_criticidade_excel_v1")
-
-        df_show = df_rank[["Cliente","Franqueado","Offline","Total","% Offline"]].copy()
-        df_show["% Offline"] = df_show["% Offline"].apply(lambda x: f"{x:.1f}%")
-        render_dataframe(df_show, height=min(400,(len(df_show)+1)*35+3))
-
-
-
-
-# ─────────────────────────────────────────────
-# Aba Auditoria › LPRs Offline
-# ─────────────────────────────────────────────
-def render_aba_auditoria_lprs(dados: dict, df_origem) -> None:
-    """Sub-aba LPRs Offline da aba Auditoria."""
-    st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
-
-    df_lpr_base = df_origem.copy() if df_origem is not None else pd.DataFrame()
-    if df_lpr_base.empty:
-        st.info("Sem dados carregados para validar LPRs offline.")
-    else:
-        for col in [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU]:
-            if col not in df_lpr_base.columns:
-                df_lpr_base[col] = ""
-
-        df_lpr_base[COL_WL] = df_lpr_base[COL_WL].astype(str).str.strip()
-        df_lpr_base[COL_STATUS] = df_lpr_base[COL_STATUS].astype(str).str.strip().str.upper()
-        df_lpr_base[COL_NOME_CAM] = df_lpr_base[COL_NOME_CAM].astype(str).fillna("")
-
-        # Garante o mesmo universo do dashboard: se existir mapa de clientes, considera apenas esses IDs.
-        clientes_map_lpr = carregar_clientes()
-        if clientes_map_lpr:
-            df_lpr_base = df_lpr_base[df_lpr_base[COL_WL].isin(set(clientes_map_lpr.keys()))].copy()
-
-        mask_lpr = df_lpr_base[COL_NOME_CAM].str.contains("LPR", case=False, na=False)
-        mask_off = df_lpr_base[COL_STATUS].eq("OFFLINE")
-        df_lprs_total = df_lpr_base[mask_lpr].copy()
-        df_lprs_off = df_lpr_base[mask_lpr & mask_off].copy()
-
-        total_lprs = int(len(df_lprs_total))
-        total_lprs_off = int(len(df_lprs_off))
-        clientes_lpr_total = int(df_lprs_total[COL_WL].nunique()) if not df_lprs_total.empty else 0
-        clientes_lpr_off = int(df_lprs_off[COL_WL].nunique()) if not df_lprs_off.empty else 0
-        pct_lpr_off = (total_lprs_off / total_lprs * 100) if total_lprs else 0
-
-        if not df_lprs_off.empty:
-            df_lprs_off["Cliente"] = df_lprs_off[COL_WL].map(clientes_map_lpr).fillna(df_lprs_off[COL_WL].apply(lambda x: f"ID {x}"))
-            df_lprs_off["Franqueado"] = df_lprs_off[COL_EMPRESA].astype(str).replace({"nan": ""}).str.strip()
-            df_lprs_off["Última atualização"] = formatar_ultima_atualizacao(df_lprs_off[COL_ULT_ATU])
-            df_lprs_off["Tempo offline"] = parse_ultima_atualizacao(df_lprs_off[COL_ULT_ATU]).apply(
-                lambda x: fmt_tempo(agora_sao_paulo() - x) if pd.notna(x) else "N/D"
-            )
-
-        st.markdown(f"""
-        <div class="compare-hero">
-            <div class="compare-title">🚘 Radar LPR Offline</div>
-            <div class="compare-sub">Validação operacional das câmeras LPR desconectadas na carteira filtrada.</div>
-        </div>
-        <div class="compare-grid">
-            <div class="compare-card neutral">
-                <div class="compare-label">Total de LPRs</div>
-                <div class="compare-value">{total_lprs}</div>
-                <div class="compare-note">câmeras LPR encontradas na base</div>
-            </div>
-            <div class="compare-card bad">
-                <div class="compare-label">LPRs offline</div>
-                <div class="compare-value" style="color:#dc2626">{total_lprs_off}</div>
-                <div class="compare-note">{pct_lpr_off:.1f}% das LPRs estão offline</div>
-            </div>
-            <div class="compare-card warn">
-                <div class="compare-label">Clientes afetados</div>
-                <div class="compare-value" style="color:#d97706">{clientes_lpr_off}</div>
-                <div class="compare-note">de {clientes_lpr_total} clientes com LPR</div>
-            </div>
-            <div class="compare-card good">
-                <div class="compare-label">LPRs online</div>
-                <div class="compare-value" style="color:#059669">{max(total_lprs - total_lprs_off, 0)}</div>
-                <div class="compare-note">câmeras LPR sem alerta offline</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if df_lprs_off.empty:
-            st.success("Nenhuma câmera LPR offline encontrada na carteira filtrada.")
-        else:
-            df_lpr_cli = (
-                df_lprs_off.groupby([COL_WL, "Cliente", "Franqueado"], as_index=False)
-                .agg(lprs_offline=(COL_ID_CAM, "count"))
-                .sort_values("lprs_offline", ascending=False)
-            )
-
-            st.markdown("#### Clientes com mais LPRs offline")
-            top_lpr_area = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True).copy()
-            top_lpr_area["Cliente eixo"] = top_lpr_area["Cliente"].astype(str)
-            max_lpr_area = max(3, int(top_lpr_area["lprs_offline"].max()) + 1) if not top_lpr_area.empty else 3
-            altura_lpr_area = max(380, min(680, 42 * len(top_lpr_area) + 140))
-
-            fig_lpr_area = go.Figure()
-            fig_lpr_area.add_trace(go.Scatter(
-                name="LPRs offline",
-                x=top_lpr_area["lprs_offline"],
-                y=top_lpr_area["Cliente eixo"],
-                mode="lines+markers+text",
-                fill="tozerox",
-                line=dict(color="#dc2626", width=3.0, shape="spline", smoothing=0.65),
-                marker=dict(color="#dc2626", size=9, line=dict(color="#ffffff", width=1)),
-                fillcolor="rgba(220, 38, 38, 0.18)",
-                text=top_lpr_area["lprs_offline"],
-                textposition="middle right",
-                customdata=top_lpr_area[["Cliente", "Franqueado"]],
-                hovertemplate=(
-                    "<b>%{customdata[0]}</b><br>"
-                    "Franqueado: %{customdata[1]}<br>"
-                    "LPRs offline: %{x}<extra></extra>"
-                ),
-            ))
-            fig_lpr_area.update_layout(
-                **pdefaults(),
-                height=altura_lpr_area,
-                margin=dict(l=10, r=55, t=10, b=35),
-                xaxis=dict(
-                    title="LPRs offline",
-                    range=[0, max_lpr_area],
-                    gridcolor="#E9D5FF",
-                    tickfont=dict(color="#8B7AA3", size=10),
-                    zeroline=False,
-                ),
-                yaxis=dict(
-                    title="",
-                    type="category",
-                    categoryorder="array",
-                    categoryarray=top_lpr_area["Cliente eixo"].tolist(),
-                    tickfont=dict(color="#6B5A7A", size=11),
-                    automargin=True,
-                ),
-                showlegend=False,
-                hovermode="closest",
-            )
-            st.plotly_chart(fig_lpr_area, use_container_width=True, key="lprs_offline_top_clientes_area_horizontal")
-
-            st.markdown("#### Detalhamento das LPRs offline")
-            busca_lpr = st.text_input("Buscar por cliente, franqueado, ID ou nome da câmera", key="busca_lprs_offline")
-            df_lpr_lista = df_lprs_off.copy()
-            if busca_lpr.strip():
-                termo = busca_lpr.strip().lower()
-                texto_busca = (
-                    df_lpr_lista["Cliente"].astype(str) + " " +
-                    df_lpr_lista["Franqueado"].astype(str) + " " +
-                    df_lpr_lista[COL_ID_CAM].astype(str) + " " +
-                    df_lpr_lista[COL_NOME_CAM].astype(str)
-                ).str.lower()
-                df_lpr_lista = df_lpr_lista[texto_busca.str.contains(re.escape(termo), na=False)].copy()
-
-            cols_lpr = ["Cliente", "Franqueado", COL_ID_CAM, COL_NOME_CAM, "Última atualização", "Tempo offline"]
-            df_lpr_lista = df_lpr_lista[cols_lpr].rename(columns={
-                COL_ID_CAM: "ID da Câmera",
-                COL_NOME_CAM: "Nome da Câmera",
-            }).sort_values(["Cliente", "Nome da Câmera"])
-            render_dataframe(df_lpr_lista, height=520)
-
-            csv_lpr = df_lpr_lista.to_csv(index=False, sep=";", encoding="utf-8-sig")
-            st.download_button(
-                "📥 Baixar LPRs offline em CSV",
-                data=csv_lpr,
-                file_name=f"lprs_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key="dl_lprs_offline_csv_v1",
-            )
-
-
-
-
-# ─────────────────────────────────────────────
-# PONTO DE ENTRADA
-# ─────────────────────────────────────────────
-
-
-# ─────────────────────────────────────────────
-# Aba Clientes
-# ─────────────────────────────────────────────
-def render_aba_clientes(ctx: 'ContextoMain') -> None:
-    """Aba Clientes: painel de cards + relatório por franquia."""
-    dados           = ctx.dados
-    df_clientes_ops = ctx.df_clientes_ops
-    tendencias      = ctx.comp['tendencias']
-    delta_offs      = ctx.comp['delta_offs']
-
-    st.markdown("### 🏢 Clientes")
-    st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-    clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia"])
-    with clientes_subtabs[0]:
-        # Quando um cliente está aberto, não renderiza todos os cards novamente.
-        # Isso deixa o clique em "Ver detalhes" muito mais rápido.
-        if "detalhe" not in st.session_state:
-            # Filtros vetorizados.
-            # Agora a aba renderiza todos os clientes do recorte na mesma tela, sem paginação.
-            df_clientes_view = df_clientes_ops.copy()
-            if "ID" in df_clientes_view.columns:
-                df_clientes_view["ID"] = df_clientes_view["ID"].astype(str)
-            for col_txt in ["Cliente", "Franqueado", "Status"]:
-                if col_txt in df_clientes_view.columns:
-                    df_clientes_view[col_txt] = df_clientes_view[col_txt].fillna("").astype(str)
-
-            franqueados = ["Todos"] + sorted([
-                x for x in df_clientes_view["Franqueado"].dropna().unique().tolist()
-                if str(x).strip()
-            ])
-
-            if "status_filter" not in st.session_state:
-                st.session_state["status_filter"] = "Todos"
-
-            st.caption("Clique no grupo para filtrar os clientes conforme a faixa de % offline.")
-            btns = st.columns([1, 1, 1, 1])
-            status_anterior = st.session_state.get("status_filter", "Todos")
-            if btns[0].button("Todos", key="clientes_status_todos"):
-                st.session_state["status_filter"] = "Todos"
-            if btns[1].button("Saudável (0-5%)", key="clientes_status_saudavel"):
-                st.session_state["status_filter"] = "Saudável (0-5%)"
-            if btns[2].button("Atenção (5-10%)", key="clientes_status_atencao"):
-                st.session_state["status_filter"] = "Atenção (5-10%)"
-            if btns[3].button("Crítico (>10%)", key="clientes_status_critico"):
-                st.session_state["status_filter"] = "Crítico (>10%)"
-
-            # Os filtros abaixo ficam dentro de um form para evitar recarregar a aba a cada tecla digitada.
-            with st.form("form_filtros_clientes", clear_on_submit=False):
-                col_search, col_franq, col_min = st.columns([2, 2, 1])
-                with col_search:
-                    busca_input = st.text_input(
-                        "Buscar",
-                        value=st.session_state.get("clientes_busca", ""),
-                        placeholder="Buscar cliente, franqueado ou ID…",
-                        key="clientes_busca_input",
-                    )
-                with col_franq:
-                    filtro_franq_input = st.selectbox(
-                        "Franqueado",
-                        franqueados,
-                        index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
-                        if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
-                        key="clientes_franq_input",
-                    )
-                with col_min:
-                    min_opcoes = [0, 10, 50, 100, 200]
-                    min_cameras_input = st.selectbox(
-                        "Min. câmeras",
-                        min_opcoes,
-                        index=min_opcoes.index(st.session_state.get("clientes_min", 0))
-                        if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
-                        key="clientes_min_input",
-                    )
-                aplicar_filtros = st.form_submit_button("Aplicar filtros · Clientes", use_container_width=True)
-
-            if aplicar_filtros:
-                st.session_state["clientes_busca"] = busca_input
-                st.session_state["clientes_franq"] = filtro_franq_input
-                st.session_state["clientes_min"] = min_cameras_input
-
-            busca = st.session_state.get("clientes_busca", "").strip()
-            filtro_franq = st.session_state.get("clientes_franq", "Todos")
-            min_cameras = st.session_state.get("clientes_min", 0)
-            filtro = st.session_state.get("status_filter", "Todos")
-
-            # Filtro vetorizado: evita loop com df_clientes_ops[df_clientes_ops['ID'] == wl_id].iloc[0].
-            mask = pd.Series(True, index=df_clientes_view.index)
-            if busca:
-                termo = busca.upper()
-                texto_busca = (
-                    df_clientes_view.get("Cliente", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                    + " " + df_clientes_view.get("Franqueado", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                    + " " + df_clientes_view.get("ID", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
-                )
-                mask &= texto_busca.str.contains(re.escape(termo), na=False)
-            if filtro_franq != "Todos":
-                mask &= df_clientes_view["Franqueado"].eq(filtro_franq)
-            if filtro != "Todos":
-                mask &= df_clientes_view["Status"].eq(filtro)
-            if min_cameras:
-                mask &= pd.to_numeric(df_clientes_view["Total"], errors="coerce").fillna(0).ge(min_cameras)
-
-            df_filtrado = df_clientes_view.loc[mask].copy()
-            if not df_filtrado.empty:
-                df_filtrado = df_filtrado.sort_values("% Offline", ascending=False).reset_index(drop=True)
-
-            if df_filtrado.empty:
-                st.info("Nenhum cliente encontrado com os filtros aplicados.")
-            else:
-                total_clientes_recorte = len(df_filtrado)
-
-                c_res, c_dl = st.columns([4, 1.4])
-                c_res.caption(
-                    f"{total_clientes_recorte} clientes no recorte · "
-                    f"{int(df_filtrado['Offline'].sum())} câmeras offline · "
-                    f"exibindo todos os clientes"
-                )
-
-                buf_filtro = io.BytesIO()
-                df_filtrado.drop(columns=["_score", "_max_horas"], errors="ignore").to_excel(
-                    buf_filtro, index=False, engine="openpyxl"
-                )
-                c_dl.download_button(
-                    "⬇ Exportar recorte",
-                    key="dl_clientes_filtrados_recorte_v1",
-                    data=buf_filtro.getvalue(),
-                    file_name=f"clientes_filtrados_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                buffer_cams = io.BytesIO()
+                with pd.ExcelWriter(buffer_cams, engine="openpyxl") as writer:
+                    df_base_cameras_novas.to_excel(writer, index=False, sheet_name="Cameras Novas")
+                st.download_button(
+                    "⬇ Baixar câmeras novas em Excel",
+                    key="dl_cameras_novas_excel_v1",
+                    data=buffer_cams.getvalue(),
+                    file_name=f"cameras_novas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
+            elif len(snapshot_ids) == 2 and detalhe_cameras_disponivel:
+                st.info("Nenhuma câmera nova foi identificada entre o snapshot atual e o anterior.")
+            elif len(snapshot_ids) == 2:
+                st.warning(
+                    "O resumo de crescimento existe, mas o detalhamento por ID de câmera ainda não está disponível "
+                    "para esses snapshots antigos. Salve um novo snapshot com esta versão e, na próxima comparação, "
+                    "o sistema exibirá Cliente, Franqueado, ID da Câmera, Nome da Câmera e Última Vez Online."
+                )
 
-                ids_f = df_filtrado["ID"].astype(str).tolist()
-
-                for linha in [ids_f[i:i + COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
-                    cols = st.columns(COLUNAS_PAINEL)
-                    for col, wl_id in zip(cols, linha):
-                        if wl_id in dados:
-                            render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
-
-        # ── Detalhe de um cliente ──
-        if "detalhe" in st.session_state:
-            wl_id  = st.session_state["detalhe"]
-            v      = dados.get(wl_id, {"nome_cliente":"?","nome_empresa":"","offline":pd.DataFrame(),"total":0})
-            df_det = v["offline"].copy()
-            total_u= v["total"]
-            pct_d  = round(len(df_det)/total_u*100, 1) if total_u else 0
-            cor_d  = cor_hex(pct_d)
-            agora  = agora_sao_paulo()
-            nome_cliente_html = escape_html(v.get("cidade_estado") or v["nome_cliente"])
-            nome_empresa_html = escape_html(v["nome_empresa"])
-            wl_id_html = escape_html(wl_id)
-
-            st.markdown("<hr>", unsafe_allow_html=True)
-            html_det = (
-                '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap">'
-                '<div style="background:rgba(0,136,204,.12);border:1px solid rgba(0,136,204,.22);'
-                'border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;'
-                'color:#6D28D9;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento</div>'
-                '<div>'
-                + f'<div style="font-size:20px;font-weight:700;color:#7C3AED">{nome_cliente_html}</div>'
-                + f'<div style="font-size:12px;color:#8B7AA3">{nome_empresa_html} · ID: {wl_id_html}</div>'
-                + '</div>'
-                + f'<div style="margin-left:auto;font-size:13px;font-weight:700;color:{cor_d}">'
-                + f'{len(df_det)} offline de {total_u} câmeras ({pct_d}%)'
-                + '</div>'
-                + '</div>'
-            )
-            st.markdown(html_det, unsafe_allow_html=True)
-
-            df_cli_row = df_clientes_ops[df_clientes_ops["ID"] == wl_id]
-            if not df_cli_row.empty:
-                cli_row = df_cli_row.iloc[0]
-                delta_txt = "N/D" if pd.isna(cli_row["Delta Offline"]) else f"{int(cli_row['Delta Offline']):+d}"
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("Total", int(cli_row["Total"]))
-                m2.metric("Offline", int(cli_row["Offline"]), delta=delta_txt if delta_txt != "N/D" else None)
-                m3.metric("% Offline", f"{cli_row['% Offline']:.1f}%")
-                m4.metric("Maior tempo", cli_row["Maior Tempo"])
-
-            if df_det.empty:
-                st.success("Nenhuma câmera offline.")
+                if not df_base_delta.empty:
+                    st.markdown("#### Resumo por cliente disponível")
+                    df_base_show = df_base_delta.copy()
+                    df_base_show["Variação"] = df_base_show["Variação"].apply(lambda v: f"{v:+d}")
+                    render_dataframe(
+                        df_base_show,
+                        height=min(620, (len(df_base_show) + 1) * 35 + 3)
+                    )
             else:
-                # Selecionar colunas relevantes e renomear para exibição
-                col_map = {
-                    COL_ID_CAM:   "ID da Câmera",
-                    COL_NOME_CAM: "Nome da Câmera",
-                    COL_ULT_ATU:  "Última vez Online",
-                    COL_OBS:      "Observações",
-                }
-                internal_cols = {COL_WL, COL_EMPRESA, COL_STATUS, "_tempo_off"}
-                base_cols = [COL_ID_CAM, COL_NOME_CAM, COL_ULT_ATU, COL_OBS]
-                cols_ex = [c for c in base_cols if c in df_det.columns] + [c for c in df_det.columns if c not in internal_cols and c not in base_cols]
+                st.info("Salve ao menos dois snapshots para comparar o crescimento da base.")
 
-                if COL_ULT_ATU in df_det.columns:
-                    # Já vem ordenado por tempo offline (mais antigo primeiro)
-                    df_show = df_det[cols_ex].copy()
-                    df_show = df_show.rename(columns=col_map)
+            if st.button("Ocultar detalhamento", key="base_delta_ocultar"):
+                st.session_state["mostrar_base_delta"] = False
+                st.rerun()
 
-                    # Adicionar coluna de tempo offline calculado
-                    if "Última vez Online" in df_show.columns:
-                        df_show.insert(
-                            df_show.columns.get_loc("Última vez Online") + 1,
-                            "Tempo Offline",
-                            df_det["_tempo_off"].apply(
-                                lambda td: fmt_tempo(td) if td.total_seconds() >= 0 else "N/D"
-                            ).values
+        if st.session_state["audit_categoria"]:
+            categoria = st.session_state["audit_categoria"]
+            df_audit = df_clientes_ops.copy()
+            if categoria == "Saudável (0-5%)":
+                mask = df_audit["% Offline"] <= 5
+            elif categoria == "Atenção (5-10%)":
+                mask = (df_audit["% Offline"] > 5) & (df_audit["% Offline"] <= 10)
+            else:
+                mask = df_audit["% Offline"] > 10
+
+            df_audit = df_audit.loc[mask, ["Cliente", "Franqueado", "% Offline"]].copy()
+            df_audit["% Offline"] = df_audit["% Offline"].round(1)
+            df_audit = df_audit.sort_values("% Offline", ascending=False).reset_index(drop=True)
+            st.markdown(f"### Clientes na faixa: {categoria}")
+            if df_audit.empty:
+                st.info("Nenhum cliente encontrado nessa faixa.")
+            else:
+                render_dataframe(df_audit, height=min(500, (len(df_audit)+1)*35 + 3))
+            if st.button("Limpar seleção", key="audit_clear"):
+                st.session_state["audit_categoria"] = None
+
+        if saude.get("colunas_faltando"):
+            st.warning(f"Colunas ausentes no CSV: {', '.join(saude['colunas_faltando'])}")
+        elif saude.get("datas_futuras", 0):
+            st.warning(f"{saude['datas_futuras']} registros têm data futura. Revise o formato de data da extração.")
+        elif saude.get("datas_invalidas", 0):
+            st.warning(f"{saude['datas_invalidas']} registros têm data inválida e foram marcados como N/D.")
+
+        st.markdown("""
+        <div class="audit-section-title">
+            <strong>Evidências visuais</strong>
+            <span>Distribuição do risco e clientes com maior exposição</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_gauge, col_pie, col_top = st.columns([1,1,1], gap="large")
+
+        with col_gauge:
+            # Gauge invertido: agora exibe o percentual ONLINE do GOV.
+            # Exemplo: 8% offline = 92% online.
+            pct_online_global = round(100 - pct_global, 2) if total_cameras else 0
+
+            st.markdown("**% Total de Câmeras ONLINE GOV**")
+
+            # Para o gauge online, quanto maior o percentual, melhor.
+            if pct_online_global >= 95:
+                cor_g = "#14b8a6"
+            elif pct_online_global >= 90:
+                cor_g = "#f59e0b"
+            else:
+                cor_g = "#ef4444"
+
+            fig_g = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=pct_online_global,
+                number=dict(suffix="%", font=dict(color=cor_g, size=48, family="DM Mono")),
+                gauge=dict(
+                    shape="angular",
+                    axis=dict(range=[0,100], showticklabels=False, ticks="", visible=False),
+                    bar=dict(color=cor_g, thickness=0.34),
+                    bgcolor="#FAF7FF",
+                    borderwidth=0,
+                    steps=[
+                        dict(range=[0,90],   color="#fecaca"),
+                        dict(range=[90,95],  color="#fde68a"),
+                        dict(range=[95,100], color="#a7f3d0"),
+                    ],
+                    threshold=dict(line=dict(color="#6B5A7A", width=4), thickness=0.75, value=pct_online_global),
+                ),
+            ))
+            layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+            fig_g.update_layout(
+                **layout_defaults,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                height=300,
+                margin=dict(l=0,r=0,t=10,b=0),
+                annotations=[
+                    dict(
+                        text=f"<span style='font-size:12px;color:#8B7AA3;font-family:DM Sans'>Câmeras operacionais</span>",
+                        x=0.5, y=0.08, showarrow=False, xanchor="center"
+                    )
+                ],
+            )
+            st.plotly_chart(fig_g, use_container_width=True, key="gauge_online_gov")
+
+        with col_pie:
+            pct_saudavel_card = round(n_saudavel / total_clientes * 100, 1) if total_clientes else 0
+            pct_atencao_card = round(n_atencao / total_clientes * 100, 1) if total_clientes else 0
+            pct_critico_card = round(n_critico / total_clientes * 100, 1) if total_clientes else 0
+
+            if n_critico > 0:
+                status_saude_titulo = "Atenção crítica"
+                status_saude_cor = "#dc2626"
+                status_saude_msg = f"{n_critico} cliente(s) acima de 10% offline"
+            elif n_atencao > 0:
+                status_saude_titulo = "Monitoramento"
+                status_saude_cor = "#d97706"
+                status_saude_msg = f"{n_atencao} cliente(s) entre 5% e 10% offline"
+            else:
+                status_saude_titulo = "Saudável"
+                status_saude_cor = "#059669"
+                status_saude_msg = "Todos os clientes até 5% offline"
+
+            st.markdown("**% Total de Câmeras ONLINE GOV**")
+
+            fig_pie = go.Figure(go.Pie(
+                labels=["Crítico", "Atenção", "Saudável"],
+                values=[n_critico, n_atencao, n_saudavel],
+                hole=0.68,
+                sort=False,
+                direction="clockwise",
+                marker=dict(
+                    colors=["#dc2626", "#f59e0b", "#14b8a6"],
+                    line=dict(color="#ffffff", width=4)
+                ),
+                textinfo="none",
+                hovertemplate="<b>%{label}</b><br>%{value} clientes<br>%{percent}<extra></extra>",
+            ))
+            fig_pie.update_traces(
+                rotation=90,
+                pull=[0.055 if n_critico else 0, 0.035 if n_atencao else 0, 0],
+            )
+            fig_pie.add_annotation(
+                text=(
+                    f"<span style='font-size:26px;font-weight:800;color:#171126;font-family:DM Mono'>{total_clientes}</span>"
+                    f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans'>clientes</span>"
+                    f"<br><span style='font-size:10px;color:#6B5A7A;font-family:DM Sans;font-weight:700'>{pct_saudavel_card:.1f}% saudáveis</span>"
+                ),
+                x=0.5, y=0.5, showarrow=False,
+            )
+            layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+            fig_pie.update_layout(
+                **layout_defaults,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                height=250,
+                showlegend=False,
+                margin=dict(l=4, r=4, t=8, b=4),
+            )
+            st.plotly_chart(fig_pie, use_container_width=True, key="pie_clientes_faixa_saude_moderno")
+
+            st.markdown(f"""
+                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:-8px">
+                    <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:9px 8px;text-align:center">
+                        <div style="font-size:10px;color:#0f766e;font-weight:800;text-transform:uppercase">Saudável</div>
+                        <div style="font-size:20px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:800">{n_saudavel}</div>
+                        <div style="font-size:10px;color:#7C6A91">0–5% · {pct_saudavel_card:.1f}%</div>
+                    </div>
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 8px;text-align:center">
+                        <div style="font-size:10px;color:#b45309;font-weight:800;text-transform:uppercase">Atenção</div>
+                        <div style="font-size:20px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:800">{n_atencao}</div>
+                        <div style="font-size:10px;color:#7C6A91">5–10% · {pct_atencao_card:.1f}%</div>
+                    </div>
+                    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 8px;text-align:center">
+                        <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase">Crítico</div>
+                        <div style="font-size:20px;color:#dc2626;font-family:'DM Mono',monospace;font-weight:800">{n_critico}</div>
+                        <div style="font-size:10px;color:#7C6A91">&gt;10% · {pct_critico_card:.1f}%</div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+        with col_top:
+            st.markdown("**Top 5 clientes mais críticos**")
+            rows_top = [
+                {"Cliente": v["nome_cliente"],
+                 "Franqueado": v["nome_empresa"],
+                 "Pct": round(len(v["offline"])/v["total"]*100, 1) if v["total"] else 0,
+                 "Off": len(v["offline"]), "Tot": v["total"]}
+                for v in dados.values() if len(v["offline"]) > 0
+            ]
+            df_top = (
+                pd.DataFrame(rows_top).sort_values("Pct", ascending=False).head(5)
+                if rows_top else pd.DataFrame()
+            )
+
+            if df_top.empty:
+                st.success("🎉 Todos os clientes estão operacionais!")
+            else:
+                for _, row in df_top.iterrows():
+                    cor = cor_hex(row["Pct"])
+                    cliente_html = escape_html(row["Cliente"])
+                    franqueado_html = escape_html(row["Franqueado"])
+                    pct_html = f"{row['Pct']:.1f}%"
+                    width_pct = min(row["Pct"], 100)
+                    offline_text = f"{int(row['Off'])} offline de {int(row['Tot'])}"
+                    st.markdown(f"""
+                    <div style="margin-bottom:14px">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                            <span style="font-size:12px;color:#171126;font-weight:600">{cliente_html}</span>
+                            <span style="font-family:'DM Mono',monospace;font-size:12px;color:{cor};font-weight:700">{pct_html}</span>
+                        </div>
+                        <div style="font-size:10px;color:#8B7AA3;margin-bottom:4px">{franqueado_html}</div>
+                        <div style="height:5px;background:#E9D5FF;border-radius:99px;overflow:hidden">
+                            <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
+                        </div>
+                        <div style="font-size:10px;color:#8B7AA3;margin-top:3px">{offline_text}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown("**Mapa de calor — % offline por cliente**")
+        # Inclui todos os clientes cadastrados no nome_clientes.xlsx,
+        # mesmo aqueles sem câmeras no CSV (aparecem com 0%).
+        rows_heat = []
+        for v in dados.values():
+            rows_heat.append({
+                "Cliente": v["nome_cliente"],
+                "Pct": round(len(v["offline"]) / v["total"] * 100, 2) if v["total"] else 0,
+            })
+        clientes_no_csv = {v["nome_cliente"] for v in dados.values()}
+        for wl_id, nome in clientes_map.items():
+            if nome not in clientes_no_csv:
+                rows_heat.append({"Cliente": nome, "Pct": 0.0})
+        df_heat = pd.DataFrame(rows_heat).sort_values("Pct", ascending=False)
+
+        fig_map, mapa_msg = montar_mapa_cidades(df_origem)
+        if fig_map is not None:
+            st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
+            st.caption(mapa_msg)
+        else:
+            st.info(mapa_msg)
+
+        fig_heat = go.Figure(go.Bar(
+            x=df_heat["Cliente"], y=df_heat["Pct"],
+            marker=dict(
+                color=df_heat["Pct"],
+                colorscale=[
+                    [0.0, "#dff8f3"],
+                    [0.10, "#14b8a6"],
+                    [0.12, "#fde047"],
+                    [0.15, "#f59e0b"],
+                    [0.40, "#ef4444"],
+                    [1.0, "#b91c1c"],
+                ],
+                cmin=0, cmax=100, line=dict(width=0),
+            ),
+            hovertemplate="<b>%{x}</b><br>%{y:.1f}% offline<extra></extra>",
+        ))
+        layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+        _heat_height = max(300, min(len(df_heat) * 22, 600))
+        fig_heat.update_layout(
+            **layout_defaults,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            height=_heat_height,
+            xaxis=dict(tickfont=dict(color="#8B7AA3",size=10), tickangle=-45),
+            yaxis=dict(ticksuffix="%", gridcolor="#E9D5FF",
+                       tickfont=dict(color="#8B7AA3",size=10),
+                       range=[0, max(df_heat["Pct"].max()*1.2, 10)]),
+            margin=dict(l=10,r=10,t=10,b=110),
+        )
+        st.plotly_chart(fig_heat, use_container_width=True, key="heatmap_clientes_operacao_v1")
+
+    # ════════════════════════════════════════════
+    # ABA 1 — PAINEL DE CLIENTES
+    # ════════════════════════════════════════════
+    with tabs[1]:
+        st.markdown("### 🏢 Clientes")
+        st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia"])
+        with clientes_subtabs[0]:
+            # Quando um cliente está aberto, não renderiza todos os cards novamente.
+            # Isso deixa o clique em "Ver detalhes" muito mais rápido.
+            if "detalhe" not in st.session_state:
+                # Filtros vetorizados.
+                # Agora a aba renderiza todos os clientes do recorte na mesma tela, sem paginação.
+                df_clientes_view = df_clientes_ops.copy()
+                if "ID" in df_clientes_view.columns:
+                    df_clientes_view["ID"] = df_clientes_view["ID"].astype(str)
+                for col_txt in ["Cliente", "Franqueado", "Status"]:
+                    if col_txt in df_clientes_view.columns:
+                        df_clientes_view[col_txt] = df_clientes_view[col_txt].fillna("").astype(str)
+    
+                franqueados = ["Todos"] + sorted([
+                    x for x in df_clientes_view["Franqueado"].dropna().unique().tolist()
+                    if str(x).strip()
+                ])
+    
+                if "status_filter" not in st.session_state:
+                    st.session_state["status_filter"] = "Todos"
+    
+                st.caption("Clique no grupo para filtrar os clientes conforme a faixa de % offline.")
+                btns = st.columns([1, 1, 1, 1])
+                status_anterior = st.session_state.get("status_filter", "Todos")
+                if btns[0].button("Todos", key="clientes_status_todos"):
+                    st.session_state["status_filter"] = "Todos"
+                if btns[1].button("Saudável (0-5%)", key="clientes_status_saudavel"):
+                    st.session_state["status_filter"] = "Saudável (0-5%)"
+                if btns[2].button("Atenção (5-10%)", key="clientes_status_atencao"):
+                    st.session_state["status_filter"] = "Atenção (5-10%)"
+                if btns[3].button("Crítico (>10%)", key="clientes_status_critico"):
+                    st.session_state["status_filter"] = "Crítico (>10%)"
+    
+                # Os filtros abaixo ficam dentro de um form para evitar recarregar a aba a cada tecla digitada.
+                with st.form("form_filtros_clientes", clear_on_submit=False):
+                    col_search, col_franq, col_min = st.columns([2, 2, 1])
+                    with col_search:
+                        busca_input = st.text_input(
+                            "Buscar",
+                            value=st.session_state.get("clientes_busca", ""),
+                            placeholder="Buscar cliente, franqueado ou ID…",
+                            key="clientes_busca_input",
                         )
-
-                    # Formatar data
-                    if "Última vez Online" in df_show.columns:
-                        df_show["Última vez Online"] = formatar_ultima_atualizacao(df_show["Última vez Online"])
+                    with col_franq:
+                        filtro_franq_input = st.selectbox(
+                            "Franqueado",
+                            franqueados,
+                            index=franqueados.index(st.session_state.get("clientes_franq", "Todos"))
+                            if st.session_state.get("clientes_franq", "Todos") in franqueados else 0,
+                            key="clientes_franq_input",
+                        )
+                    with col_min:
+                        min_opcoes = [0, 10, 50, 100, 200]
+                        min_cameras_input = st.selectbox(
+                            "Min. câmeras",
+                            min_opcoes,
+                            index=min_opcoes.index(st.session_state.get("clientes_min", 0))
+                            if st.session_state.get("clientes_min", 0) in min_opcoes else 0,
+                            key="clientes_min_input",
+                        )
+                    aplicar_filtros = st.form_submit_button("Aplicar filtros · Clientes", use_container_width=True)
+    
+                if aplicar_filtros:
+                    st.session_state["clientes_busca"] = busca_input
+                    st.session_state["clientes_franq"] = filtro_franq_input
+                    st.session_state["clientes_min"] = min_cameras_input
+    
+                busca = st.session_state.get("clientes_busca", "").strip()
+                filtro_franq = st.session_state.get("clientes_franq", "Todos")
+                min_cameras = st.session_state.get("clientes_min", 0)
+                filtro = st.session_state.get("status_filter", "Todos")
+    
+                # Filtro vetorizado: evita loop com df_clientes_ops[df_clientes_ops['ID'] == wl_id].iloc[0].
+                mask = pd.Series(True, index=df_clientes_view.index)
+                if busca:
+                    termo = busca.upper()
+                    texto_busca = (
+                        df_clientes_view.get("Cliente", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                        + " " + df_clientes_view.get("Franqueado", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                        + " " + df_clientes_view.get("ID", pd.Series("", index=df_clientes_view.index)).astype(str).str.upper()
+                    )
+                    mask &= texto_busca.str.contains(re.escape(termo), na=False)
+                if filtro_franq != "Todos":
+                    mask &= df_clientes_view["Franqueado"].eq(filtro_franq)
+                if filtro != "Todos":
+                    mask &= df_clientes_view["Status"].eq(filtro)
+                if min_cameras:
+                    mask &= pd.to_numeric(df_clientes_view["Total"], errors="coerce").fillna(0).ge(min_cameras)
+    
+                df_filtrado = df_clientes_view.loc[mask].copy()
+                if not df_filtrado.empty:
+                    df_filtrado = df_filtrado.sort_values("% Offline", ascending=False).reset_index(drop=True)
+    
+                if df_filtrado.empty:
+                    st.info("Nenhum cliente encontrado com os filtros aplicados.")
                 else:
-                    df_show = df_det[cols_ex].copy().rename(columns=col_map)
-
-                df_show = df_show.reset_index(drop=True)
-                df_show.index += 1
-                st.caption(f"⬆ Ordenado por tempo offline — quem está há mais tempo sem sinal aparece primeiro")
-                render_dataframe(df_show, height=min(500,(len(df_show)+1)*35+3))
-
-                # Botões de exportação do detalhe (XLSX e CSV)
-                buf_xlsx = io.BytesIO()
-                df_show.to_excel(buf_xlsx, index=True, engine="openpyxl")
-                buf_xlsx.seek(0)
-
-                buf_csv = io.StringIO()
-                df_show.to_csv(buf_csv, index=True)
-                buf_csv.seek(0)
-
-                dl_col1, dl_col2 = st.columns([1,1])
-                with dl_col1:
-                    st.download_button(
-                        label="⬇ Exportar detalhe (.xlsx)",
-                        data=buf_xlsx.getvalue(),
-                        file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                    total_clientes_recorte = len(df_filtrado)
+    
+                    c_res, c_dl = st.columns([4, 1.4])
+                    c_res.caption(
+                        f"{total_clientes_recorte} clientes no recorte · "
+                        f"{int(df_filtrado['Offline'].sum())} câmeras offline · "
+                        f"exibindo todos os clientes"
+                    )
+    
+                    buf_filtro = io.BytesIO()
+                    df_filtrado.drop(columns=["_score", "_max_horas"], errors="ignore").to_excel(
+                        buf_filtro, index=False, engine="openpyxl"
+                    )
+                    c_dl.download_button(
+                        "⬇ Exportar recorte",
+                        key="dl_clientes_filtrados_recorte_v1",
+                        data=buf_filtro.getvalue(),
+                        file_name=f"clientes_filtrados_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
-                        key=f"dl_detalhe_cliente_xlsx_{str(wl_id)}_aba",
                     )
-                with dl_col2:
-                    st.download_button(
-                        label="⬇ Exportar detalhe (.csv)",
-                        data=buf_csv.getvalue(),
-                        file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        key=f"dl_detalhe_cliente_csv_{str(wl_id)}_aba",
-                    )
+    
+                    ids_f = df_filtrado["ID"].astype(str).tolist()
+    
+                    for linha in [ids_f[i:i + COLUNAS_PAINEL] for i in range(0, len(ids_f), COLUNAS_PAINEL)]:
+                        cols = st.columns(COLUNAS_PAINEL)
+                        for col, wl_id in zip(cols, linha):
+                            if wl_id in dados:
+                                render_card(col, wl_id, dados[wl_id], tendencias.get(wl_id), delta_offs.get(wl_id))
+    
+            # ── Detalhe de um cliente ──
+            if "detalhe" in st.session_state:
+                wl_id  = st.session_state["detalhe"]
+                v      = dados.get(wl_id, {"nome_cliente":"?","nome_empresa":"","offline":pd.DataFrame(),"total":0})
+                df_det = v["offline"].copy()
+                total_u= v["total"]
+                pct_d  = round(len(df_det)/total_u*100, 1) if total_u else 0
+                cor_d  = cor_hex(pct_d)
+                agora  = agora_sao_paulo()
+                nome_cliente_html = escape_html(v.get("cidade_estado") or v["nome_cliente"])
+                nome_empresa_html = escape_html(v["nome_empresa"])
+                wl_id_html = escape_html(wl_id)
 
-                # Mini-métricas de tempo
-                if "_tempo_off" in df_det.columns:
-                    validos = df_det["_tempo_off"][df_det["_tempo_off"].dt.total_seconds() >= 0]
-                    if not validos.empty:
-                        col_t1, col_t2, col_t3 = st.columns(3)
-                        mais_antigo = validos.max()
-                        media_td    = validos.mean()
-                        acima_24h   = (validos.dt.total_seconds() >= 86400).sum()
-                        col_t1.metric("⏱️ Mais tempo offline", fmt_tempo(mais_antigo))
-                        col_t2.metric("📊 Tempo médio offline", fmt_tempo(media_td))
-                        col_t3.metric("🔴 Acima de 24h", f"{acima_24h} câmeras")
+                st.markdown("<hr>", unsafe_allow_html=True)
+                html_det = (
+                    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem;flex-wrap:wrap">'
+                    '<div style="background:rgba(0,136,204,.12);border:1px solid rgba(0,136,204,.22);'
+                    'border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;'
+                    'color:#6D28D9;text-transform:uppercase;letter-spacing:.5px">📍 Detalhamento</div>'
+                    '<div>'
+                    + f'<div style="font-size:20px;font-weight:700;color:#7C3AED">{nome_cliente_html}</div>'
+                    + f'<div style="font-size:12px;color:#8B7AA3">{nome_empresa_html} · ID: {wl_id_html}</div>'
+                    + '</div>'
+                    + f'<div style="margin-left:auto;font-size:13px;font-weight:700;color:{cor_d}">'
+                    + f'{len(df_det)} offline de {total_u} câmeras ({pct_d}%)'
+                    + '</div>'
+                    + '</div>'
+                )
+                st.markdown(html_det, unsafe_allow_html=True)
 
-            st.markdown("<hr>", unsafe_allow_html=True)
-            render_grafico_evolucao_cliente(wl_id)
+                df_cli_row = df_clientes_ops[df_clientes_ops["ID"] == wl_id]
+                if not df_cli_row.empty:
+                    cli_row = df_cli_row.iloc[0]
+                    delta_txt = "N/D" if pd.isna(cli_row["Delta Offline"]) else f"{int(cli_row['Delta Offline']):+d}"
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1.metric("Total", int(cli_row["Total"]))
+                    m2.metric("Offline", int(cli_row["Offline"]), delta=delta_txt if delta_txt != "N/D" else None)
+                    m3.metric("% Offline", f"{cli_row['% Offline']:.1f}%")
+                    m4.metric("Maior tempo", cli_row["Maior Tempo"])
 
-            # ─────────────────────────────────────────────
-            # SEÇÃO DE AÇÕES DO CLIENTE
-            # ─────────────────────────────────────────────
-            st.markdown("<hr>", unsafe_allow_html=True)
-            st.markdown("### 📋 Ações a realizar")
+                if df_det.empty:
+                    st.success("Nenhuma câmera offline.")
+                else:
+                    # Selecionar colunas relevantes e renomear para exibição
+                    col_map = {
+                        COL_ID_CAM:   "ID da Câmera",
+                        COL_NOME_CAM: "Nome da Câmera",
+                        COL_ULT_ATU:  "Última vez Online",
+                        COL_OBS:      "Observações",
+                    }
+                    internal_cols = {COL_WL, COL_EMPRESA, COL_STATUS, "_tempo_off"}
+                    base_cols = [COL_ID_CAM, COL_NOME_CAM, COL_ULT_ATU, COL_OBS]
+                    cols_ex = [c for c in base_cols if c in df_det.columns] + [c for c in df_det.columns if c not in internal_cols and c not in base_cols]
 
-            # Verificar configuração
-            if not supabase_configurado():
-                st.warning("⚠️ Supabase não configurado. As ações não podem ser salvas.")
-            else:
-                tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
-                if not tabela_existe:
-                    st.error("🚨 Não foi possível acessar a tabela acoes_clientes")
-                    st.info(msg_tabela)
+                    if COL_ULT_ATU in df_det.columns:
+                        # Já vem ordenado por tempo offline (mais antigo primeiro)
+                        df_show = df_det[cols_ex].copy()
+                        df_show = df_show.rename(columns=col_map)
 
-            with st.expander("✏️ Gerenciar ações", expanded=False):
-                # Carregar ações existentes
-                df_acoes = carregar_acoes_cliente(wl_id)
+                        # Adicionar coluna de tempo offline calculado
+                        if "Última vez Online" in df_show.columns:
+                            df_show.insert(
+                                df_show.columns.get_loc("Última vez Online") + 1,
+                                "Tempo Offline",
+                                df_det["_tempo_off"].apply(
+                                    lambda td: fmt_tempo(td) if td.total_seconds() >= 0 else "N/D"
+                                ).values
+                            )
 
-                if df_acoes is not None and not df_acoes.empty:
-                    st.subheader("Ações registradas")
-                    for idx_acao, (_, acao) in enumerate(df_acoes.iterrows()):
-                        col_acao_data, col_acao_status, col_acao_del = st.columns([3, 1.5, 1])
+                        # Formatar data
+                        if "Última vez Online" in df_show.columns:
+                            df_show["Última vez Online"] = formatar_ultima_atualizacao(df_show["Última vez Online"])
+                    else:
+                        df_show = df_det[cols_ex].copy().rename(columns=col_map)
 
-                        data_criacao = acao.get("data_criacao", "N/D")
-                        if isinstance(data_criacao, str) and "T" in data_criacao:
-                            data_criacao = data_criacao.split("T")[0]
+                    df_show = df_show.reset_index(drop=True)
+                    df_show.index += 1
+                    st.caption(f"⬆ Ordenado por tempo offline — quem está há mais tempo sem sinal aparece primeiro")
+                    render_dataframe(df_show, height=min(500,(len(df_show)+1)*35+3))
 
-                        status_atual = acao.get("status_acao", "Pendente")
+                    # Botões de exportação do detalhe (XLSX e CSV)
+                    buf_xlsx = io.BytesIO()
+                    df_show.to_excel(buf_xlsx, index=True, engine="openpyxl")
+                    buf_xlsx.seek(0)
 
-                        with col_acao_data:
-                            st.markdown(f"""
-                            <div style="padding:12px 14px;background:#f8fafc;border:1px solid #E9D5FF;border-radius:8px">
-                                <div style="font-size:11px;color:#8B7AA3;font-weight:700;text-transform:uppercase;margin-bottom:4px">Ação</div>
-                                <div style="font-size:13px;color:#171126;margin-bottom:8px"><strong>{acao.get('o_que_foi_feito', 'N/D')}</strong></div>
-                                <div style="font-size:10px;color:#8B7AA3">📅 {data_criacao}</div>
-                                {f"<div style='font-size:10px;color:#8B7AA3'>⏰ Prazo: {acao.get('prazo_ajustes', 'Sem prazo')}</div>" if acao.get('prazo_ajustes') else ""}
-                            </div>
-                            """, unsafe_allow_html=True)
+                    buf_csv = io.StringIO()
+                    df_show.to_csv(buf_csv, index=True)
+                    buf_csv.seek(0)
 
-                        with col_acao_status:
-                            novo_status = st.selectbox(
+                    dl_col1, dl_col2 = st.columns([1,1])
+                    with dl_col1:
+                        st.download_button(
+                            label="⬇ Exportar detalhe (.xlsx)",
+                            data=buf_xlsx.getvalue(),
+                            file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key=f"dl_detalhe_cliente_xlsx_{str(wl_id)}_aba",
+                        )
+                    with dl_col2:
+                        st.download_button(
+                            label="⬇ Exportar detalhe (.csv)",
+                            data=buf_csv.getvalue(),
+                            file_name=f"detalhe_cliente_{wl_id}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"dl_detalhe_cliente_csv_{str(wl_id)}_aba",
+                        )
+
+                    # Mini-métricas de tempo
+                    if "_tempo_off" in df_det.columns:
+                        validos = df_det["_tempo_off"][df_det["_tempo_off"].dt.total_seconds() >= 0]
+                        if not validos.empty:
+                            col_t1, col_t2, col_t3 = st.columns(3)
+                            mais_antigo = validos.max()
+                            media_td    = validos.mean()
+                            acima_24h   = (validos.dt.total_seconds() >= 86400).sum()
+                            col_t1.metric("⏱️ Mais tempo offline", fmt_tempo(mais_antigo))
+                            col_t2.metric("📊 Tempo médio offline", fmt_tempo(media_td))
+                            col_t3.metric("🔴 Acima de 24h", f"{acima_24h} câmeras")
+
+                # ─────────────────────────────────────────────
+                # SEÇÃO DE AÇÕES DO CLIENTE
+                # ─────────────────────────────────────────────
+                st.markdown("<hr>", unsafe_allow_html=True)
+                st.markdown("### 📋 Ações a realizar")
+            
+                # Verificar configuração
+                if not supabase_configurado():
+                    st.warning("⚠️ Supabase não configurado. As ações não podem ser salvas.")
+                else:
+                    tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
+                    if not tabela_existe:
+                        st.error("🚨 Não foi possível acessar a tabela acoes_clientes")
+                        st.info(msg_tabela)
+            
+                with st.expander("✏️ Gerenciar ações", expanded=False):
+                    # Carregar ações existentes
+                    df_acoes = carregar_acoes_cliente(wl_id)
+                
+                    if df_acoes is not None and not df_acoes.empty:
+                        st.subheader("Ações registradas")
+                        for idx_acao, (_, acao) in enumerate(df_acoes.iterrows()):
+                            col_acao_data, col_acao_status, col_acao_del = st.columns([3, 1.5, 1])
+                        
+                            data_criacao = acao.get("data_criacao", "N/D")
+                            if isinstance(data_criacao, str) and "T" in data_criacao:
+                                data_criacao = data_criacao.split("T")[0]
+                        
+                            status_atual = acao.get("status_acao", "Pendente")
+                        
+                            with col_acao_data:
+                                st.markdown(f"""
+                                <div style="padding:12px 14px;background:#f8fafc;border:1px solid #E9D5FF;border-radius:8px">
+                                    <div style="font-size:11px;color:#8B7AA3;font-weight:700;text-transform:uppercase;margin-bottom:4px">Ação</div>
+                                    <div style="font-size:13px;color:#171126;margin-bottom:8px"><strong>{acao.get('o_que_foi_feito', 'N/D')}</strong></div>
+                                    <div style="font-size:10px;color:#8B7AA3">📅 {data_criacao}</div>
+                                    {f"<div style='font-size:10px;color:#8B7AA3'>⏰ Prazo: {acao.get('prazo_ajustes', 'Sem prazo')}</div>" if acao.get('prazo_ajustes') else ""}
+                                </div>
+                                """, unsafe_allow_html=True)
+                        
+                            with col_acao_status:
+                                novo_status = st.selectbox(
+                                    "Status",
+                                    ["Pendente", "Concluído"],
+                                    index=0 if status_atual == "Pendente" else 1,
+                                    key=f"status_{acao.get('id', idx_acao)}_{idx_acao}"
+                                )
+                                if novo_status != status_atual:
+                                    sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                                    if sucesso:
+                                        st.success("Atualizado!", icon="✅")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                        
+                            with col_acao_del:
+                                st.write("")  # spacing
+                    else:
+                        st.info("Nenhuma ação registrada para este cliente.")
+                
+                    st.divider()
+                    st.subheader("Adicionar nova ação")
+                
+                    with st.form(f"form_acao_{wl_id}", clear_on_submit=True):
+                        acao_texto = st.text_area(
+                            "O que foi feito",
+                            placeholder="Descreva a ação tomada (ex: Abrir chamado com técnico, Enviar comunicado, etc.)",
+                            height=100,
+                            key=f"acao_texto_{wl_id}"
+                        )
+                    
+                        col_prazo, col_status = st.columns(2)
+                        with col_prazo:
+                            prazo = st.date_input(
+                                "Prazo para ajustes",
+                                value=None,
+                                format="DD/MM/YYYY",
+                                key=f"prazo_acao_{wl_id}"
+                            )
+                        with col_status:
+                            status_acao = st.selectbox(
                                 "Status",
                                 ["Pendente", "Concluído"],
-                                index=0 if status_atual == "Pendente" else 1,
-                                key=f"status_{acao.get('id', idx_acao)}_{idx_acao}"
+                                key=f"status_nova_acao_{wl_id}"
                             )
-                            if novo_status != status_atual:
-                                sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
+                    
+                        if st.form_submit_button(f"➕ Registrar ação · {wl_id}", use_container_width=True):
+                            if not acao_texto.strip():
+                                st.error("Descreva a ação a ser realizada")
+                            else:
+                                prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
+                                sucesso, msg = salvar_acao_cliente(
+                                    id_whitelabel=wl_id,
+                                    nome_cliente=v.get("nome_cliente", ""),
+                                    o_que_foi_feito=acao_texto,
+                                    prazo_ajustes=prazo_str,
+                                    status_acao=status_acao
+                                )
                                 if sucesso:
-                                    st.success("Atualizado!", icon="✅")
+                                    st.success(msg)
                                     st.rerun()
                                 else:
                                     st.error(msg)
 
-                        with col_acao_del:
-                            st.write("")  # spacing
-                else:
-                    st.info("Nenhuma ação registrada para este cliente.")
+                if st.button("← Voltar ao painel", key="btn_voltar_painel_detalhe_cliente_v1"):
+                    del st.session_state["detalhe"]; st.rerun()
 
-                st.divider()
-                st.subheader("Adicionar nova ação")
-
-                with st.form(f"form_acao_{wl_id}", clear_on_submit=True):
-                    acao_texto = st.text_area(
-                        "O que foi feito",
-                        placeholder="Descreva a ação tomada (ex: Abrir chamado com técnico, Enviar comunicado, etc.)",
-                        height=100,
-                        key=f"acao_texto_{wl_id}"
-                    )
-
-                    col_prazo, col_status = st.columns(2)
-                    with col_prazo:
-                        prazo = st.date_input(
-                            "Prazo para ajustes",
-                            value=None,
-                            format="DD/MM/YYYY",
-                            key=f"prazo_acao_{wl_id}"
-                        )
-                    with col_status:
-                        status_acao = st.selectbox(
-                            "Status",
-                            ["Pendente", "Concluído"],
-                            key=f"status_nova_acao_{wl_id}"
-                        )
-
-                    if st.form_submit_button(f"➕ Registrar ação · {wl_id}", use_container_width=True):
-                        if not acao_texto.strip():
-                            st.error("Descreva a ação a ser realizada")
-                        else:
-                            prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
-                            sucesso, msg = salvar_acao_cliente(
-                                id_whitelabel=wl_id,
-                                nome_cliente=v.get("nome_cliente", ""),
-                                o_que_foi_feito=acao_texto,
-                                prazo_ajustes=prazo_str,
-                                status_acao=status_acao
-                            )
-                            if sucesso:
-                                st.success(msg)
-                                st.rerun()
-                            else:
-                                st.error(msg)
-
-            if st.button("← Voltar ao painel", key="btn_voltar_painel_detalhe_cliente_v1"):
-                del st.session_state["detalhe"]; st.rerun()
-
-    with clientes_subtabs[1]:
-        render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="clientes_relatorio_franquia")
+        with clientes_subtabs[1]:
+            render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="clientes_relatorio_franquia")
 
     # ════════════════════════════════════════════
     # ABA 2 — CENTRAL DE AÇÕES
     # ════════════════════════════════════════════
+    with tabs[2]:
+        render_central_acoes(dados)
 
+    # ════════════════════════════════════════════
+    # ABA 3 — TEMPO OFFLINE
+    # ════════════════════════════════════════════
+    with tabs[3]:
+        st.markdown("#### Câmeras offline por tempo sem sinal")
+        st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
 
+        # Montar DataFrame global com todas as câmeras offline
+        rows_tempo = []
+        agora = agora_sao_paulo()
+        for wl_id, v in dados.items():
+            df_off = v["offline"]
+            if df_off.empty: continue
+            for _, row in df_off.iterrows():
+                td = row.get("_tempo_off", timedelta(seconds=-1))
+                if not isinstance(td, timedelta): td = timedelta(seconds=-1)
+                horas = td.total_seconds()/3600 if td.total_seconds() >= 0 else -1
+                rows_tempo.append({
+                    "ID do Cliente": wl_id,
+                    "Nome Cliente":  v["nome_cliente"],
+                    "Cidade": v.get("cidade_estado") or v.get("cidade") or v["nome_cliente"],
+                    "Nome Franqueado": v["nome_empresa"],
+                    "ID da Câmera":  row.get(COL_ID_CAM,  "N/D"),
+                    "Nome da Câmera":row.get(COL_NOME_CAM,"N/D"),
+                    "Última vez Online": row.get(COL_ULT_ATU, pd.NaT),
+                    "Observações":   row.get(COL_OBS, ""),
+                    "Faixa":         faixa_tempo_dias(horas),
+                    "_horas":        horas,
+                    "_td":           td,
+                })
 
-
-
-# ─────────────────────────────────────────────
-# Aba Tendência por Cliente
-# ─────────────────────────────────────────────
-def render_aba_tendencia(ctx: 'ContextoMain') -> None:
-    """Aba Tendência: evolução do % offline ao longo dos snapshots."""
-    dados = ctx.dados
-
-    col_periodo, col_cliente = st.columns([1, 2])
-
-    with col_periodo:
-        dias = st.selectbox(
-            "Período",
-            options=[7, 14, 30, 60, 90],
-            index=2,
-            format_func=lambda d: f"Últimos {d} dias",
-            key="tend_periodo",
-        )
-
-    with st.spinner("Carregando histórico de snapshots…"):
-        df_hist = carregar_historico_clientes(dias)
-
-    if df_hist.empty:
-        st.info(
-            f"Nenhum snapshot encontrado nos últimos {dias} dias. "
-            "Salve snapshots regularmente pelo painel lateral."
-        )
-        return
-
-    df_hist["gravado_dt"] = pd.to_datetime(df_hist["gravado_em"], errors="coerce")
-
-    clientes_hist = (
-        df_hist[["wl_id", "nome_cliente"]]
-        .drop_duplicates("wl_id")
-        .set_index("wl_id")["nome_cliente"]
-        .to_dict()
-    )
-    for wl_id, v in dados.items():
-        if str(wl_id) not in clientes_hist:
-            clientes_hist[str(wl_id)] = v.get("nome_cliente", f"ID {wl_id}")
-
-    opcoes_ids   = sorted(clientes_hist.keys())
-    opcoes_nomes = {wl: clientes_hist[wl] for wl in opcoes_ids}
-
-    with col_cliente:
-        wl_sel = st.selectbox(
-            "Cliente",
-            options=opcoes_ids,
-            format_func=lambda wl: opcoes_nomes.get(wl, wl),
-            key="tend_cliente",
-        )
-
-    df_cli = (
-        df_hist[df_hist["wl_id"].astype(str) == str(wl_sel)]
-        .sort_values("gravado_dt")
-        .copy()
-    )
-
-    if df_cli.empty:
-        st.warning(
-            f"Nenhum snapshot encontrado para **{opcoes_nomes.get(wl_sel, wl_sel)}** "
-            f"nos últimos {dias} dias."
-        )
-        return
-
-    nome_cliente = opcoes_nomes.get(wl_sel, wl_sel)
-
-    pct_atual   = float(df_cli["pct_offline"].iloc[-1])
-    pct_inicio  = float(df_cli["pct_offline"].iloc[0])
-    pct_max     = float(df_cli["pct_offline"].max())
-    pct_min     = float(df_cli["pct_offline"].min())
-    pct_medio   = float(df_cli["pct_offline"].mean())
-    variacao    = pct_atual - pct_inicio
-    n_snapshots = len(df_cli)
-    cor_atual   = cor_hex(pct_atual)
-    cor_delta   = "#ef4444" if variacao > 0 else ("#14b8a6" if variacao < 0 else "#7C3AED")
-    sinal       = f"+{variacao:.1f}" if variacao > 0 else f"{variacao:.1f}"
-
-    st.markdown(f"""
-    <div style="margin:12px 0 18px">
-        <div style="font-size:13px;color:#7C6A91;font-weight:700;text-transform:uppercase;
-                    letter-spacing:.6px;margin-bottom:10px">{escape_html(nome_cliente)}</div>
-        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px">
-            <div class="audit-card">
-                <div class="audit-card-label">% Offline atual</div>
-                <div class="audit-card-value" style="color:{cor_atual}">{pct_atual:.1f}%</div>
-                <div class="audit-card-note">{int(df_cli['offline'].iloc[-1])} de {int(df_cli['total'].iloc[-1])} câmeras</div>
-            </div>
-            <div class="audit-card">
-                <div class="audit-card-label">Variação no período</div>
-                <div class="audit-card-value" style="color:{cor_delta}">{sinal}%</div>
-                <div class="audit-card-note">Início: {pct_inicio:.1f}%</div>
-            </div>
-            <div class="audit-card">
-                <div class="audit-card-label">Pior momento</div>
-                <div class="audit-card-value" style="color:#ef4444">{pct_max:.1f}%</div>
-                <div class="audit-card-note">Pico no período</div>
-            </div>
-            <div class="audit-card">
-                <div class="audit-card-label">Melhor momento</div>
-                <div class="audit-card-value" style="color:#14b8a6">{pct_min:.1f}%</div>
-                <div class="audit-card-note">Mínimo no período</div>
-            </div>
-            <div class="audit-card">
-                <div class="audit-card-label">Média do período</div>
-                <div class="audit-card-value" style="color:#7C3AED">{pct_medio:.1f}%</div>
-                <div class="audit-card-note">{n_snapshots} snapshots</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    cores_pontos = [cor_hex(p) for p in df_cli["pct_offline"]]
-    labels_x     = df_cli["gravado_dt"].dt.strftime("%d/%m %H:%M").tolist()
-
-    fig = go.Figure()
-    fig.add_hrect(y0=0,  y1=5,   fillcolor="#dff8f3", opacity=0.25, line_width=0, layer="below")
-    fig.add_hrect(y0=5,  y1=10,  fillcolor="#fef9c3", opacity=0.25, line_width=0, layer="below")
-    fig.add_hrect(y0=10, y1=100, fillcolor="#fee2e2", opacity=0.20, line_width=0, layer="below")
-
-    fig.add_trace(go.Scatter(
-        x=labels_x, y=df_cli["pct_offline"].tolist(),
-        mode="lines",
-        line=dict(color="#C4B5FD", width=2),
-        showlegend=False, hoverinfo="skip",
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=labels_x, y=df_cli["pct_offline"].tolist(),
-        mode="markers+lines",
-        marker=dict(color=cores_pontos, size=9, line=dict(color="#ffffff", width=2)),
-        line=dict(color="rgba(0,0,0,0)", width=0),
-        text=[
-            f"<b>{r['label']}</b><br>"
-            f"{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
-            f"% Offline: <b>{r['pct_offline']:.1f}%</b><br>"
-            f"Offline: {int(r['offline'])} · Total: {int(r['total'])}"
-            for _, r in df_cli.iterrows()
-        ],
-        hovertemplate="%{text}<extra></extra>",
-        showlegend=False,
-    ))
-
-    fig.add_hline(y=5,  line_dash="dot", line_color="#14b8a6", line_width=1,
-                  annotation_text="5%",  annotation_position="right",
-                  annotation_font=dict(color="#14b8a6", size=11))
-    fig.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1,
-                  annotation_text="10%", annotation_position="right",
-                  annotation_font=dict(color="#f59e0b", size=11))
-
-    ld = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-    fig.update_layout(
-        **ld,
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        height=360, margin=dict(l=10, r=60, t=20, b=60),
-        xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-35, gridcolor="#F3E8FF"),
-        yaxis=dict(ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10),
-                   gridcolor="#F3E8FF", range=[0, max(pct_max * 1.25, 12)]),
-    )
-    st.plotly_chart(fig, use_container_width=True, key=f"tend_line_{wl_sel}")
-
-    st.markdown("---")
-    st.markdown("#### Comparar com outros clientes")
-    st.caption("Selecione até 4 clientes para sobrepor no mesmo gráfico.")
-
-    outros = st.multiselect(
-        "Clientes para comparar",
-        options=[wl for wl in opcoes_ids if wl != wl_sel],
-        format_func=lambda wl: opcoes_nomes.get(wl, wl),
-        max_selections=4,
-        key="tend_comparar",
-    )
-
-    if outros:
-        PALETTE = ["#7C3AED", "#0ea5e9", "#f59e0b", "#ec4899"]
-        fig2 = go.Figure()
-        fig2.add_trace(go.Scatter(
-            x=labels_x, y=df_cli["pct_offline"].tolist(),
-            mode="lines+markers", name=nome_cliente[:28],
-            line=dict(color="#ef4444", width=2.5),
-            marker=dict(size=7, color="#ef4444"),
-            hovertemplate=f"<b>{escape_html(nome_cliente)}</b><br>%{{y:.1f}}%<extra></extra>",
-        ))
-        for i, wl_outro in enumerate(outros):
-            df_outro = (
-                df_hist[df_hist["wl_id"].astype(str) == str(wl_outro)]
-                .sort_values("gravado_dt").copy()
-            )
-            if df_outro.empty:
-                continue
-            nome_outro   = opcoes_nomes.get(wl_outro, wl_outro)
-            labels_outro = df_outro["gravado_dt"].dt.strftime("%d/%m %H:%M").tolist()
-            cor_outro    = PALETTE[i % len(PALETTE)]
-            fig2.add_trace(go.Scatter(
-                x=labels_outro, y=df_outro["pct_offline"].tolist(),
-                mode="lines+markers", name=nome_outro[:28],
-                line=dict(color=cor_outro, width=2),
-                marker=dict(size=6, color=cor_outro),
-                hovertemplate=f"<b>{escape_html(nome_outro)}</b><br>%{{y:.1f}}%<extra></extra>",
-            ))
-        fig2.add_hline(y=5,  line_dash="dot", line_color="#14b8a6", line_width=1)
-        fig2.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1)
-        fig2.update_layout(
-            **ld,
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            height=380, margin=dict(l=10, r=20, t=20, b=60),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                        xanchor="left", x=0, font=dict(size=11, color="#6B5A7A")),
-            xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-35, gridcolor="#F3E8FF"),
-            yaxis=dict(ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10),
-                       gridcolor="#F3E8FF", range=[0, None]),
-        )
-        st.plotly_chart(fig2, use_container_width=True, key=f"tend_multi_{wl_sel}")
-
-    with st.expander("Ver tabela de dados brutos"):
-        df_tabela = df_cli[["gravado_dt", "label", "total", "offline", "pct_offline"]].copy()
-        df_tabela["gravado_dt"] = df_tabela["gravado_dt"].dt.strftime("%d/%m/%Y %H:%M")
-        df_tabela.columns = ["Data", "Rótulo", "Total", "Offline", "% Offline"]
-        df_tabela["% Offline"] = df_tabela["% Offline"].apply(lambda v: f"{v:.1f}%")
-        render_dataframe(df_tabela, height=min(400, (len(df_tabela) + 1) * 35 + 3))
-
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-            df_tabela.to_excel(writer, index=False, sheet_name="Tendência")
-        st.download_button(
-            "⬇ Exportar Excel",
-            data=buf.getvalue(),
-            file_name=f"tendencia_{slug_arquivo(nome_cliente)}_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"dl_tend_{wl_sel}",
-            use_container_width=True,
-        )
-
-
-# ─────────────────────────────────────────────
-# Aba Evidências (Histórico & Comparativo)
-# ─────────────────────────────────────────────
-def render_aba_evidencias(ctx: 'ContextoMain') -> None:
-    """Aba Evidências: snapshots e comparativo entre períodos."""
-    dados = ctx.dados
-    comp  = ctx.comp
-
-    st.markdown("#### Histórico de snapshots")
-    df_snaps = listar_snapshots()
-
-    if df_snaps.empty:
-        st.info("Nenhum snapshot gravado ainda. Use o painel lateral para salvar o estado atual.")
-    else:
-        df_snaps["gravado_dt"] = pd.to_datetime(df_snaps["gravado_em"])
-        data_min = df_snaps["gravado_dt"].min().date()
-        data_max = df_snaps["gravado_dt"].max().date()
-
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            data_inicio = st.date_input("📅 Data inicial", value=data_min,
-                                        min_value=data_min, max_value=data_max,
-                                        format="DD/MM/YYYY", key="hist_data_ini")
-        with col_d2:
-            data_fim = st.date_input("📅 Data final", value=data_max,
-                                     min_value=data_min, max_value=data_max,
-                                     format="DD/MM/YYYY", key="hist_data_fim")
-
-        df_snaps_filtrado = df_snaps[
-            (df_snaps["gravado_dt"].dt.date >= data_inicio) &
-            (df_snaps["gravado_dt"].dt.date <= data_fim)
-        ]
-
-        if df_snaps_filtrado.empty:
-            st.warning("Nenhum snapshot encontrado no período selecionado.")
+        if not rows_tempo:
+            st.success("🎉 Nenhuma câmera offline no momento!")
         else:
-            opcoes = {
-                int(r["id"]): f"{r['label']}  ({r['gravado_em']})"
-                for _, r in df_snaps_filtrado.iterrows()
-            }
-            datas_snap = {
-                int(r["id"]): r["gravado_em"]
-                for _, r in df_snaps_filtrado.iterrows()
-            }
-            ids_opcoes = list(opcoes.keys())
+            df_tempo = pd.DataFrame(rows_tempo).sort_values("_horas", ascending=False)
 
-            col_a, col_b, col_dl_h = st.columns([2,2,1])
-            with col_a:
-                sel_a = st.selectbox(
-                    "📅 Snapshot A (base)",
-                    ids_opcoes,
-                    index=min(1, len(ids_opcoes)-1),
-                    format_func=lambda sid: opcoes.get(sid, str(sid)),
-                    key="hist_snap_a",
-                )
-            with col_b:
-                sel_b = st.selectbox(
-                    "📅 Snapshot B (recente)",
-                    ids_opcoes,
-                    index=0,
-                    format_func=lambda sid: opcoes.get(sid, str(sid)),
-                    key="hist_snap_b",
-                )
+            # KPIs de tempo
+            validos       = df_tempo[df_tempo["_horas"] >= 0]
+            menos_1d      = (validos["_horas"] < 24).sum()
+            entre_1_3d    = ((validos["_horas"] >= 24) & (validos["_horas"] < 72)).sum()
+            entre_3_7d    = ((validos["_horas"] >= 72) & (validos["_horas"] < 168)).sum()
+            acima_7d      = (validos["_horas"] >= 168).sum()
+            nd_count      = (df_tempo["_horas"] < 0).sum()
 
-            id_a = int(sel_a)
-            id_b = int(sel_b)
+            k1, k2, k3, k4 = st.columns(4)
 
-            def fmt_dt(s):
-                try: return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
-                except: return s
+            def card_tempo_moderno(titulo, valor, subtitulo, cor):
+                return f'''
+                <div style="
+                    background:#ffffff;
+                    border:1px solid #E9D5FF;
+                    border-radius:14px;
+                    padding:18px 18px 16px;
+                    text-align:center;
+                    box-shadow:0 10px 26px rgba(16,42,63,.06);
+                    position:relative;
+                    overflow:hidden;
+                    min-height:118px;
+                ">
+                    <div style="position:absolute;top:0;left:0;right:0;height:4px;background:{cor};"></div>
+                    <div style="font-size:10px;color:#7C6A91;font-weight:800;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">{titulo}</div>
+                    <div style="font-size:34px;font-weight:800;color:{cor};font-family:DM Mono,monospace;line-height:1.15;margin-top:10px">{valor}</div>
+                    <div style="font-size:11px;color:#7C6A91;margin-top:6px">{subtitulo}</div>
+                </div>
+                '''
 
-            leg_a = fmt_dt(datas_snap.get(id_a, ""))
-            leg_b = fmt_dt(datas_snap.get(id_b, ""))
+            k1.markdown(card_tempo_moderno("Menos de 1 dia", menos_1d, "câmeras recentes", "#10b981"), unsafe_allow_html=True)
+            k2.markdown(card_tempo_moderno("Entre 1 e 3 dias", entre_1_3d, "câmeras em atenção", "#f59e0b"), unsafe_allow_html=True)
+            k3.markdown(card_tempo_moderno("3 a 7 dias", entre_3_7d, "câmeras críticas", "#ef4444"), unsafe_allow_html=True)
+            k4.markdown(card_tempo_moderno("Acima de 7 dias", acima_7d, "câmeras mais antigas", "#ef4444"), unsafe_allow_html=True)
 
-            # Comparativo histórico real: A e B vêm dos snapshots salvos,
-            # mas respeitando o mesmo universo de clientes usado no painel.
-            wl_ids_validos_hist = {str(wl).strip() for wl in (dados or {}).keys()}
-            df_a = carregar_snapshot(id_a, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_a","total":"tot_a","pct_offline":"pct_a","nome_cliente":"nc_a"})
-            df_b = carregar_snapshot(id_b, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
-            df_comp = pd.merge(df_a, df_b, on="wl_id", how="outer").fillna(0)
-            # Usar nome do snapshot B como display
-            df_comp["cliente"] = df_comp["nc_b"].where(df_comp["nc_b"] != 0, df_comp["nc_a"])
-            df_comp["delta_pct"] = df_comp["pct_b"] - df_comp["pct_a"]
-            df_comp["delta_off"] = df_comp["off_b"] - df_comp["off_a"]
-            df_comp = df_comp.sort_values("pct_b", ascending=False)
+            st.markdown("<br>", unsafe_allow_html=True)
+            if "tempo_offline_categoria" not in st.session_state:
+                st.session_state["tempo_offline_categoria"] = "Todas"
 
-            melhoraram = (df_comp["delta_off"] < 0).sum()
-            pioraram   = (df_comp["delta_off"] > 0).sum()
-            estaveis   = len(df_comp) - melhoraram - pioraram
+            st.markdown("#### Filtrar por faixa de tempo")
+            cards = [
+                ("Menos de 1 dia", menos_1d),
+                ("Entre 1 e 3 dias", entre_1_3d),
+                ("3 a 7 dias", entre_3_7d),
+                ("Acima de 7 dias", acima_7d),
+                ("Sem data", nd_count),
+            ]
+            cols_cat = st.columns(len(cards))
+            for (label, count), col in zip(cards, cols_cat):
+                with col:
+                    if st.button(f"{label} ({count})", key=f"tempo_cat_{label}"):
+                        st.session_state["tempo_offline_categoria"] = label
 
-            with col_dl_h:
-                st.markdown("<br>", unsafe_allow_html=True)
-                buf_h = io.BytesIO()
-                df_comp.to_excel(buf_h, index=False, engine="openpyxl")
-                st.download_button("⬇ Comparativo", data=buf_h.getvalue(),
-                    file_name=f"comparativo_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    key="dl_comparativo_historico_excel_v1")
+            selected = st.session_state["tempo_offline_categoria"]
+            if selected != "Todas":
+                st.markdown(f"**Filtro ativo:** {selected}")
+                if st.button("Limpar filtro", key="tempo_cat_clear"):
+                    st.session_state["tempo_offline_categoria"] = "Todas"
 
-            total_off_a = int(df_comp["off_a"].sum())
-            total_off_b = int(df_comp["off_b"].sum())
-            total_cam_a = int(df_comp["tot_a"].sum())
-            total_cam_b = int(df_comp["tot_b"].sum())
-            pct_a_global = (total_off_a / total_cam_a * 100) if total_cam_a else 0
-            pct_b_global = (total_off_b / total_cam_b * 100) if total_cam_b else 0
-            delta_off_global = total_off_b - total_off_a
-            delta_pct_global = pct_b_global - pct_a_global
-            delta_base_global = total_cam_b - total_cam_a
-            novos_clientes = int(((df_comp["tot_a"] == 0) & (df_comp["tot_b"] > 0)).sum())
-            removidos_clientes = int(((df_comp["tot_a"] > 0) & (df_comp["tot_b"] == 0)).sum())
-            clientes_analisados = int(len(df_comp))
-            clientes_com_variacao_offline = int((df_comp["delta_off"] != 0).sum())
-            clientes_com_variacao_base = int((df_comp["tot_b"] - df_comp["tot_a"] != 0).sum())
+            col_f1, col_f2 = st.columns([3,1])
+            with col_f1:
+                busca_t = st.text_input("Buscar", key="busca_tempo",
+                                        placeholder="Buscar câmera ou cliente…")
+            with col_f2:
+                top_n_t = st.selectbox("Exibir", ["Top 50","Top 100","Top 200","Todas"],
+                                       key="top_n_tempo")
 
-            if delta_off_global > 0:
-                resumo_cor = "#dc2626"
-                resumo_status = "Piora operacional"
-                resumo_texto = f"A base teve aumento de {delta_off_global} câmeras offline no período."
-            elif delta_off_global < 0:
-                resumo_cor = "#059669"
-                resumo_status = "Melhora operacional"
-                resumo_texto = f"A base reduziu {abs(delta_off_global)} câmeras offline no período."
+            df_exib = df_tempo.copy()
+            if selected != "Todas":
+                if selected == "Sem data":
+                    df_exib = df_exib[df_exib["_horas"] < 0]
+                elif selected == "Menos de 1 dia":
+                    df_exib = df_exib[(df_exib["_horas"] >= 0) & (df_exib["_horas"] < 24)]
+                elif selected == "Entre 1 e 3 dias":
+                    df_exib = df_exib[(df_exib["_horas"] >= 24) & (df_exib["_horas"] < 72)]
+                elif selected == "3 a 7 dias":
+                    df_exib = df_exib[(df_exib["_horas"] >= 72) & (df_exib["_horas"] < 168)]
+                elif selected == "Acima de 7 dias":
+                    df_exib = df_exib[df_exib["_horas"] >= 168]
+
+            if busca_t:
+                termo = busca_t.upper()
+                df_exib = df_exib[
+                    df_exib["Nome da Câmera"].astype(str).str.upper().str.contains(termo) |
+                    df_exib["Nome Cliente"].str.upper().str.contains(termo) |
+                    df_exib["Nome Franqueado"].astype(str).str.upper().str.contains(termo) |
+                    df_exib["ID do Cliente"].astype(str).str.upper().str.contains(termo) |
+                    df_exib["ID da Câmera"].astype(str).str.upper().str.contains(termo)
+                ]
+
+            lim = {"Top 50":50,"Top 100":100,"Top 200":200}.get(top_n_t, len(df_exib))
+            df_exib = df_exib.head(lim)
+
+            if df_exib.empty:
+                st.info("Nenhuma câmera encontrada com os filtros aplicados.")
             else:
-                resumo_cor = "#6D28D9"
-                resumo_status = "Operação estável"
-                resumo_texto = "O total de câmeras offline ficou estável no período."
+                # Gráfico executivo — Top 30 por dias offline
+                df_graf = df_exib[df_exib["_horas"] >= 0].copy()
+                df_graf = df_graf.sort_values("_horas", ascending=False).head(30).copy()
+                if not df_graf.empty:
+                    df_graf["_dias"] = (df_graf["_horas"] / 24).round(1)
+                    df_graf["_rank"] = range(1, len(df_graf) + 1)
+                    df_graf["_y"] = list(range(len(df_graf), 0, -1))
 
-            cor_card_delta = "bad" if delta_off_global > 0 else ("good" if delta_off_global < 0 else "neutral")
-            cor_card_pct = "bad" if delta_pct_global > 0 else ("good" if delta_pct_global < 0 else "neutral")
+                    def _truncar_label_top30(id_camera, cidade, limite=34):
+                        id_camera = str(id_camera or "N/D").strip()
+                        cidade = str(cidade or "N/D").replace("\n", " ").strip()
+                        label = f"{id_camera} · {cidade}"
+                        return label if len(label) <= limite else label[:limite - 1].rstrip() + "…"
+
+                    if "Cidade" not in df_graf.columns:
+                        df_graf["Cidade"] = df_graf["Nome Cliente"]
+
+                    df_graf["_label_curto"] = df_graf.apply(
+                        lambda r: _truncar_label_top30(r["ID da Câmera"], r["Cidade"]), axis=1
+                    )
+                    df_graf["_tempo_fmt"] = df_graf["_td"].apply(lambda td: fmt_tempo(td))
+                    df_graf["_criticidade"] = df_graf["_horas"].apply(
+                        lambda h: "Crítico · acima de 7 dias" if h >= 168 else (
+                            "Alto · 3 a 7 dias" if h >= 72 else (
+                                "Atenção · 1 a 3 dias" if h >= 24 else "Recente · menos de 1 dia"
+                            )
+                        )
+                    )
+                    df_graf["_cor"] = df_graf["_horas"].apply(
+                        lambda h: "#dc2626" if h >= 168 else (
+                            "#ea580c" if h >= 72 else (
+                                "#d97706" if h >= 24 else "#059669"
+                            )
+                        )
+                    )
+
+                    st.markdown(f"**Top {len(df_graf)} câmeras — tempo offline em dias**")
+                    st.caption("Visão em área por ID da câmera e cidade. Passe o mouse para ver o nome completo da câmera, cliente e tempo detalhado.")
+
+                    max_dias = float(df_graf["_dias"].max()) if not df_graf.empty else 1.0
+
+                    # Visão de área moderna — ranking por tempo offline em dias.
+                    # Mantém o gráfico limpo: eixo X por posição no ranking e detalhes completos no hover.
+                    fig_t = go.Figure()
+                    x_rank = df_graf["_rank"].tolist()
+                    y_dias = df_graf["_dias"].tolist()
+
+                    fig_t.add_trace(go.Scatter(
+                        x=x_rank,
+                        y=y_dias,
+                        mode="lines",
+                        line=dict(color="#dc2626", width=0),
+                        fill="tozeroy",
+                        fillcolor="rgba(220, 38, 38, 0.14)",
+                        hoverinfo="skip",
+                        showlegend=False,
+                    ))
+
+                    fig_t.add_trace(go.Scatter(
+                        x=x_rank,
+                        y=y_dias,
+                        mode="lines+markers",
+                        line=dict(color="#991b1b", width=3, shape="spline", smoothing=0.65),
+                        marker=dict(
+                            size=8,
+                            color=df_graf["_cor"],
+                            line=dict(color="#ffffff", width=1.5),
+                        ),
+                        customdata=df_graf[["_rank", "ID da Câmera", "Cidade", "Nome da Câmera", "Nome Cliente", "_tempo_fmt", "_criticidade"]].values,
+                        hovertemplate=(
+                            "<b>ID %{customdata[1]} · %{customdata[2]}</b><br>"
+                            "Nome da câmera: %{customdata[3]}<br>"
+                            "Cliente: %{customdata[4]}<br>"
+                            "Ranking: #%{customdata[0]}<br>"
+                            "Tempo offline: <b>%{y:.1f} dias</b><br>"
+                            "Tempo detalhado: %{customdata[5]}<br>"
+                            "Status: %{customdata[6]}"
+                            "<extra></extra>"
+                        ),
+                        name="Dias offline",
+                    ))
+
+                    # Labels fixos removidos para evitar caixas sobrepostas nos pontos.
+                    # A identificação completa permanece no eixo X e no hover.
+
+                    layout_padrao_top30 = {
+                        k: v for k, v in pdefaults().items()
+                        if k not in ["plot_bgcolor", "paper_bgcolor", "margin"]
+                    }
+                    tickvals = df_graf["_rank"].tolist()
+                    ticktext = df_graf["_label_curto"].tolist()
+                    fig_t.update_layout(
+                        **layout_padrao_top30,
+                        height=560,
+                        showlegend=False,
+                        plot_bgcolor="#ffffff",
+                        paper_bgcolor="#ffffff",
+                        hovermode="closest",
+                        xaxis=dict(
+                            title="ID da câmera · Cidade",
+                            tickmode="array",
+                            tickvals=tickvals,
+                            ticktext=ticktext,
+                            gridcolor="rgba(148,163,184,.10)",
+                            tickfont=dict(color="#8B7AA3", size=9),
+                            tickangle=-45,
+                            zeroline=False,
+                            range=[0.5, len(df_graf) + 0.5],
+                        ),
+                        yaxis=dict(
+                            title="Dias offline",
+                            gridcolor="rgba(148,163,184,.16)",
+                            tickfont=dict(color="#8B7AA3", size=10),
+                            zeroline=False,
+                            rangemode="tozero",
+                            ticksuffix="d",
+                        ),
+                        margin=dict(l=70, r=35, t=44, b=145),
+                    )
+                    st.plotly_chart(fig_t, use_container_width=True, key="top30_cameras_tempo_offline_area_moderno")
+
+                # Tabela detalhada
+                st.markdown(f"**Lista detalhada — {len(df_exib)} câmeras**")
+                df_tbl_t = df_exib[["Nome Cliente","Nome Franqueado","ID da Câmera","Nome da Câmera","Faixa","Última vez Online","Observações","_horas","_td"]].copy()
+                df_tbl_t["Tempo Offline"] = df_tbl_t["_td"].apply(lambda td: fmt_tempo(td) if isinstance(td,timedelta) and td.total_seconds()>=0 else "N/D")
+                df_tbl_t["Última vez Online"] = formatar_ultima_atualizacao(df_tbl_t["Última vez Online"])
+                df_tbl_t["Criticidade"] = df_tbl_t["_horas"].apply(
+                    lambda h: "🔴 Crítico (>7 dias)" if h>=168 else (
+                        "🟠 Alto (3–7 dias)" if h>=72 else (
+                            "🟡 Atenção (1–3 dias)" if h>=24 else (
+                                "🟢 Recente (<1 dia)" if h>=0 else "⚫ Sem data"
+                            )
+                        )
+                    )
+                )
+                df_tbl_t = df_tbl_t.drop(columns=["_horas","_td"]).reset_index(drop=True)
+                df_tbl_t.index += 1
+                # Reordenar colunas
+                df_tbl_t = df_tbl_t[["Criticidade","Faixa","Tempo Offline","Nome da Câmera","ID da Câmera","Nome Cliente","Nome Franqueado","Última vez Online","Observações"]]
+
+                # Download
+                buf_t = io.BytesIO()
+                df_tbl_t.to_excel(buf_t, index=True, engine="openpyxl")
+                st.download_button("⬇ Exportar lista",
+                    data=buf_t.getvalue(),
+                    file_name=f"tempo_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="dl_tempo_offline_lista_v1")
+
+                render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
+
+    # ════════════════════════════════════════════
+    # ABA 4 — % OFFLINE POR CLIENTE
+    # ════════════════════════════════════════════
+    with tabs[4]:
+        st.markdown("#### Percentual de câmeras offline por cliente")
+        st.caption("Escala 0–100% · Verde 0–5% · Amarelo >5–10% · Vermelho >10%")
+
+        df_bar = pd.DataFrame([
+            {"Cliente": v["nome_cliente"], "Offline": len(v["offline"]),
+             "Total": v["total"],
+             "Pct": round(len(v["offline"])/v["total"]*100, 2) if v["total"] else 0}
+            for v in dados.values()
+        ]).sort_values("Pct", ascending=True)
+
+        fig_bar = go.Figure()
+        fig_bar.add_vrect(x0=0,   x1=10,  fillcolor="rgba(5,150,105,0.06)",  layer="below", line_width=0)
+        fig_bar.add_vrect(x0=10,  x1=15,  fillcolor="rgba(217,119,6,0.06)",  layer="below", line_width=0)
+        fig_bar.add_vrect(x0=15,  x1=100, fillcolor="rgba(220,38,38,0.06)",  layer="below", line_width=0)
+        for xv, lbl in [(5,"5%"),(10,"10%")]:
+            fig_bar.add_vline(x=xv, line_dash="dot", line_color="#C4B5FD", line_width=1.5,
+                annotation_text=lbl, annotation_position="top",
+                annotation_font=dict(color="#8B7AA3", size=10))
+        fig_bar.add_trace(go.Bar(
+            y=df_bar["Cliente"], x=df_bar["Pct"], orientation="h",
+            marker=dict(color=[cor_hex(p) for p in df_bar["Pct"]], line=dict(width=0)),
+            text=[f"{p:.1f}% ({o}/{t})" for p,o,t in zip(df_bar["Pct"],df_bar["Offline"],df_bar["Total"])],
+            textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
+            hovertemplate="<b>%{y}</b><br>%{x:.1f}% offline<extra></extra>",
+        ))
+        fig_bar.update_layout(
+            **pdefaults(), height=max(360, len(df_bar)*34), showlegend=False,
+            xaxis=dict(range=[0,100], ticksuffix="%", gridcolor="#E9D5FF",
+                       tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+            yaxis=dict(tickfont=dict(color="#6B5A7A",size=10), gridcolor="#FAF7FF"),
+            margin=dict(l=10, r=80, t=30, b=10),
+        )
+        st.plotly_chart(fig_bar, use_container_width=True, key="pct_offline_por_cliente_bar_v1")
+
+        st.markdown("---")
+        st.markdown("#### Ranking de criticidade")
+        st.caption("Online (verde) + Offline (vermelho) · Ordenado por % offline")
+
+        df_rank = pd.DataFrame([
+            {"Cliente": v["nome_cliente"], "Franqueado": v["nome_empresa"],
+             "Offline": len(v["offline"]), "Total": v["total"],
+             "% Offline": round(len(v["offline"])/v["total"]*100,2) if v["total"] else 0,
+             "Online": v["total"]-len(v["offline"])}
+            for v in dados.values() if len(v["offline"]) > 0
+        ]).sort_values("% Offline", ascending=False).reset_index(drop=True)
+        df_rank.index += 1
+
+        if df_rank.empty:
+            st.success("🎉 Nenhum cliente com câmeras offline no momento!")
+        else:
+            fig_rank = go.Figure()
+            fig_rank.add_trace(go.Bar(
+                name="Online", y=df_rank["Cliente"], x=df_rank["Online"],
+                orientation="h", marker_color="#14b8a6",
+                hovertemplate="%{y}<br>Online: %{x}<extra></extra>",
+            ))
+            fig_rank.add_trace(go.Bar(
+                name="Offline", y=df_rank["Cliente"], x=df_rank["Offline"],
+                orientation="h", marker_color="#ef4444",
+                text=[f'{p:.1f}%' for p in df_rank["% Offline"]],
+                textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
+                hovertemplate="%{y}<br>Offline: %{x} (%{text})<extra></extra>",
+            ))
+            fig_rank.update_layout(
+                **pdefaults(), barmode="stack",
+                height=max(360, len(df_rank)*40),
+                xaxis=dict(title="Quantidade de câmeras", gridcolor="#E9D5FF",
+                           tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                yaxis=dict(tickfont=dict(color="#6B5A7A",size=10),
+                           categoryorder="array",
+                           categoryarray=df_rank["Cliente"].tolist()[::-1]),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                            font=dict(color="#8B7AA3",size=11), bgcolor="rgba(0,0,0,0)"),
+                margin=dict(l=10, r=80, t=50, b=10),
+            )
+            st.plotly_chart(fig_rank, use_container_width=True, key="ranking_criticidade_stack_v1")
+
+            st.markdown("---")
+            col_tbl, col_dl = st.columns([5,1])
+            col_tbl.markdown("**Tabela resumo**")
+            buf_r = io.BytesIO()
+            df_rank.to_excel(buf_r, index=True, engine="openpyxl")
+            col_dl.download_button("⬇ Excel", data=buf_r.getvalue(),
+                file_name=f"ranking_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_ranking_criticidade_excel_v1")
+
+            df_show = df_rank[["Cliente","Franqueado","Offline","Total","% Offline"]].copy()
+            df_show["% Offline"] = df_show["% Offline"].apply(lambda x: f"{x:.1f}%")
+            render_dataframe(df_show, height=min(400,(len(df_show)+1)*35+3))
+
+
+    # ════════════════════════════════════════════
+    # ABA 5 — HISTÓRICO & COMPARATIVO
+    # ════════════════════════════════════════════
+    with tabs[5]:
+        st.markdown("#### Histórico de snapshots")
+        df_snaps = listar_snapshots()
+
+        if df_snaps.empty:
+            st.info("Nenhum snapshot gravado ainda. Use o painel lateral para salvar o estado atual.")
+        else:
+            df_snaps["gravado_dt"] = pd.to_datetime(df_snaps["gravado_em"])
+            data_min = df_snaps["gravado_dt"].min().date()
+            data_max = df_snaps["gravado_dt"].max().date()
+
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                data_inicio = st.date_input("📅 Data inicial", value=data_min,
+                                            min_value=data_min, max_value=data_max,
+                                            format="DD/MM/YYYY", key="hist_data_ini")
+            with col_d2:
+                data_fim = st.date_input("📅 Data final", value=data_max,
+                                         min_value=data_min, max_value=data_max,
+                                         format="DD/MM/YYYY", key="hist_data_fim")
+
+            df_snaps_filtrado = df_snaps[
+                (df_snaps["gravado_dt"].dt.date >= data_inicio) &
+                (df_snaps["gravado_dt"].dt.date <= data_fim)
+            ]
+
+            if df_snaps_filtrado.empty:
+                st.warning("Nenhum snapshot encontrado no período selecionado.")
+            else:
+                opcoes = {
+                    int(r["id"]): f"{r['label']}  ({r['gravado_em']})"
+                    for _, r in df_snaps_filtrado.iterrows()
+                }
+                datas_snap = {
+                    int(r["id"]): r["gravado_em"]
+                    for _, r in df_snaps_filtrado.iterrows()
+                }
+                ids_opcoes = list(opcoes.keys())
+
+                col_a, col_b, col_dl_h = st.columns([2,2,1])
+                with col_a:
+                    sel_a = st.selectbox(
+                        "📅 Snapshot A (base)",
+                        ids_opcoes,
+                        index=min(1, len(ids_opcoes)-1),
+                        format_func=lambda sid: opcoes.get(sid, str(sid)),
+                        key="hist_snap_a",
+                    )
+                with col_b:
+                    sel_b = st.selectbox(
+                        "📅 Snapshot B (recente)",
+                        ids_opcoes,
+                        index=0,
+                        format_func=lambda sid: opcoes.get(sid, str(sid)),
+                        key="hist_snap_b",
+                    )
+
+                id_a = int(sel_a)
+                id_b = int(sel_b)
+
+                def fmt_dt(s):
+                    try: return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
+                    except: return s
+
+                leg_a = fmt_dt(datas_snap.get(id_a, ""))
+                leg_b = fmt_dt(datas_snap.get(id_b, ""))
+
+                # Comparativo histórico real: A e B vêm dos snapshots salvos,
+                # mas respeitando o mesmo universo de clientes usado no painel.
+                wl_ids_validos_hist = {str(wl).strip() for wl in (dados or {}).keys()}
+                df_a = carregar_snapshot(id_a, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_a","total":"tot_a","pct_offline":"pct_a","nome_cliente":"nc_a"})
+                df_b = carregar_snapshot(id_b, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
+                df_comp = pd.merge(df_a, df_b, on="wl_id", how="outer").fillna(0)
+                # Usar nome do snapshot B como display
+                df_comp["cliente"] = df_comp["nc_b"].where(df_comp["nc_b"] != 0, df_comp["nc_a"])
+                df_comp["delta_pct"] = df_comp["pct_b"] - df_comp["pct_a"]
+                df_comp["delta_off"] = df_comp["off_b"] - df_comp["off_a"]
+                df_comp = df_comp.sort_values("pct_b", ascending=False)
+
+                melhoraram = (df_comp["delta_off"] < 0).sum()
+                pioraram   = (df_comp["delta_off"] > 0).sum()
+                estaveis   = len(df_comp) - melhoraram - pioraram
+
+                with col_dl_h:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    buf_h = io.BytesIO()
+                    df_comp.to_excel(buf_h, index=False, engine="openpyxl")
+                    st.download_button("⬇ Comparativo", data=buf_h.getvalue(),
+                        file_name=f"comparativo_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="dl_comparativo_historico_excel_v1")
+
+                total_off_a = int(df_comp["off_a"].sum())
+                total_off_b = int(df_comp["off_b"].sum())
+                total_cam_a = int(df_comp["tot_a"].sum())
+                total_cam_b = int(df_comp["tot_b"].sum())
+                pct_a_global = (total_off_a / total_cam_a * 100) if total_cam_a else 0
+                pct_b_global = (total_off_b / total_cam_b * 100) if total_cam_b else 0
+                delta_off_global = total_off_b - total_off_a
+                delta_pct_global = pct_b_global - pct_a_global
+                delta_base_global = total_cam_b - total_cam_a
+                novos_clientes = int(((df_comp["tot_a"] == 0) & (df_comp["tot_b"] > 0)).sum())
+                removidos_clientes = int(((df_comp["tot_a"] > 0) & (df_comp["tot_b"] == 0)).sum())
+                clientes_analisados = int(len(df_comp))
+                clientes_com_variacao_offline = int((df_comp["delta_off"] != 0).sum())
+                clientes_com_variacao_base = int((df_comp["tot_b"] - df_comp["tot_a"] != 0).sum())
+
+                if delta_off_global > 0:
+                    resumo_cor = "#dc2626"
+                    resumo_status = "Piora operacional"
+                    resumo_texto = f"A base teve aumento de {delta_off_global} câmeras offline no período."
+                elif delta_off_global < 0:
+                    resumo_cor = "#059669"
+                    resumo_status = "Melhora operacional"
+                    resumo_texto = f"A base reduziu {abs(delta_off_global)} câmeras offline no período."
+                else:
+                    resumo_cor = "#6D28D9"
+                    resumo_status = "Operação estável"
+                    resumo_texto = "O total de câmeras offline ficou estável no período."
+
+                cor_card_delta = "bad" if delta_off_global > 0 else ("good" if delta_off_global < 0 else "neutral")
+                cor_card_pct = "bad" if delta_pct_global > 0 else ("good" if delta_pct_global < 0 else "neutral")
+
+                st.markdown(f"""
+                <div class="compare-hero">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
+                        <div>
+                            <div class="compare-title">Painel executivo de comparativo</div>
+                            <div class="compare-sub">
+                                Comparação real entre os dois snapshots selecionados, mostrando impacto em câmeras offline, percentual da frota e movimento da carteira.
+                            </div>
+                            <div class="compare-pill">📅 Snapshot A/Base: {leg_a} &nbsp; → &nbsp; Snapshot B/Recente: {leg_b}</div>
+                        </div>
+                        <div class="compare-status-tag" style="color:{resumo_cor}">{resumo_status}</div>
+                    </div>
+                    <div class="compare-status-box">
+                        <div class="compare-status-text">{resumo_texto}</div>
+                        <div class="compare-status-text"><b>Delta:</b> {delta_off_global:+d} offline · {delta_pct_global:+.1f} p.p. · Base {delta_base_global:+d}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="compare-grid">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">Snapshot A · Base</div>
+                        <div class="compare-value">{total_off_a}</div>
+                        <div class="compare-note">{pct_a_global:.1f}% da frota · {total_cam_a} câmeras totais</div>
+                    </div>
+                    <div class="compare-card {cor_card_pct}">
+                        <div class="compare-label">Snapshot B · Recente</div>
+                        <div class="compare-value" style="color:{resumo_cor}">{total_off_b}</div>
+                        <div class="compare-note">{pct_b_global:.1f}% da frota · {total_cam_b} câmeras totais</div>
+                    </div>
+                    <div class="compare-card {cor_card_delta}">
+                        <div class="compare-label">Variação de offline</div>
+                        <div class="compare-value" style="color:{resumo_cor}">{delta_off_global:+d}</div>
+                        <div class="compare-note">{delta_pct_global:+.1f} p.p. em relação ao snapshot A</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">Carteira analisada</div>
+                        <div class="compare-value" style="font-size:30px">{clientes_analisados}</div>
+                        <div class="compare-note">{clientes_com_variacao_offline} com variação offline · {melhoraram} melhoraram · {pioraram} pioraram</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Resumo visual da carteira — substitui métricas soltas por cards executivos
+                pct_movimento = (clientes_com_variacao_offline / clientes_analisados * 100) if clientes_analisados else 0
+                pct_melhoraram = (melhoraram / clientes_analisados * 100) if clientes_analisados else 0
+                pct_pioraram = (pioraram / clientes_analisados * 100) if clientes_analisados else 0
+                pct_estaveis = (estaveis / clientes_analisados * 100) if clientes_analisados else 0
+                pct_base_alterada = (clientes_com_variacao_base / clientes_analisados * 100) if clientes_analisados else 0
+
+                st.markdown("#### Resumo da carteira")
+                st.markdown(f"""
+                <div class="compare-grid">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">📈 Movimento</div>
+                        <div class="compare-value">{clientes_com_variacao_offline}</div>
+                        <div class="compare-note">{pct_movimento:.1f}% da carteira · {clientes_analisados} clientes analisados</div>
+                    </div>
+                    <div class="compare-card good">
+                        <div class="compare-label">🟢 Melhoraram</div>
+                        <div class="compare-value" style="color:#059669">{melhoraram}</div>
+                        <div class="compare-note">{pct_melhoraram:.1f}% da carteira reduziu offline</div>
+                    </div>
+                    <div class="compare-card bad">
+                        <div class="compare-label">🔴 Pioraram</div>
+                        <div class="compare-value" style="color:#dc2626">{pioraram}</div>
+                        <div class="compare-note">{pct_pioraram:.1f}% da carteira aumentou offline</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">📊 Estabilidade</div>
+                        <div class="compare-value">{pct_estaveis:.1f}%</div>
+                        <div class="compare-note">{estaveis} clientes sem alteração offline</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="compare-status-box" style="margin-top:-4px;margin-bottom:16px">
+                    <div class="compare-status-text">
+                        <b>Carteira analisada:</b> {clientes_analisados} clientes · 
+                        <b>Com variação offline:</b> {clientes_com_variacao_offline} · 
+                        <b>Estáveis:</b> {estaveis}
+                    </div>
+                    <div class="compare-status-tag" style="color:#6D28D9">Resumo executivo</div>
+                </div>
+                <div class="compare-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">🆕 Novos clientes</div>
+                        <div class="compare-value" style="font-size:26px">{novos_clientes}</div>
+                        <div class="compare-note">Entraram no snapshot recente</div>
+                    </div>
+                    <div class="compare-card warn">
+                        <div class="compare-label">🚫 Clientes removidos</div>
+                        <div class="compare-value" style="font-size:26px">{removidos_clientes}</div>
+                        <div class="compare-note">Existiam na base anterior e não aparecem na recente</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">🔄 Base alterada</div>
+                        <div class="compare-value" style="font-size:26px">{clientes_com_variacao_base}</div>
+                        <div class="compare-note">{pct_base_alterada:.1f}% da carteira teve mudança no total de câmeras</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                df_top_piora = df_comp[df_comp["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
+                df_top_melhora = df_comp[df_comp["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
+
+                st.markdown("#### Maiores variações de câmeras offline")
+                col_g1, col_g2 = st.columns(2)
+                with col_g1:
+                    st.caption("🔴 Clientes que mais pioraram")
+                    if df_top_piora.empty:
+                        st.info("Nenhum cliente piorou neste comparativo.")
+                    else:
+                        fig_piora = go.Figure(go.Bar(
+                            y=df_top_piora["cliente"],
+                            x=df_top_piora["delta_off"],
+                            orientation="h",
+                            marker=dict(color="#dc2626"),
+                            text=[f"+{int(v)}" for v in df_top_piora["delta_off"]],
+                            textposition="outside",
+                            hovertemplate="%{y}<br>+%{x:.0f} câmeras offline<extra></extra>",
+                        ))
+                        fig_piora.update_layout(
+                            **pdefaults(), height=max(320, len(df_top_piora)*34), showlegend=False,
+                            xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                            yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
+                            margin=dict(l=10, r=60, t=10, b=10),
+                        )
+                        st.plotly_chart(fig_piora, use_container_width=True, key="hist_top_piora")
+
+                with col_g2:
+                    st.caption("🟢 Clientes que mais melhoraram")
+                    if df_top_melhora.empty:
+                        st.info("Nenhum cliente melhorou neste comparativo.")
+                    else:
+                        df_m_plot = df_top_melhora.copy()
+                        df_m_plot["melhora_abs"] = df_m_plot["delta_off"].abs()
+                        fig_melhora = go.Figure(go.Bar(
+                            y=df_m_plot["cliente"],
+                            x=df_m_plot["melhora_abs"],
+                            orientation="h",
+                            marker=dict(color="#059669"),
+                            text=[f"-{int(v)}" for v in df_m_plot["melhora_abs"]],
+                            textposition="outside",
+                            hovertemplate="%{y}<br>-%{x:.0f} câmeras offline<extra></extra>",
+                        ))
+                        fig_melhora.update_layout(
+                            **pdefaults(), height=max(320, len(df_m_plot)*34), showlegend=False,
+                            xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                            yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
+                            margin=dict(l=10, r=60, t=10, b=10),
+                        )
+                        st.plotly_chart(fig_melhora, use_container_width=True, key="hist_top_melhora")
+
+                cor_snap_base = "#f97316"   # laranja
+                cor_snap_atual = "#7c3aed"  # roxo
+
+                st.markdown("#### Visão de área comparativa")
+                st.caption("Área horizontal: Snap Antigo/Base em laranja e Snap Novo/Atual em roxo. Todas as cidades/clientes ficam listadas no eixo Y.")
+                df_area = df_comp.copy().sort_values("pct_b", ascending=True).reset_index(drop=True)
+                df_area["cliente_eixo"] = df_area["cliente"].astype(str)
+
+                max_pct_area = max(15, float(df_area[["pct_a", "pct_b"]].max().max()) + 5)
+                altura_area = max(560, 190 + len(df_area) * 34)
+
+                fig_area = go.Figure()
+
+                # Faixas de referência no fundo: saudável, atenção e crítico.
+                fig_area.add_vrect(x0=0, x1=5, fillcolor="#059669", opacity=0.05, line_width=0)
+                fig_area.add_vrect(x0=5, x1=10, fillcolor="#f59e0b", opacity=0.06, line_width=0)
+                fig_area.add_vrect(x0=10, x1=max_pct_area, fillcolor="#dc2626", opacity=0.05, line_width=0)
+
+                # Snap antigo/base em laranja.
+                fig_area.add_trace(go.Scatter(
+                    name=f"Snap Antigo/Base · {leg_a}",
+                    y=df_area["cliente_eixo"],
+                    x=df_area["pct_a"],
+                    mode="lines+markers",
+                    fill="tozerox",
+                    line=dict(color=cor_snap_base, width=2.5, shape="spline", smoothing=0.65),
+                    marker=dict(color=cor_snap_base, size=6, line=dict(color="#ffffff", width=1)),
+                    fillcolor="rgba(249, 115, 22, 0.18)",
+                    customdata=df_area[["cliente", "off_a", "tot_a"]],
+                    hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Antigo/Base</extra>",
+                ))
+
+                # Snap novo/atual em roxo.
+                fig_area.add_trace(go.Scatter(
+                    name=f"Snap Novo/Atual · {leg_b}",
+                    y=df_area["cliente_eixo"],
+                    x=df_area["pct_b"],
+                    mode="lines+markers",
+                    fill="tozerox",
+                    line=dict(color=cor_snap_atual, width=2.8, shape="spline", smoothing=0.65),
+                    marker=dict(color=cor_snap_atual, size=7, line=dict(color="#ffffff", width=1)),
+                    fillcolor="rgba(124, 58, 237, 0.20)",
+                    customdata=df_area[["cliente", "off_b", "tot_b"]],
+                    hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Novo/Atual</extra>",
+                ))
+
+                fig_area.add_vline(x=5, line_color="#059669", line_dash="dot", line_width=1)
+                fig_area.add_vline(x=10, line_color="#dc2626", line_dash="dot", line_width=1)
+
+                fig_area.update_layout(
+                    **pdefaults(),
+                    height=altura_area,
+                    xaxis=dict(
+                        title="% offline",
+                        range=[0, max_pct_area],
+                        ticksuffix="%",
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
+                        zeroline=False,
+                    ),
+                    yaxis=dict(
+                        title="",
+                        type="category",
+                        categoryorder="array",
+                        categoryarray=df_area["cliente_eixo"].tolist(),
+                        tickmode="array",
+                        tickvals=df_area["cliente_eixo"].tolist(),
+                        ticktext=df_area["cliente_eixo"].tolist(),
+                        showticklabels=True,
+                        automargin=True,
+                        tickfont=dict(color="#6B5A7A", size=10),
+                    ),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                                font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=10, r=20, t=45, b=40),
+                    hovermode="closest",
+                )
+                st.caption(f"Renderizando {len(df_area)} cidades/clientes na visão de área.")
+                st.plotly_chart(fig_area, use_container_width=True, key="hist_area_pct_cliente")
+
+                st.markdown("#### Comparativo por cliente · câmeras offline")
+                st.caption("Comparação da quantidade de câmeras offline por cidade/cliente. 🟧 Snap Antigo/Base · 🟪 Snap Novo/Atual")
+                df_comp_graf = df_comp.copy().sort_values("off_b", ascending=True)
+
+                max_offline_cliente = max(1, float(df_comp_graf[["off_a", "off_b"]].max().max()))
+                fig_comp = go.Figure()
+                fig_comp.add_trace(go.Bar(
+                    name=f"Snap Antigo/Base · {leg_a}",
+                    y=df_comp_graf["cliente"],
+                    x=df_comp_graf["off_a"],
+                    orientation="h",
+                    marker_color=cor_snap_base,
+                    opacity=0.88,
+                    customdata=df_comp_graf[["tot_a", "pct_a"]],
+                    hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Antigo/Base</extra>",
+                ))
+                fig_comp.add_trace(go.Bar(
+                    name=f"Snap Novo/Atual · {leg_b}",
+                    y=df_comp_graf["cliente"],
+                    x=df_comp_graf["off_b"],
+                    orientation="h",
+                    marker_color=cor_snap_atual,
+                    opacity=0.92,
+                    customdata=df_comp_graf[["tot_b", "pct_b"]],
+                    hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Novo/Atual</extra>",
+                ))
+                fig_comp.update_layout(
+                    **pdefaults(),
+                    barmode="group",
+                    height=max(420, len(df_comp_graf) * 42),
+                    xaxis=dict(
+                        title="Quantidade de câmeras offline",
+                        range=[0, max_offline_cliente * 1.18],
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
+                        zeroline=False,
+                    ),
+                    yaxis=dict(tickfont=dict(color="#6B5A7A", size=10)),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                                font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=10, r=20, t=45, b=10),
+                )
+                st.plotly_chart(fig_comp, use_container_width=True, key="hist_comp_offline_cliente")
+
+                st.markdown("#### Variação líquida de offline")
+                st.caption("Valores positivos indicam piora; valores negativos indicam melhora.")
+                df_delta = df_comp.copy().sort_values("delta_off", ascending=True)
+                cores_d  = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in df_delta["delta_off"]]
+                fig_d = go.Figure(go.Bar(
+                    y=df_delta["cliente"], x=df_delta["delta_off"], orientation="h",
+                    marker=dict(color=cores_d, line=dict(width=0)),
+                    text=[f"{'+' if d>0 else ''}{int(d)}" for d in df_delta["delta_off"]],
+                    textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
+                    hovertemplate="%{y}<br>Δ %{x:+.0f} câmeras<extra></extra>",
+                ))
+                fig_d.add_vline(x=0, line_color="#C4B5FD", line_width=1)
+                fig_d.update_layout(
+                    **pdefaults(), height=max(420, len(df_delta)*32), showlegend=False,
+                    xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                    yaxis=dict(tickfont=dict(color="#6B5A7A",size=10)),
+                    margin=dict(l=10, r=70, t=20, b=10),
+                )
+                st.plotly_chart(fig_d, use_container_width=True, key="hist_delta_off_cliente")
+
+                st.markdown("---")
+                st.markdown("#### Tabela comparativa detalhada")
+                df_tbl = df_comp[["cliente","tot_a","off_a","pct_a","tot_b","off_b","pct_b","delta_pct","delta_off"]].copy()
+                df_tbl["Situação"] = df_tbl["delta_off"].apply(lambda v: "Piorou" if v > 0 else ("Melhorou" if v < 0 else "Estável"))
+                df_tbl.columns = ["Cliente","Total A","Off A","% A","Total B","Off B","% B","Δ% (pp)","Δ Off","Situação"]
+                df_tbl["% A"]     = df_tbl["% A"].apply(lambda x: f"{x:.1f}%")
+                df_tbl["% B"]     = df_tbl["% B"].apply(lambda x: f"{x:.1f}%")
+                df_tbl["Δ% (pp)"] = df_tbl["Δ% (pp)"].apply(lambda x: f"{'+' if x>0 else ''}{x:.1f}")
+                df_tbl["Δ Off"]   = df_tbl["Δ Off"].apply(lambda x: f"{'+' if x>0 else ''}{int(x)}")
+                df_tbl = df_tbl.sort_values(["Situação", "Δ Off"], ascending=[True, False]).reset_index(drop=True)
+                df_tbl.index += 1
+                render_dataframe(df_tbl, height=min(620,(len(df_tbl)+1)*35+3))
+
+                row_b = df_snaps_filtrado[df_snaps_filtrado["id"] == id_b].iloc[0]
+                if str(row_b.get("notas","")).strip():
+                    st.markdown("---")
+                    st.markdown(f"📝 **Observações do snapshot B TESTE:** {row_b['notas']}")
+
+            st.markdown("---")
+            with st.expander("🗑️  Gerenciar snapshots gravados"):
+                for _, row in df_snaps.iterrows():
+                    c1, c2 = st.columns([5,1])
+                    notas_txt = f" · *{str(row['notas'])[:60]}…*" if str(row.get("notas","")).strip() else ""
+                    c1.markdown(f"**{row['label']}** · `{row['gravado_em']}`{notas_txt}")
+                    if c2.button("Excluir", key=f"del_{row['id']}"):
+                        deletar_snapshot(row["id"]); st.rerun()
+
+
+    # ════════════════════════════════════════════
+    # ABA 6 — LPRS OFFLINE
+    # ════════════════════════════════════════════
+    with tabs[6]:
+        st.markdown("### LPRs Offline")
+        st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
+
+        df_lpr_base = df_origem.copy() if df_origem is not None else pd.DataFrame()
+        if df_lpr_base.empty:
+            st.info("Sem dados carregados para validar LPRs offline.")
+        else:
+            for col in [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU]:
+                if col not in df_lpr_base.columns:
+                    df_lpr_base[col] = ""
+
+            df_lpr_base[COL_WL] = df_lpr_base[COL_WL].astype(str).str.strip()
+            df_lpr_base[COL_STATUS] = df_lpr_base[COL_STATUS].astype(str).str.strip().str.upper()
+            df_lpr_base[COL_NOME_CAM] = df_lpr_base[COL_NOME_CAM].astype(str).fillna("")
+
+            # Garante o mesmo universo do dashboard: se existir mapa de clientes, considera apenas esses IDs.
+            clientes_map_lpr = carregar_clientes()
+            if clientes_map_lpr:
+                df_lpr_base = df_lpr_base[df_lpr_base[COL_WL].isin(set(clientes_map_lpr.keys()))].copy()
+
+            mask_lpr = df_lpr_base[COL_NOME_CAM].str.contains("LPR", case=False, na=False)
+            mask_off = df_lpr_base[COL_STATUS].eq("OFFLINE")
+            df_lprs_total = df_lpr_base[mask_lpr].copy()
+            df_lprs_off = df_lpr_base[mask_lpr & mask_off].copy()
+
+            total_lprs = int(len(df_lprs_total))
+            total_lprs_off = int(len(df_lprs_off))
+            clientes_lpr_total = int(df_lprs_total[COL_WL].nunique()) if not df_lprs_total.empty else 0
+            clientes_lpr_off = int(df_lprs_off[COL_WL].nunique()) if not df_lprs_off.empty else 0
+            pct_lpr_off = (total_lprs_off / total_lprs * 100) if total_lprs else 0
+
+            if not df_lprs_off.empty:
+                df_lprs_off["Cliente"] = df_lprs_off[COL_WL].map(clientes_map_lpr).fillna(df_lprs_off[COL_WL].apply(lambda x: f"ID {x}"))
+                df_lprs_off["Franqueado"] = df_lprs_off[COL_EMPRESA].astype(str).replace({"nan": ""}).str.strip()
+                df_lprs_off["Última atualização"] = formatar_ultima_atualizacao(df_lprs_off[COL_ULT_ATU])
+                df_lprs_off["Tempo offline"] = parse_ultima_atualizacao(df_lprs_off[COL_ULT_ATU]).apply(
+                    lambda x: fmt_tempo(agora_sao_paulo() - x) if pd.notna(x) else "N/D"
+                )
 
             st.markdown(f"""
             <div class="compare-hero">
-                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
-                    <div>
-                        <div class="compare-title">Painel executivo de comparativo</div>
-                        <div class="compare-sub">
-                            Comparação real entre os dois snapshots selecionados, mostrando impacto em câmeras offline, percentual da frota e movimento da carteira.
-                        </div>
-                        <div class="compare-pill">📅 Snapshot A/Base: {leg_a} &nbsp; → &nbsp; Snapshot B/Recente: {leg_b}</div>
-                    </div>
-                    <div class="compare-status-tag" style="color:{resumo_cor}">{resumo_status}</div>
-                </div>
-                <div class="compare-status-box">
-                    <div class="compare-status-text">{resumo_texto}</div>
-                    <div class="compare-status-text"><b>Delta:</b> {delta_off_global:+d} offline · {delta_pct_global:+.1f} p.p. · Base {delta_base_global:+d}</div>
-                </div>
+                <div class="compare-title">🚘 Radar LPR Offline</div>
+                <div class="compare-sub">Validação operacional das câmeras LPR desconectadas na carteira filtrada.</div>
             </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown(f"""
             <div class="compare-grid">
                 <div class="compare-card neutral">
-                    <div class="compare-label">Snapshot A · Base</div>
-                    <div class="compare-value">{total_off_a}</div>
-                    <div class="compare-note">{pct_a_global:.1f}% da frota · {total_cam_a} câmeras totais</div>
-                </div>
-                <div class="compare-card {cor_card_pct}">
-                    <div class="compare-label">Snapshot B · Recente</div>
-                    <div class="compare-value" style="color:{resumo_cor}">{total_off_b}</div>
-                    <div class="compare-note">{pct_b_global:.1f}% da frota · {total_cam_b} câmeras totais</div>
-                </div>
-                <div class="compare-card {cor_card_delta}">
-                    <div class="compare-label">Variação de offline</div>
-                    <div class="compare-value" style="color:{resumo_cor}">{delta_off_global:+d}</div>
-                    <div class="compare-note">{delta_pct_global:+.1f} p.p. em relação ao snapshot A</div>
-                </div>
-                <div class="compare-card neutral">
-                    <div class="compare-label">Carteira analisada</div>
-                    <div class="compare-value" style="font-size:30px">{clientes_analisados}</div>
-                    <div class="compare-note">{clientes_com_variacao_offline} com variação offline · {melhoraram} melhoraram · {pioraram} pioraram</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Resumo visual da carteira — substitui métricas soltas por cards executivos
-            pct_movimento = (clientes_com_variacao_offline / clientes_analisados * 100) if clientes_analisados else 0
-            pct_melhoraram = (melhoraram / clientes_analisados * 100) if clientes_analisados else 0
-            pct_pioraram = (pioraram / clientes_analisados * 100) if clientes_analisados else 0
-            pct_estaveis = (estaveis / clientes_analisados * 100) if clientes_analisados else 0
-            pct_base_alterada = (clientes_com_variacao_base / clientes_analisados * 100) if clientes_analisados else 0
-
-            st.markdown("#### Resumo da carteira")
-            st.markdown(f"""
-            <div class="compare-grid">
-                <div class="compare-card neutral">
-                    <div class="compare-label">📈 Movimento</div>
-                    <div class="compare-value">{clientes_com_variacao_offline}</div>
-                    <div class="compare-note">{pct_movimento:.1f}% da carteira · {clientes_analisados} clientes analisados</div>
-                </div>
-                <div class="compare-card good">
-                    <div class="compare-label">🟢 Melhoraram</div>
-                    <div class="compare-value" style="color:#059669">{melhoraram}</div>
-                    <div class="compare-note">{pct_melhoraram:.1f}% da carteira reduziu offline</div>
+                    <div class="compare-label">Total de LPRs</div>
+                    <div class="compare-value">{total_lprs}</div>
+                    <div class="compare-note">câmeras LPR encontradas na base</div>
                 </div>
                 <div class="compare-card bad">
-                    <div class="compare-label">🔴 Pioraram</div>
-                    <div class="compare-value" style="color:#dc2626">{pioraram}</div>
-                    <div class="compare-note">{pct_pioraram:.1f}% da carteira aumentou offline</div>
-                </div>
-                <div class="compare-card neutral">
-                    <div class="compare-label">📊 Estabilidade</div>
-                    <div class="compare-value">{pct_estaveis:.1f}%</div>
-                    <div class="compare-note">{estaveis} clientes sem alteração offline</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            st.markdown(f"""
-            <div class="compare-status-box" style="margin-top:-4px;margin-bottom:16px">
-                <div class="compare-status-text">
-                    <b>Carteira analisada:</b> {clientes_analisados} clientes · 
-                    <b>Com variação offline:</b> {clientes_com_variacao_offline} · 
-                    <b>Estáveis:</b> {estaveis}
-                </div>
-                <div class="compare-status-tag" style="color:#6D28D9">Resumo executivo</div>
-            </div>
-            <div class="compare-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px">
-                <div class="compare-card neutral">
-                    <div class="compare-label">🆕 Novos clientes</div>
-                    <div class="compare-value" style="font-size:26px">{novos_clientes}</div>
-                    <div class="compare-note">Entraram no snapshot recente</div>
+                    <div class="compare-label">LPRs offline</div>
+                    <div class="compare-value" style="color:#dc2626">{total_lprs_off}</div>
+                    <div class="compare-note">{pct_lpr_off:.1f}% das LPRs estão offline</div>
                 </div>
                 <div class="compare-card warn">
-                    <div class="compare-label">🚫 Clientes removidos</div>
-                    <div class="compare-value" style="font-size:26px">{removidos_clientes}</div>
-                    <div class="compare-note">Existiam na base anterior e não aparecem na recente</div>
+                    <div class="compare-label">Clientes afetados</div>
+                    <div class="compare-value" style="color:#d97706">{clientes_lpr_off}</div>
+                    <div class="compare-note">de {clientes_lpr_total} clientes com LPR</div>
                 </div>
-                <div class="compare-card neutral">
-                    <div class="compare-label">🔄 Base alterada</div>
-                    <div class="compare-value" style="font-size:26px">{clientes_com_variacao_base}</div>
-                    <div class="compare-note">{pct_base_alterada:.1f}% da carteira teve mudança no total de câmeras</div>
+                <div class="compare-card good">
+                    <div class="compare-label">LPRs online</div>
+                    <div class="compare-value" style="color:#059669">{max(total_lprs - total_lprs_off, 0)}</div>
+                    <div class="compare-note">câmeras LPR sem alerta offline</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-            df_top_piora = df_comp[df_comp["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
-            df_top_melhora = df_comp[df_comp["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
+            if df_lprs_off.empty:
+                st.success("Nenhuma câmera LPR offline encontrada na carteira filtrada.")
+            else:
+                df_lpr_cli = (
+                    df_lprs_off.groupby([COL_WL, "Cliente", "Franqueado"], as_index=False)
+                    .agg(lprs_offline=(COL_ID_CAM, "count"))
+                    .sort_values("lprs_offline", ascending=False)
+                )
 
-            st.markdown("#### Maiores variações de câmeras offline")
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                st.caption("🔴 Clientes que mais pioraram")
-                if df_top_piora.empty:
-                    st.info("Nenhum cliente piorou neste comparativo.")
-                else:
-                    fig_piora = go.Figure(go.Bar(
-                        y=df_top_piora["cliente"],
-                        x=df_top_piora["delta_off"],
-                        orientation="h",
-                        marker=dict(color="#dc2626"),
-                        text=[f"+{int(v)}" for v in df_top_piora["delta_off"]],
-                        textposition="outside",
-                        hovertemplate="%{y}<br>+%{x:.0f} câmeras offline<extra></extra>",
-                    ))
-                    fig_piora.update_layout(
-                        **pdefaults(), height=max(320, len(df_top_piora)*34), showlegend=False,
-                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
-                        margin=dict(l=10, r=60, t=10, b=10),
-                    )
-                    st.plotly_chart(fig_piora, use_container_width=True, key="hist_top_piora")
+                st.markdown("#### Clientes com mais LPRs offline")
+                top_lpr_area = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True).copy()
+                top_lpr_area["Cliente eixo"] = top_lpr_area["Cliente"].astype(str)
+                max_lpr_area = max(3, int(top_lpr_area["lprs_offline"].max()) + 1) if not top_lpr_area.empty else 3
+                altura_lpr_area = max(380, min(680, 42 * len(top_lpr_area) + 140))
 
-            with col_g2:
-                st.caption("🟢 Clientes que mais melhoraram")
-                if df_top_melhora.empty:
-                    st.info("Nenhum cliente melhorou neste comparativo.")
-                else:
-                    df_m_plot = df_top_melhora.copy()
-                    df_m_plot["melhora_abs"] = df_m_plot["delta_off"].abs()
-                    fig_melhora = go.Figure(go.Bar(
-                        y=df_m_plot["cliente"],
-                        x=df_m_plot["melhora_abs"],
-                        orientation="h",
-                        marker=dict(color="#059669"),
-                        text=[f"-{int(v)}" for v in df_m_plot["melhora_abs"]],
-                        textposition="outside",
-                        hovertemplate="%{y}<br>-%{x:.0f} câmeras offline<extra></extra>",
-                    ))
-                    fig_melhora.update_layout(
-                        **pdefaults(), height=max(320, len(df_m_plot)*34), showlegend=False,
-                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
-                        margin=dict(l=10, r=60, t=10, b=10),
-                    )
-                    st.plotly_chart(fig_melhora, use_container_width=True, key="hist_top_melhora")
+                fig_lpr_area = go.Figure()
+                fig_lpr_area.add_trace(go.Scatter(
+                    name="LPRs offline",
+                    x=top_lpr_area["lprs_offline"],
+                    y=top_lpr_area["Cliente eixo"],
+                    mode="lines+markers+text",
+                    fill="tozerox",
+                    line=dict(color="#dc2626", width=3.0, shape="spline", smoothing=0.65),
+                    marker=dict(color="#dc2626", size=9, line=dict(color="#ffffff", width=1)),
+                    fillcolor="rgba(220, 38, 38, 0.18)",
+                    text=top_lpr_area["lprs_offline"],
+                    textposition="middle right",
+                    customdata=top_lpr_area[["Cliente", "Franqueado"]],
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b><br>"
+                        "Franqueado: %{customdata[1]}<br>"
+                        "LPRs offline: %{x}<extra></extra>"
+                    ),
+                ))
+                fig_lpr_area.update_layout(
+                    **pdefaults(),
+                    height=altura_lpr_area,
+                    margin=dict(l=10, r=55, t=10, b=35),
+                    xaxis=dict(
+                        title="LPRs offline",
+                        range=[0, max_lpr_area],
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
+                        zeroline=False,
+                    ),
+                    yaxis=dict(
+                        title="",
+                        type="category",
+                        categoryorder="array",
+                        categoryarray=top_lpr_area["Cliente eixo"].tolist(),
+                        tickfont=dict(color="#6B5A7A", size=11),
+                        automargin=True,
+                    ),
+                    showlegend=False,
+                    hovermode="closest",
+                )
+                st.plotly_chart(fig_lpr_area, use_container_width=True, key="lprs_offline_top_clientes_area_horizontal")
 
-            cor_snap_base = "#f97316"   # laranja
-            cor_snap_atual = "#7c3aed"  # roxo
+                st.markdown("#### Detalhamento das LPRs offline")
+                busca_lpr = st.text_input("Buscar por cliente, franqueado, ID ou nome da câmera", key="busca_lprs_offline")
+                df_lpr_lista = df_lprs_off.copy()
+                if busca_lpr.strip():
+                    termo = busca_lpr.strip().lower()
+                    texto_busca = (
+                        df_lpr_lista["Cliente"].astype(str) + " " +
+                        df_lpr_lista["Franqueado"].astype(str) + " " +
+                        df_lpr_lista[COL_ID_CAM].astype(str) + " " +
+                        df_lpr_lista[COL_NOME_CAM].astype(str)
+                    ).str.lower()
+                    df_lpr_lista = df_lpr_lista[texto_busca.str.contains(re.escape(termo), na=False)].copy()
 
-            st.markdown("#### Visão de área comparativa")
-            st.caption("Área horizontal: Snap Antigo/Base em laranja e Snap Novo/Atual em roxo. Todas as cidades/clientes ficam listadas no eixo Y.")
-            df_area = df_comp.copy().sort_values("pct_b", ascending=True).reset_index(drop=True)
-            df_area["cliente_eixo"] = df_area["cliente"].astype(str)
+                cols_lpr = ["Cliente", "Franqueado", COL_ID_CAM, COL_NOME_CAM, "Última atualização", "Tempo offline"]
+                df_lpr_lista = df_lpr_lista[cols_lpr].rename(columns={
+                    COL_ID_CAM: "ID da Câmera",
+                    COL_NOME_CAM: "Nome da Câmera",
+                }).sort_values(["Cliente", "Nome da Câmera"])
+                render_dataframe(df_lpr_lista, height=520)
 
-            max_pct_area = max(15, float(df_area[["pct_a", "pct_b"]].max().max()) + 5)
-            altura_area = max(560, 190 + len(df_area) * 34)
-
-            fig_area = go.Figure()
-
-            # Faixas de referência no fundo: saudável, atenção e crítico.
-            fig_area.add_vrect(x0=0, x1=5, fillcolor="#059669", opacity=0.05, line_width=0)
-            fig_area.add_vrect(x0=5, x1=10, fillcolor="#f59e0b", opacity=0.06, line_width=0)
-            fig_area.add_vrect(x0=10, x1=max_pct_area, fillcolor="#dc2626", opacity=0.05, line_width=0)
-
-            # Snap antigo/base em laranja.
-            fig_area.add_trace(go.Scatter(
-                name=f"Snap Antigo/Base · {leg_a}",
-                y=df_area["cliente_eixo"],
-                x=df_area["pct_a"],
-                mode="lines+markers",
-                fill="tozerox",
-                line=dict(color=cor_snap_base, width=2.5, shape="spline", smoothing=0.65),
-                marker=dict(color=cor_snap_base, size=6, line=dict(color="#ffffff", width=1)),
-                fillcolor="rgba(249, 115, 22, 0.18)",
-                customdata=df_area[["cliente", "off_a", "tot_a"]],
-                hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Antigo/Base</extra>",
-            ))
-
-            # Snap novo/atual em roxo.
-            fig_area.add_trace(go.Scatter(
-                name=f"Snap Novo/Atual · {leg_b}",
-                y=df_area["cliente_eixo"],
-                x=df_area["pct_b"],
-                mode="lines+markers",
-                fill="tozerox",
-                line=dict(color=cor_snap_atual, width=2.8, shape="spline", smoothing=0.65),
-                marker=dict(color=cor_snap_atual, size=7, line=dict(color="#ffffff", width=1)),
-                fillcolor="rgba(124, 58, 237, 0.20)",
-                customdata=df_area[["cliente", "off_b", "tot_b"]],
-                hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Novo/Atual</extra>",
-            ))
-
-            fig_area.add_vline(x=5, line_color="#059669", line_dash="dot", line_width=1)
-            fig_area.add_vline(x=10, line_color="#dc2626", line_dash="dot", line_width=1)
-
-            fig_area.update_layout(
-                **pdefaults(),
-                height=altura_area,
-                xaxis=dict(
-                    title="% offline",
-                    range=[0, max_pct_area],
-                    ticksuffix="%",
-                    gridcolor="#E9D5FF",
-                    tickfont=dict(color="#8B7AA3", size=10),
-                    zeroline=False,
-                ),
-                yaxis=dict(
-                    title="",
-                    type="category",
-                    categoryorder="array",
-                    categoryarray=df_area["cliente_eixo"].tolist(),
-                    tickmode="array",
-                    tickvals=df_area["cliente_eixo"].tolist(),
-                    ticktext=df_area["cliente_eixo"].tolist(),
-                    showticklabels=True,
-                    automargin=True,
-                    tickfont=dict(color="#6B5A7A", size=10),
-                ),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                            font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
-                margin=dict(l=10, r=20, t=45, b=40),
-                hovermode="closest",
-            )
-            st.caption(f"Renderizando {len(df_area)} cidades/clientes na visão de área.")
-            st.plotly_chart(fig_area, use_container_width=True, key="hist_area_pct_cliente")
-
-            st.markdown("#### Comparativo por cliente · câmeras offline")
-            st.caption("Comparação da quantidade de câmeras offline por cidade/cliente. 🟧 Snap Antigo/Base · 🟪 Snap Novo/Atual")
-            df_comp_graf = df_comp.copy().sort_values("off_b", ascending=True)
-
-            max_offline_cliente = max(1, float(df_comp_graf[["off_a", "off_b"]].max().max()))
-            fig_comp = go.Figure()
-            fig_comp.add_trace(go.Bar(
-                name=f"Snap Antigo/Base · {leg_a}",
-                y=df_comp_graf["cliente"],
-                x=df_comp_graf["off_a"],
-                orientation="h",
-                marker_color=cor_snap_base,
-                opacity=0.88,
-                customdata=df_comp_graf[["tot_a", "pct_a"]],
-                hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Antigo/Base</extra>",
-            ))
-            fig_comp.add_trace(go.Bar(
-                name=f"Snap Novo/Atual · {leg_b}",
-                y=df_comp_graf["cliente"],
-                x=df_comp_graf["off_b"],
-                orientation="h",
-                marker_color=cor_snap_atual,
-                opacity=0.92,
-                customdata=df_comp_graf[["tot_b", "pct_b"]],
-                hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Novo/Atual</extra>",
-            ))
-            fig_comp.update_layout(
-                **pdefaults(),
-                barmode="group",
-                height=max(420, len(df_comp_graf) * 42),
-                xaxis=dict(
-                    title="Quantidade de câmeras offline",
-                    range=[0, max_offline_cliente * 1.18],
-                    gridcolor="#E9D5FF",
-                    tickfont=dict(color="#8B7AA3", size=10),
-                    zeroline=False,
-                ),
-                yaxis=dict(tickfont=dict(color="#6B5A7A", size=10)),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                            font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
-                margin=dict(l=10, r=20, t=45, b=10),
-            )
-            st.plotly_chart(fig_comp, use_container_width=True, key="hist_comp_offline_cliente")
-
-            st.markdown("#### Variação líquida de offline")
-            st.caption("Valores positivos indicam piora; valores negativos indicam melhora.")
-            df_delta = df_comp.copy().sort_values("delta_off", ascending=True)
-            cores_d  = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in df_delta["delta_off"]]
-            fig_d = go.Figure(go.Bar(
-                y=df_delta["cliente"], x=df_delta["delta_off"], orientation="h",
-                marker=dict(color=cores_d, line=dict(width=0)),
-                text=[f"{'+' if d>0 else ''}{int(d)}" for d in df_delta["delta_off"]],
-                textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
-                hovertemplate="%{y}<br>Δ %{x:+.0f} câmeras<extra></extra>",
-            ))
-            fig_d.add_vline(x=0, line_color="#C4B5FD", line_width=1)
-            fig_d.update_layout(
-                **pdefaults(), height=max(420, len(df_delta)*32), showlegend=False,
-                xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-                yaxis=dict(tickfont=dict(color="#6B5A7A",size=10)),
-                margin=dict(l=10, r=70, t=20, b=10),
-            )
-            st.plotly_chart(fig_d, use_container_width=True, key="hist_delta_off_cliente")
-
-            st.markdown("---")
-            st.markdown("#### Tabela comparativa detalhada")
-            df_tbl = df_comp[["cliente","tot_a","off_a","pct_a","tot_b","off_b","pct_b","delta_pct","delta_off"]].copy()
-            df_tbl["Situação"] = df_tbl["delta_off"].apply(lambda v: "Piorou" if v > 0 else ("Melhorou" if v < 0 else "Estável"))
-            df_tbl.columns = ["Cliente","Total A","Off A","% A","Total B","Off B","% B","Δ% (pp)","Δ Off","Situação"]
-            df_tbl["% A"]     = df_tbl["% A"].apply(lambda x: f"{x:.1f}%")
-            df_tbl["% B"]     = df_tbl["% B"].apply(lambda x: f"{x:.1f}%")
-            df_tbl["Δ% (pp)"] = df_tbl["Δ% (pp)"].apply(lambda x: f"{'+' if x>0 else ''}{x:.1f}")
-            df_tbl["Δ Off"]   = df_tbl["Δ Off"].apply(lambda x: f"{'+' if x>0 else ''}{int(x)}")
-            df_tbl = df_tbl.sort_values(["Situação", "Δ Off"], ascending=[True, False]).reset_index(drop=True)
-            df_tbl.index += 1
-            render_dataframe(df_tbl, height=min(620,(len(df_tbl)+1)*35+3))
-
-            row_b = df_snaps_filtrado[df_snaps_filtrado["id"] == id_b].iloc[0]
-            if str(row_b.get("notas","")).strip():
-                st.markdown("---")
-                st.markdown(f"📝 **Observações do snapshot B TESTE:** {row_b['notas']}")
-
-        st.markdown("---")
-        with st.expander("🗑️  Gerenciar snapshots gravados"):
-            for _, row in df_snaps.iterrows():
-                c1, c2 = st.columns([5,1])
-                notas_txt = f" · *{str(row['notas'])[:60]}…*" if str(row.get("notas","")).strip() else ""
-                c1.markdown(f"**{row['label']}** · `{row['gravado_em']}`{notas_txt}")
-                if c2.button("Excluir", key=f"del_{row['id']}"):
-                    deletar_snapshot(row["id"]); st.rerun()
+                csv_lpr = df_lpr_lista.to_csv(index=False, sep=";", encoding="utf-8-sig")
+                st.download_button(
+                    "📥 Baixar LPRs offline em CSV",
+                    data=csv_lpr,
+                    file_name=f"lprs_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="dl_lprs_offline_csv_v1",
+                )
 
 
-
-
-
-# ─────────────────────────────────────────────
-# PONTO DE ENTRADA
-# ─────────────────────────────────────────────
-def main():
-    init_db()
-
-    dados, erro, df_origem = carregar_dados(PASTA)
-    clientes_map = carregar_clientes()
-    saude = calcular_saude_dados(PASTA)
-    origem_local = True
-
-    if not dados:
-        result = _render_sem_dados(dados, erro, df_origem, saude)
-        if result is None:
-            return
-        dados, saude, origem_local = result
-
-    if erro:
-        st.warning(erro)
-
-    # ── Métricas globais ──
-    total_clientes = len(dados)
-    total_cameras  = sum(v["total"] for v in dados.values())
-    total_offline  = sum(len(v["offline"]) for v in dados.values())
-    pct_global     = round(total_offline / total_cameras * 100, 2) if total_cameras else 0
-    n_critico      = sum(1 for v in dados.values() if (len(v["offline"]) / v["total"] * 100 if v["total"] else 0) > 10)
-    n_atencao      = sum(1 for v in dados.values() if 5 < (len(v["offline"]) / v["total"] * 100 if v["total"] else 0) <= 10)
-    n_saudavel     = total_clientes - n_critico - n_atencao
-    audit_label, audit_color, audit_reason = classificar_auditoria(pct_global, n_critico, n_atencao, saude)
-    acao_curta, acao_detalhe = recomendacao_auditoria(n_critico, n_atencao, saude)
-    pct_clientes_criticos = round(n_critico / total_clientes * 100, 1) if total_clientes else 0
-    pct_clientes_atencao  = round(n_atencao / total_clientes * 100, 1) if total_clientes else 0
-
-    # ── Modo detalhe rápido ──
-    if "detalhe" in st.session_state:
-        render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem)
-        st.markdown("""<div class="page-header"><div>
-            <div class="page-title">Detalhe do Cliente</div>
-            <div class="page-sub">Consulta direta</div>
-        </div></div>""", unsafe_allow_html=True)
-        render_cliente_detalhe_rapido(str(st.session_state["detalhe"]), dados)
-        return
-
-    # ── Comparativo de snapshots ──
-    comp = _calcular_comparativo(dados)
-    recorrencia     = calcular_recorrencia(30)
-    _hd = _hash_dados(dados)
-    df_clientes_ops = _session_cache(
-        f"montar_df_clientes:{_hd}:{id(comp['tendencias'])}",
-        montar_df_clientes,
-        dados, comp["tendencias"], comp["delta_offs"], recorrencia,
-    )
-    df_tempo_global = _session_cache(
-        f"montar_df_tempo:{_hd}",
-        montar_df_tempo, dados,
-    )
-
-    total_offline_anterior = 0
-    if len(comp["snapshot_ids"]) == 2:
-        try:
-            _snap_old = carregar_snapshot(comp["snapshot_ids"][1], wl_ids_validos={str(w) for w in dados})
-            total_offline_anterior = int(_snap_old["offline"].sum()) if "offline" in _snap_old.columns else 0
-        except Exception:
-            total_offline_anterior = total_offline
-    comp["total_offline_anterior"] = total_offline_anterior
-
-    # ── Contexto compartilhado ──
-    ctx = ContextoMain(
-        dados=dados, saude=saude, comp=comp,
-        df_clientes_ops=df_clientes_ops, df_tempo_global=df_tempo_global,
-        clientes_map=clientes_map, df_origem=df_origem,
-        total_clientes=total_clientes, total_cameras=total_cameras,
-        total_offline=total_offline, pct_global=pct_global,
-        n_critico=n_critico, n_atencao=n_atencao, n_saudavel=n_saudavel,
-        audit_label=audit_label, audit_color=audit_color, audit_reason=audit_reason,
-        acao_curta=acao_curta, acao_detalhe=acao_detalhe,
-        pct_clientes_criticos=pct_clientes_criticos, pct_clientes_atencao=pct_clientes_atencao,
-        origem_local=origem_local,
-    )
-
-    # ── Sidebar e header ──
-    render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem)
-    st.markdown(f"""<div class="page-header"><div>
-        <div class="page-title">Monitoramento Operacional</div>
-        <div class="page-sub">{total_clientes} clientes · {total_cameras} câmeras monitoradas</div>
-    </div></div>""", unsafe_allow_html=True)
-
-    # ── Abas ──
-    _injetar_css_abas_visiveis()
-    abas_principais = [
-        "Auditoria",
-        "Clientes",
-        "Central de Ações",
-        "Tendência",
-        "Evidências",
-        "Detalhe Cliente Snap",
-        "Atualizar Base",
-    ]
-    tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
-
-    with tabs["Auditoria"]:
-        auditoria_subtabs = st.tabs(["📋 Visão Geral", "🕐 Tempo Offline", "📊 % por Cliente", "🚘 LPRs Offline"])
-        with auditoria_subtabs[0]:
-            render_aba_auditoria_visao_geral(
-                dados=dados, saude=saude, comp=comp,
-                n_critico=n_critico, n_atencao=n_atencao, n_saudavel=n_saudavel,
-                total_clientes=total_clientes, total_cameras=total_cameras,
-                total_offline=total_offline, pct_global=pct_global,
-                pct_clientes_criticos=pct_clientes_criticos, pct_clientes_atencao=pct_clientes_atencao,
-                audit_label=audit_label, audit_color=audit_color, acao_detalhe=acao_detalhe,
-                df_clientes_ops=df_clientes_ops, clientes_map=clientes_map, df_origem=df_origem,
-            )
-    with tabs["Auditoria"]:
-     with auditoria_subtabs[1]:
-        render_aba_auditoria_tempo_offline(dados=dados, df_origem=df_origem)
-    with tabs["Auditoria"]:
-     with auditoria_subtabs[2]:
-        render_aba_auditoria_pct_cliente(dados=dados)
-    with tabs["Auditoria"]:
-     with auditoria_subtabs[3]:
-        render_aba_auditoria_lprs(dados=dados, df_origem=df_origem)
-
-    with tabs["Clientes"]:
-        render_aba_clientes(ctx)
-
-    with tabs["Central de Ações"]:
-        render_central_acoes(dados)
-
-    with tabs["Tendência"]:
-        render_aba_tendencia(ctx)
-
-    with tabs["Evidências"]:
-        render_aba_evidencias(ctx)
-
-    with tabs["Detalhe Cliente Snap"]:
-        render_aba_detalhe_cliente_snap(dados)
-
-    with tabs["Atualizar Base"]:
+    # ════════════════════════════════════════════
+    # ABA 7 — ATUALIZAR BASE ONLINE
+    # ════════════════════════════════════════════
+    with tabs[7]:
         render_aba_atualizar_base(df_origem)
+
+    # ════════════════════════════════════════════
+    # ABA 8 — RELATÓRIO FRANQUIA (atalho visível)
+    # ════════════════════════════════════════════
+    with tabs[8]:
+        st.markdown("### ✉️ Relatório por franquia")
+        st.caption("Atalho da mesma rotina disponível dentro de Clientes > Relatório por franquia.")
+        render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="atalho_relatorio_franquia")
 
 
 if __name__ == "__main__":
