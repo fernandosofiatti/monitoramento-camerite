@@ -5087,14 +5087,17 @@ def main():
         "Auditoria",
         "Clientes",
         "Central de Ações",
-        "Tendência",
-        "Tempo offline",
-        "% por cliente",
         "Evidências",
-        "LPRs Offline",
         "Atualizar Base",
     ]
     tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
+
+    with tabs["Auditoria"]:
+        auditoria_subtabs = st.tabs(["📋 Visão Geral", "🕐 Tempo offline", "📊 % por cliente", "🚘 LPRs Offline"])
+    tabs["Auditoria"] = auditoria_subtabs[0]
+    tabs["Tempo offline"] = auditoria_subtabs[1]
+    tabs["% por cliente"] = auditoria_subtabs[2]
+    tabs["LPRs Offline"] = auditoria_subtabs[3]
 
     # ════════════════════════════════════════════
     # ABA 0 — VISÃO EXECUTIVA
@@ -5554,7 +5557,7 @@ def main():
     with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia"])
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -5918,7 +5921,7 @@ def main():
     with tabs["Central de Ações"]:
         render_central_acoes(dados)
 
-    with tabs["Tendência"]:
+    with clientes_subtabs[2]:
         render_aba_tendencia(dados)
 
     # ════════════════════════════════════════════
