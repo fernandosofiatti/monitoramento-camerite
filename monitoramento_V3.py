@@ -6200,458 +6200,456 @@ def render_aba_evidencias(ctx: 'ContextoMain') -> None:
         render_tendencia_cliente(dados)
 
     with ev_subtabs[0]:
-     pass  # conteúdo abaixo usa 4-space indent original
+        df_snaps = listar_snapshots()
 
-    with ev_subtabs[0]:
-     st.markdown("#### Histórico de snapshots")
-    df_snaps = listar_snapshots()
-
-    if df_snaps.empty:
-        st.info("Nenhum snapshot gravado ainda. Use o painel lateral para salvar o estado atual.")
-    else:
-        df_snaps["gravado_dt"] = pd.to_datetime(df_snaps["gravado_em"])
-        data_min = df_snaps["gravado_dt"].min().date()
-        data_max = df_snaps["gravado_dt"].max().date()
-
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            data_inicio = st.date_input("📅 Data inicial", value=data_min,
-                                        min_value=data_min, max_value=data_max,
-                                        format="DD/MM/YYYY", key="hist_data_ini")
-        with col_d2:
-            data_fim = st.date_input("📅 Data final", value=data_max,
-                                     min_value=data_min, max_value=data_max,
-                                     format="DD/MM/YYYY", key="hist_data_fim")
-
-        df_snaps_filtrado = df_snaps[
-            (df_snaps["gravado_dt"].dt.date >= data_inicio) &
-            (df_snaps["gravado_dt"].dt.date <= data_fim)
-        ]
-
-        if df_snaps_filtrado.empty:
-            st.warning("Nenhum snapshot encontrado no período selecionado.")
+        if df_snaps.empty:
+            st.info("Nenhum snapshot gravado ainda. Use o painel lateral para salvar o estado atual.")
         else:
-            opcoes = {
-                int(r["id"]): f"{r['label']}  ({r['gravado_em']})"
-                for _, r in df_snaps_filtrado.iterrows()
-            }
-            datas_snap = {
-                int(r["id"]): r["gravado_em"]
-                for _, r in df_snaps_filtrado.iterrows()
-            }
-            ids_opcoes = list(opcoes.keys())
+            df_snaps["gravado_dt"] = pd.to_datetime(df_snaps["gravado_em"])
+            data_min = df_snaps["gravado_dt"].min().date()
+            data_max = df_snaps["gravado_dt"].max().date()
 
-            col_a, col_b, col_dl_h = st.columns([2,2,1])
-            with col_a:
-                sel_a = st.selectbox(
-                    "📅 Snapshot A (base)",
-                    ids_opcoes,
-                    index=min(1, len(ids_opcoes)-1),
-                    format_func=lambda sid: opcoes.get(sid, str(sid)),
-                    key="hist_snap_a",
-                )
-            with col_b:
-                sel_b = st.selectbox(
-                    "📅 Snapshot B (recente)",
-                    ids_opcoes,
-                    index=0,
-                    format_func=lambda sid: opcoes.get(sid, str(sid)),
-                    key="hist_snap_b",
-                )
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                data_inicio = st.date_input("📅 Data inicial", value=data_min,
+                                            min_value=data_min, max_value=data_max,
+                                            format="DD/MM/YYYY", key="hist_data_ini")
+            with col_d2:
+                data_fim = st.date_input("📅 Data final", value=data_max,
+                                         min_value=data_min, max_value=data_max,
+                                         format="DD/MM/YYYY", key="hist_data_fim")
 
-            id_a = int(sel_a)
-            id_b = int(sel_b)
+            df_snaps_filtrado = df_snaps[
+                (df_snaps["gravado_dt"].dt.date >= data_inicio) &
+                (df_snaps["gravado_dt"].dt.date <= data_fim)
+            ]
 
-            def fmt_dt(s):
-                try: return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
-                except: return s
-
-            leg_a = fmt_dt(datas_snap.get(id_a, ""))
-            leg_b = fmt_dt(datas_snap.get(id_b, ""))
-
-            # Comparativo histórico real: A e B vêm dos snapshots salvos,
-            # mas respeitando o mesmo universo de clientes usado no painel.
-            wl_ids_validos_hist = {str(wl).strip() for wl in (dados or {}).keys()}
-            df_a = carregar_snapshot(id_a, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_a","total":"tot_a","pct_offline":"pct_a","nome_cliente":"nc_a"})
-            df_b = carregar_snapshot(id_b, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
-            df_comp = pd.merge(df_a, df_b, on="wl_id", how="outer").fillna(0)
-            # Usar nome do snapshot B como display
-            df_comp["cliente"] = df_comp["nc_b"].where(df_comp["nc_b"] != 0, df_comp["nc_a"])
-            df_comp["delta_pct"] = df_comp["pct_b"] - df_comp["pct_a"]
-            df_comp["delta_off"] = df_comp["off_b"] - df_comp["off_a"]
-            df_comp = df_comp.sort_values("pct_b", ascending=False)
-
-            melhoraram = (df_comp["delta_off"] < 0).sum()
-            pioraram   = (df_comp["delta_off"] > 0).sum()
-            estaveis   = len(df_comp) - melhoraram - pioraram
-
-            with col_dl_h:
-                st.markdown("<br>", unsafe_allow_html=True)
-                buf_h = io.BytesIO()
-                df_comp.to_excel(buf_h, index=False, engine="openpyxl")
-                st.download_button("⬇ Comparativo", data=buf_h.getvalue(),
-                    file_name=f"comparativo_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    key="dl_comparativo_historico_excel_v1")
-
-            total_off_a = int(df_comp["off_a"].sum())
-            total_off_b = int(df_comp["off_b"].sum())
-            total_cam_a = int(df_comp["tot_a"].sum())
-            total_cam_b = int(df_comp["tot_b"].sum())
-            pct_a_global = (total_off_a / total_cam_a * 100) if total_cam_a else 0
-            pct_b_global = (total_off_b / total_cam_b * 100) if total_cam_b else 0
-            delta_off_global = total_off_b - total_off_a
-            delta_pct_global = pct_b_global - pct_a_global
-            delta_base_global = total_cam_b - total_cam_a
-            novos_clientes = int(((df_comp["tot_a"] == 0) & (df_comp["tot_b"] > 0)).sum())
-            removidos_clientes = int(((df_comp["tot_a"] > 0) & (df_comp["tot_b"] == 0)).sum())
-            clientes_analisados = int(len(df_comp))
-            clientes_com_variacao_offline = int((df_comp["delta_off"] != 0).sum())
-            clientes_com_variacao_base = int((df_comp["tot_b"] - df_comp["tot_a"] != 0).sum())
-
-            if delta_off_global > 0:
-                resumo_cor = "#dc2626"
-                resumo_status = "Piora operacional"
-                resumo_texto = f"A base teve aumento de {delta_off_global} câmeras offline no período."
-            elif delta_off_global < 0:
-                resumo_cor = "#059669"
-                resumo_status = "Melhora operacional"
-                resumo_texto = f"A base reduziu {abs(delta_off_global)} câmeras offline no período."
+            if df_snaps_filtrado.empty:
+                st.warning("Nenhum snapshot encontrado no período selecionado.")
             else:
-                resumo_cor = "#6D28D9"
-                resumo_status = "Operação estável"
-                resumo_texto = "O total de câmeras offline ficou estável no período."
+                opcoes = {
+                    int(r["id"]): f"{r['label']}  ({r['gravado_em']})"
+                    for _, r in df_snaps_filtrado.iterrows()
+                }
+                datas_snap = {
+                    int(r["id"]): r["gravado_em"]
+                    for _, r in df_snaps_filtrado.iterrows()
+                }
+                ids_opcoes = list(opcoes.keys())
 
-            cor_card_delta = "bad" if delta_off_global > 0 else ("good" if delta_off_global < 0 else "neutral")
-            cor_card_pct = "bad" if delta_pct_global > 0 else ("good" if delta_pct_global < 0 else "neutral")
+                col_a, col_b, col_dl_h = st.columns([2,2,1])
+                with col_a:
+                    sel_a = st.selectbox(
+                        "📅 Snapshot A (base)",
+                        ids_opcoes,
+                        index=min(1, len(ids_opcoes)-1),
+                        format_func=lambda sid: opcoes.get(sid, str(sid)),
+                        key="hist_snap_a",
+                    )
+                with col_b:
+                    sel_b = st.selectbox(
+                        "📅 Snapshot B (recente)",
+                        ids_opcoes,
+                        index=0,
+                        format_func=lambda sid: opcoes.get(sid, str(sid)),
+                        key="hist_snap_b",
+                    )
 
-            st.markdown(f"""
-            <div class="compare-hero">
-                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
-                    <div>
-                        <div class="compare-title">Painel executivo de comparativo</div>
-                        <div class="compare-sub">
-                            Comparação real entre os dois snapshots selecionados, mostrando impacto em câmeras offline, percentual da frota e movimento da carteira.
+                id_a = int(sel_a)
+                id_b = int(sel_b)
+
+                def fmt_dt(s):
+                    try: return datetime.strptime(s, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
+                    except: return s
+
+                leg_a = fmt_dt(datas_snap.get(id_a, ""))
+                leg_b = fmt_dt(datas_snap.get(id_b, ""))
+
+                # Comparativo histórico real: A e B vêm dos snapshots salvos,
+                # mas respeitando o mesmo universo de clientes usado no painel.
+                wl_ids_validos_hist = {str(wl).strip() for wl in (dados or {}).keys()}
+                df_a = carregar_snapshot(id_a, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_a","total":"tot_a","pct_offline":"pct_a","nome_cliente":"nc_a"})
+                df_b = carregar_snapshot(id_b, wl_ids_validos=wl_ids_validos_hist).rename(columns={"offline":"off_b","total":"tot_b","pct_offline":"pct_b","nome_cliente":"nc_b"})
+                df_comp = pd.merge(df_a, df_b, on="wl_id", how="outer").fillna(0)
+                # Usar nome do snapshot B como display
+                df_comp["cliente"] = df_comp["nc_b"].where(df_comp["nc_b"] != 0, df_comp["nc_a"])
+                df_comp["delta_pct"] = df_comp["pct_b"] - df_comp["pct_a"]
+                df_comp["delta_off"] = df_comp["off_b"] - df_comp["off_a"]
+                df_comp = df_comp.sort_values("pct_b", ascending=False)
+
+                melhoraram = (df_comp["delta_off"] < 0).sum()
+                pioraram   = (df_comp["delta_off"] > 0).sum()
+                estaveis   = len(df_comp) - melhoraram - pioraram
+
+                with col_dl_h:
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    buf_h = io.BytesIO()
+                    df_comp.to_excel(buf_h, index=False, engine="openpyxl")
+                    st.download_button("⬇ Comparativo", data=buf_h.getvalue(),
+                        file_name=f"comparativo_{agora_sao_paulo_str('%Y%m%d')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="dl_comparativo_historico_excel_v1")
+
+                total_off_a = int(df_comp["off_a"].sum())
+                total_off_b = int(df_comp["off_b"].sum())
+                total_cam_a = int(df_comp["tot_a"].sum())
+                total_cam_b = int(df_comp["tot_b"].sum())
+                pct_a_global = (total_off_a / total_cam_a * 100) if total_cam_a else 0
+                pct_b_global = (total_off_b / total_cam_b * 100) if total_cam_b else 0
+                delta_off_global = total_off_b - total_off_a
+                delta_pct_global = pct_b_global - pct_a_global
+                delta_base_global = total_cam_b - total_cam_a
+                novos_clientes = int(((df_comp["tot_a"] == 0) & (df_comp["tot_b"] > 0)).sum())
+                removidos_clientes = int(((df_comp["tot_a"] > 0) & (df_comp["tot_b"] == 0)).sum())
+                clientes_analisados = int(len(df_comp))
+                clientes_com_variacao_offline = int((df_comp["delta_off"] != 0).sum())
+                clientes_com_variacao_base = int((df_comp["tot_b"] - df_comp["tot_a"] != 0).sum())
+
+                if delta_off_global > 0:
+                    resumo_cor = "#dc2626"
+                    resumo_status = "Piora operacional"
+                    resumo_texto = f"A base teve aumento de {delta_off_global} câmeras offline no período."
+                elif delta_off_global < 0:
+                    resumo_cor = "#059669"
+                    resumo_status = "Melhora operacional"
+                    resumo_texto = f"A base reduziu {abs(delta_off_global)} câmeras offline no período."
+                else:
+                    resumo_cor = "#6D28D9"
+                    resumo_status = "Operação estável"
+                    resumo_texto = "O total de câmeras offline ficou estável no período."
+
+                cor_card_delta = "bad" if delta_off_global > 0 else ("good" if delta_off_global < 0 else "neutral")
+                cor_card_pct = "bad" if delta_pct_global > 0 else ("good" if delta_pct_global < 0 else "neutral")
+
+                st.markdown(f"""
+                <div class="compare-hero">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
+                        <div>
+                            <div class="compare-title">Painel executivo de comparativo</div>
+                            <div class="compare-sub">
+                                Comparação real entre os dois snapshots selecionados, mostrando impacto em câmeras offline, percentual da frota e movimento da carteira.
+                            </div>
+                            <div class="compare-pill">📅 Snapshot A/Base: {leg_a} &nbsp; → &nbsp; Snapshot B/Recente: {leg_b}</div>
                         </div>
-                        <div class="compare-pill">📅 Snapshot A/Base: {leg_a} &nbsp; → &nbsp; Snapshot B/Recente: {leg_b}</div>
+                        <div class="compare-status-tag" style="color:{resumo_cor}">{resumo_status}</div>
                     </div>
-                    <div class="compare-status-tag" style="color:{resumo_cor}">{resumo_status}</div>
+                    <div class="compare-status-box">
+                        <div class="compare-status-text">{resumo_texto}</div>
+                        <div class="compare-status-text"><b>Delta:</b> {delta_off_global:+d} offline · {delta_pct_global:+.1f} p.p. · Base {delta_base_global:+d}</div>
+                    </div>
                 </div>
-                <div class="compare-status-box">
-                    <div class="compare-status-text">{resumo_texto}</div>
-                    <div class="compare-status-text"><b>Delta:</b> {delta_off_global:+d} offline · {delta_pct_global:+.1f} p.p. · Base {delta_base_global:+d}</div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="compare-grid">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">Snapshot A · Base</div>
+                        <div class="compare-value">{total_off_a}</div>
+                        <div class="compare-note">{pct_a_global:.1f}% da frota · {total_cam_a} câmeras totais</div>
+                    </div>
+                    <div class="compare-card {cor_card_pct}">
+                        <div class="compare-label">Snapshot B · Recente</div>
+                        <div class="compare-value" style="color:{resumo_cor}">{total_off_b}</div>
+                        <div class="compare-note">{pct_b_global:.1f}% da frota · {total_cam_b} câmeras totais</div>
+                    </div>
+                    <div class="compare-card {cor_card_delta}">
+                        <div class="compare-label">Variação de offline</div>
+                        <div class="compare-value" style="color:{resumo_cor}">{delta_off_global:+d}</div>
+                        <div class="compare-note">{delta_pct_global:+.1f} p.p. em relação ao snapshot A</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">Carteira analisada</div>
+                        <div class="compare-value" style="font-size:30px">{clientes_analisados}</div>
+                        <div class="compare-note">{clientes_com_variacao_offline} com variação offline · {melhoraram} melhoraram · {pioraram} pioraram</div>
+                    </div>
                 </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-            st.markdown(f"""
-            <div class="compare-grid">
-                <div class="compare-card neutral">
-                    <div class="compare-label">Snapshot A · Base</div>
-                    <div class="compare-value">{total_off_a}</div>
-                    <div class="compare-note">{pct_a_global:.1f}% da frota · {total_cam_a} câmeras totais</div>
+                # Resumo visual da carteira — substitui métricas soltas por cards executivos
+                pct_movimento = (clientes_com_variacao_offline / clientes_analisados * 100) if clientes_analisados else 0
+                pct_melhoraram = (melhoraram / clientes_analisados * 100) if clientes_analisados else 0
+                pct_pioraram = (pioraram / clientes_analisados * 100) if clientes_analisados else 0
+                pct_estaveis = (estaveis / clientes_analisados * 100) if clientes_analisados else 0
+                pct_base_alterada = (clientes_com_variacao_base / clientes_analisados * 100) if clientes_analisados else 0
+
+                st.markdown("#### Resumo da carteira")
+                st.markdown(f"""
+                <div class="compare-grid">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">📈 Movimento</div>
+                        <div class="compare-value">{clientes_com_variacao_offline}</div>
+                        <div class="compare-note">{pct_movimento:.1f}% da carteira · {clientes_analisados} clientes analisados</div>
+                    </div>
+                    <div class="compare-card good">
+                        <div class="compare-label">🟢 Melhoraram</div>
+                        <div class="compare-value" style="color:#059669">{melhoraram}</div>
+                        <div class="compare-note">{pct_melhoraram:.1f}% da carteira reduziu offline</div>
+                    </div>
+                    <div class="compare-card bad">
+                        <div class="compare-label">🔴 Pioraram</div>
+                        <div class="compare-value" style="color:#dc2626">{pioraram}</div>
+                        <div class="compare-note">{pct_pioraram:.1f}% da carteira aumentou offline</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">📊 Estabilidade</div>
+                        <div class="compare-value">{pct_estaveis:.1f}%</div>
+                        <div class="compare-note">{estaveis} clientes sem alteração offline</div>
+                    </div>
                 </div>
-                <div class="compare-card {cor_card_pct}">
-                    <div class="compare-label">Snapshot B · Recente</div>
-                    <div class="compare-value" style="color:{resumo_cor}">{total_off_b}</div>
-                    <div class="compare-note">{pct_b_global:.1f}% da frota · {total_cam_b} câmeras totais</div>
+                """, unsafe_allow_html=True)
+
+                st.markdown(f"""
+                <div class="compare-status-box" style="margin-top:-4px;margin-bottom:16px">
+                    <div class="compare-status-text">
+                        <b>Carteira analisada:</b> {clientes_analisados} clientes · 
+                        <b>Com variação offline:</b> {clientes_com_variacao_offline} · 
+                        <b>Estáveis:</b> {estaveis}
+                    </div>
+                    <div class="compare-status-tag" style="color:#6D28D9">Resumo executivo</div>
                 </div>
-                <div class="compare-card {cor_card_delta}">
-                    <div class="compare-label">Variação de offline</div>
-                    <div class="compare-value" style="color:{resumo_cor}">{delta_off_global:+d}</div>
-                    <div class="compare-note">{delta_pct_global:+.1f} p.p. em relação ao snapshot A</div>
+                <div class="compare-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px">
+                    <div class="compare-card neutral">
+                        <div class="compare-label">🆕 Novos clientes</div>
+                        <div class="compare-value" style="font-size:26px">{novos_clientes}</div>
+                        <div class="compare-note">Entraram no snapshot recente</div>
+                    </div>
+                    <div class="compare-card warn">
+                        <div class="compare-label">🚫 Clientes removidos</div>
+                        <div class="compare-value" style="font-size:26px">{removidos_clientes}</div>
+                        <div class="compare-note">Existiam na base anterior e não aparecem na recente</div>
+                    </div>
+                    <div class="compare-card neutral">
+                        <div class="compare-label">🔄 Base alterada</div>
+                        <div class="compare-value" style="font-size:26px">{clientes_com_variacao_base}</div>
+                        <div class="compare-note">{pct_base_alterada:.1f}% da carteira teve mudança no total de câmeras</div>
+                    </div>
                 </div>
-                <div class="compare-card neutral">
-                    <div class="compare-label">Carteira analisada</div>
-                    <div class="compare-value" style="font-size:30px">{clientes_analisados}</div>
-                    <div class="compare-note">{clientes_com_variacao_offline} com variação offline · {melhoraram} melhoraram · {pioraram} pioraram</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-            # Resumo visual da carteira — substitui métricas soltas por cards executivos
-            pct_movimento = (clientes_com_variacao_offline / clientes_analisados * 100) if clientes_analisados else 0
-            pct_melhoraram = (melhoraram / clientes_analisados * 100) if clientes_analisados else 0
-            pct_pioraram = (pioraram / clientes_analisados * 100) if clientes_analisados else 0
-            pct_estaveis = (estaveis / clientes_analisados * 100) if clientes_analisados else 0
-            pct_base_alterada = (clientes_com_variacao_base / clientes_analisados * 100) if clientes_analisados else 0
+                df_top_piora = df_comp[df_comp["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
+                df_top_melhora = df_comp[df_comp["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
 
-            st.markdown("#### Resumo da carteira")
-            st.markdown(f"""
-            <div class="compare-grid">
-                <div class="compare-card neutral">
-                    <div class="compare-label">📈 Movimento</div>
-                    <div class="compare-value">{clientes_com_variacao_offline}</div>
-                    <div class="compare-note">{pct_movimento:.1f}% da carteira · {clientes_analisados} clientes analisados</div>
-                </div>
-                <div class="compare-card good">
-                    <div class="compare-label">🟢 Melhoraram</div>
-                    <div class="compare-value" style="color:#059669">{melhoraram}</div>
-                    <div class="compare-note">{pct_melhoraram:.1f}% da carteira reduziu offline</div>
-                </div>
-                <div class="compare-card bad">
-                    <div class="compare-label">🔴 Pioraram</div>
-                    <div class="compare-value" style="color:#dc2626">{pioraram}</div>
-                    <div class="compare-note">{pct_pioraram:.1f}% da carteira aumentou offline</div>
-                </div>
-                <div class="compare-card neutral">
-                    <div class="compare-label">📊 Estabilidade</div>
-                    <div class="compare-value">{pct_estaveis:.1f}%</div>
-                    <div class="compare-note">{estaveis} clientes sem alteração offline</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                st.markdown("#### Maiores variações de câmeras offline")
+                col_g1, col_g2 = st.columns(2)
+                with col_g1:
+                    st.caption("🔴 Clientes que mais pioraram")
+                    if df_top_piora.empty:
+                        st.info("Nenhum cliente piorou neste comparativo.")
+                    else:
+                        fig_piora = go.Figure(go.Bar(
+                            y=df_top_piora["cliente"],
+                            x=df_top_piora["delta_off"],
+                            orientation="h",
+                            marker=dict(color="#dc2626"),
+                            text=[f"+{int(v)}" for v in df_top_piora["delta_off"]],
+                            textposition="outside",
+                            hovertemplate="%{y}<br>+%{x:.0f} câmeras offline<extra></extra>",
+                        ))
+                        fig_piora.update_layout(
+                            **pdefaults(), height=max(320, len(df_top_piora)*34), showlegend=False,
+                            xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                            yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
+                            margin=dict(l=10, r=60, t=10, b=10),
+                        )
+                        st.plotly_chart(fig_piora, use_container_width=True, key="hist_top_piora")
 
-            st.markdown(f"""
-            <div class="compare-status-box" style="margin-top:-4px;margin-bottom:16px">
-                <div class="compare-status-text">
-                    <b>Carteira analisada:</b> {clientes_analisados} clientes · 
-                    <b>Com variação offline:</b> {clientes_com_variacao_offline} · 
-                    <b>Estáveis:</b> {estaveis}
-                </div>
-                <div class="compare-status-tag" style="color:#6D28D9">Resumo executivo</div>
-            </div>
-            <div class="compare-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px">
-                <div class="compare-card neutral">
-                    <div class="compare-label">🆕 Novos clientes</div>
-                    <div class="compare-value" style="font-size:26px">{novos_clientes}</div>
-                    <div class="compare-note">Entraram no snapshot recente</div>
-                </div>
-                <div class="compare-card warn">
-                    <div class="compare-label">🚫 Clientes removidos</div>
-                    <div class="compare-value" style="font-size:26px">{removidos_clientes}</div>
-                    <div class="compare-note">Existiam na base anterior e não aparecem na recente</div>
-                </div>
-                <div class="compare-card neutral">
-                    <div class="compare-label">🔄 Base alterada</div>
-                    <div class="compare-value" style="font-size:26px">{clientes_com_variacao_base}</div>
-                    <div class="compare-note">{pct_base_alterada:.1f}% da carteira teve mudança no total de câmeras</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                with col_g2:
+                    st.caption("🟢 Clientes que mais melhoraram")
+                    if df_top_melhora.empty:
+                        st.info("Nenhum cliente melhorou neste comparativo.")
+                    else:
+                        df_m_plot = df_top_melhora.copy()
+                        df_m_plot["melhora_abs"] = df_m_plot["delta_off"].abs()
+                        fig_melhora = go.Figure(go.Bar(
+                            y=df_m_plot["cliente"],
+                            x=df_m_plot["melhora_abs"],
+                            orientation="h",
+                            marker=dict(color="#059669"),
+                            text=[f"-{int(v)}" for v in df_m_plot["melhora_abs"]],
+                            textposition="outside",
+                            hovertemplate="%{y}<br>-%{x:.0f} câmeras offline<extra></extra>",
+                        ))
+                        fig_melhora.update_layout(
+                            **pdefaults(), height=max(320, len(df_m_plot)*34), showlegend=False,
+                            xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                            yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
+                            margin=dict(l=10, r=60, t=10, b=10),
+                        )
+                        st.plotly_chart(fig_melhora, use_container_width=True, key="hist_top_melhora")
 
-            df_top_piora = df_comp[df_comp["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
-            df_top_melhora = df_comp[df_comp["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
+                cor_snap_base = "#f97316"   # laranja
+                cor_snap_atual = "#7c3aed"  # roxo
 
-            st.markdown("#### Maiores variações de câmeras offline")
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                st.caption("🔴 Clientes que mais pioraram")
-                if df_top_piora.empty:
-                    st.info("Nenhum cliente piorou neste comparativo.")
-                else:
-                    fig_piora = go.Figure(go.Bar(
-                        y=df_top_piora["cliente"],
-                        x=df_top_piora["delta_off"],
-                        orientation="h",
-                        marker=dict(color="#dc2626"),
-                        text=[f"+{int(v)}" for v in df_top_piora["delta_off"]],
-                        textposition="outside",
-                        hovertemplate="%{y}<br>+%{x:.0f} câmeras offline<extra></extra>",
-                    ))
-                    fig_piora.update_layout(
-                        **pdefaults(), height=max(320, len(df_top_piora)*34), showlegend=False,
-                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
-                        margin=dict(l=10, r=60, t=10, b=10),
-                    )
-                    st.plotly_chart(fig_piora, use_container_width=True, key="hist_top_piora")
+                st.markdown("#### Visão de área comparativa")
+                st.caption("Área horizontal: Snap Antigo/Base em laranja e Snap Novo/Atual em roxo. Todas as cidades/clientes ficam listadas no eixo Y.")
+                df_area = df_comp.copy().sort_values("pct_b", ascending=True).reset_index(drop=True)
+                df_area["cliente_eixo"] = df_area["cliente"].astype(str)
 
-            with col_g2:
-                st.caption("🟢 Clientes que mais melhoraram")
-                if df_top_melhora.empty:
-                    st.info("Nenhum cliente melhorou neste comparativo.")
-                else:
-                    df_m_plot = df_top_melhora.copy()
-                    df_m_plot["melhora_abs"] = df_m_plot["delta_off"].abs()
-                    fig_melhora = go.Figure(go.Bar(
-                        y=df_m_plot["cliente"],
-                        x=df_m_plot["melhora_abs"],
-                        orientation="h",
-                        marker=dict(color="#059669"),
-                        text=[f"-{int(v)}" for v in df_m_plot["melhora_abs"]],
-                        textposition="outside",
-                        hovertemplate="%{y}<br>-%{x:.0f} câmeras offline<extra></extra>",
-                    ))
-                    fig_melhora.update_layout(
-                        **pdefaults(), height=max(320, len(df_m_plot)*34), showlegend=False,
-                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A",size=10)),
-                        margin=dict(l=10, r=60, t=10, b=10),
-                    )
-                    st.plotly_chart(fig_melhora, use_container_width=True, key="hist_top_melhora")
+                max_pct_area = max(15, float(df_area[["pct_a", "pct_b"]].max().max()) + 5)
+                altura_area = max(560, 190 + len(df_area) * 34)
 
-            cor_snap_base = "#f97316"   # laranja
-            cor_snap_atual = "#7c3aed"  # roxo
+                fig_area = go.Figure()
 
-            st.markdown("#### Visão de área comparativa")
-            st.caption("Área horizontal: Snap Antigo/Base em laranja e Snap Novo/Atual em roxo. Todas as cidades/clientes ficam listadas no eixo Y.")
-            df_area = df_comp.copy().sort_values("pct_b", ascending=True).reset_index(drop=True)
-            df_area["cliente_eixo"] = df_area["cliente"].astype(str)
+                # Faixas de referência no fundo: saudável, atenção e crítico.
+                fig_area.add_vrect(x0=0, x1=5, fillcolor="#059669", opacity=0.05, line_width=0)
+                fig_area.add_vrect(x0=5, x1=10, fillcolor="#f59e0b", opacity=0.06, line_width=0)
+                fig_area.add_vrect(x0=10, x1=max_pct_area, fillcolor="#dc2626", opacity=0.05, line_width=0)
 
-            max_pct_area = max(15, float(df_area[["pct_a", "pct_b"]].max().max()) + 5)
-            altura_area = max(560, 190 + len(df_area) * 34)
+                # Snap antigo/base em laranja.
+                fig_area.add_trace(go.Scatter(
+                    name=f"Snap Antigo/Base · {leg_a}",
+                    y=df_area["cliente_eixo"],
+                    x=df_area["pct_a"],
+                    mode="lines+markers",
+                    fill="tozerox",
+                    line=dict(color=cor_snap_base, width=2.5, shape="spline", smoothing=0.65),
+                    marker=dict(color=cor_snap_base, size=6, line=dict(color="#ffffff", width=1)),
+                    fillcolor="rgba(249, 115, 22, 0.18)",
+                    customdata=df_area[["cliente", "off_a", "tot_a"]],
+                    hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Antigo/Base</extra>",
+                ))
 
-            fig_area = go.Figure()
+                # Snap novo/atual em roxo.
+                fig_area.add_trace(go.Scatter(
+                    name=f"Snap Novo/Atual · {leg_b}",
+                    y=df_area["cliente_eixo"],
+                    x=df_area["pct_b"],
+                    mode="lines+markers",
+                    fill="tozerox",
+                    line=dict(color=cor_snap_atual, width=2.8, shape="spline", smoothing=0.65),
+                    marker=dict(color=cor_snap_atual, size=7, line=dict(color="#ffffff", width=1)),
+                    fillcolor="rgba(124, 58, 237, 0.20)",
+                    customdata=df_area[["cliente", "off_b", "tot_b"]],
+                    hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Novo/Atual</extra>",
+                ))
 
-            # Faixas de referência no fundo: saudável, atenção e crítico.
-            fig_area.add_vrect(x0=0, x1=5, fillcolor="#059669", opacity=0.05, line_width=0)
-            fig_area.add_vrect(x0=5, x1=10, fillcolor="#f59e0b", opacity=0.06, line_width=0)
-            fig_area.add_vrect(x0=10, x1=max_pct_area, fillcolor="#dc2626", opacity=0.05, line_width=0)
+                fig_area.add_vline(x=5, line_color="#059669", line_dash="dot", line_width=1)
+                fig_area.add_vline(x=10, line_color="#dc2626", line_dash="dot", line_width=1)
 
-            # Snap antigo/base em laranja.
-            fig_area.add_trace(go.Scatter(
-                name=f"Snap Antigo/Base · {leg_a}",
-                y=df_area["cliente_eixo"],
-                x=df_area["pct_a"],
-                mode="lines+markers",
-                fill="tozerox",
-                line=dict(color=cor_snap_base, width=2.5, shape="spline", smoothing=0.65),
-                marker=dict(color=cor_snap_base, size=6, line=dict(color="#ffffff", width=1)),
-                fillcolor="rgba(249, 115, 22, 0.18)",
-                customdata=df_area[["cliente", "off_a", "tot_a"]],
-                hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Antigo/Base</extra>",
-            ))
+                fig_area.update_layout(
+                    **pdefaults(),
+                    height=altura_area,
+                    xaxis=dict(
+                        title="% offline",
+                        range=[0, max_pct_area],
+                        ticksuffix="%",
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
+                        zeroline=False,
+                    ),
+                    yaxis=dict(
+                        title="",
+                        type="category",
+                        categoryorder="array",
+                        categoryarray=df_area["cliente_eixo"].tolist(),
+                        tickmode="array",
+                        tickvals=df_area["cliente_eixo"].tolist(),
+                        ticktext=df_area["cliente_eixo"].tolist(),
+                        showticklabels=True,
+                        automargin=True,
+                        tickfont=dict(color="#6B5A7A", size=10),
+                    ),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                                font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=10, r=20, t=45, b=40),
+                    hovermode="closest",
+                )
+                st.caption(f"Renderizando {len(df_area)} cidades/clientes na visão de área.")
+                st.plotly_chart(fig_area, use_container_width=True, key="hist_area_pct_cliente")
 
-            # Snap novo/atual em roxo.
-            fig_area.add_trace(go.Scatter(
-                name=f"Snap Novo/Atual · {leg_b}",
-                y=df_area["cliente_eixo"],
-                x=df_area["pct_b"],
-                mode="lines+markers",
-                fill="tozerox",
-                line=dict(color=cor_snap_atual, width=2.8, shape="spline", smoothing=0.65),
-                marker=dict(color=cor_snap_atual, size=7, line=dict(color="#ffffff", width=1)),
-                fillcolor="rgba(124, 58, 237, 0.20)",
-                customdata=df_area[["cliente", "off_b", "tot_b"]],
-                hovertemplate="%{customdata[0]}<br>%{x:.1f}% offline<br>%{customdata[1]:.0f} de %{customdata[2]:.0f} câmeras<extra>Snap Novo/Atual</extra>",
-            ))
+                st.markdown("#### Comparativo por cliente · câmeras offline")
+                st.caption("Comparação da quantidade de câmeras offline por cidade/cliente. 🟧 Snap Antigo/Base · 🟪 Snap Novo/Atual")
+                df_comp_graf = df_comp.copy().sort_values("off_b", ascending=True)
 
-            fig_area.add_vline(x=5, line_color="#059669", line_dash="dot", line_width=1)
-            fig_area.add_vline(x=10, line_color="#dc2626", line_dash="dot", line_width=1)
+                max_offline_cliente = max(1, float(df_comp_graf[["off_a", "off_b"]].max().max()))
+                fig_comp = go.Figure()
+                fig_comp.add_trace(go.Bar(
+                    name=f"Snap Antigo/Base · {leg_a}",
+                    y=df_comp_graf["cliente"],
+                    x=df_comp_graf["off_a"],
+                    orientation="h",
+                    marker_color=cor_snap_base,
+                    opacity=0.88,
+                    customdata=df_comp_graf[["tot_a", "pct_a"]],
+                    hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Antigo/Base</extra>",
+                ))
+                fig_comp.add_trace(go.Bar(
+                    name=f"Snap Novo/Atual · {leg_b}",
+                    y=df_comp_graf["cliente"],
+                    x=df_comp_graf["off_b"],
+                    orientation="h",
+                    marker_color=cor_snap_atual,
+                    opacity=0.92,
+                    customdata=df_comp_graf[["tot_b", "pct_b"]],
+                    hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Novo/Atual</extra>",
+                ))
+                fig_comp.update_layout(
+                    **pdefaults(),
+                    barmode="group",
+                    height=max(420, len(df_comp_graf) * 42),
+                    xaxis=dict(
+                        title="Quantidade de câmeras offline",
+                        range=[0, max_offline_cliente * 1.18],
+                        gridcolor="#E9D5FF",
+                        tickfont=dict(color="#8B7AA3", size=10),
+                        zeroline=False,
+                    ),
+                    yaxis=dict(tickfont=dict(color="#6B5A7A", size=10)),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                                font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
+                    margin=dict(l=10, r=20, t=45, b=10),
+                )
+                st.plotly_chart(fig_comp, use_container_width=True, key="hist_comp_offline_cliente")
 
-            fig_area.update_layout(
-                **pdefaults(),
-                height=altura_area,
-                xaxis=dict(
-                    title="% offline",
-                    range=[0, max_pct_area],
-                    ticksuffix="%",
-                    gridcolor="#E9D5FF",
-                    tickfont=dict(color="#8B7AA3", size=10),
-                    zeroline=False,
-                ),
-                yaxis=dict(
-                    title="",
-                    type="category",
-                    categoryorder="array",
-                    categoryarray=df_area["cliente_eixo"].tolist(),
-                    tickmode="array",
-                    tickvals=df_area["cliente_eixo"].tolist(),
-                    ticktext=df_area["cliente_eixo"].tolist(),
-                    showticklabels=True,
-                    automargin=True,
-                    tickfont=dict(color="#6B5A7A", size=10),
-                ),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                            font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
-                margin=dict(l=10, r=20, t=45, b=40),
-                hovermode="closest",
-            )
-            st.caption(f"Renderizando {len(df_area)} cidades/clientes na visão de área.")
-            st.plotly_chart(fig_area, use_container_width=True, key="hist_area_pct_cliente")
+                st.markdown("#### Variação líquida de offline")
+                st.caption("Valores positivos indicam piora; valores negativos indicam melhora.")
+                df_delta = df_comp.copy().sort_values("delta_off", ascending=True)
+                cores_d  = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in df_delta["delta_off"]]
+                fig_d = go.Figure(go.Bar(
+                    y=df_delta["cliente"], x=df_delta["delta_off"], orientation="h",
+                    marker=dict(color=cores_d, line=dict(width=0)),
+                    text=[f"{'+' if d>0 else ''}{int(d)}" for d in df_delta["delta_off"]],
+                    textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
+                    hovertemplate="%{y}<br>Δ %{x:+.0f} câmeras<extra></extra>",
+                ))
+                fig_d.add_vline(x=0, line_color="#C4B5FD", line_width=1)
+                fig_d.update_layout(
+                    **pdefaults(), height=max(420, len(df_delta)*32), showlegend=False,
+                    xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
+                    yaxis=dict(tickfont=dict(color="#6B5A7A",size=10)),
+                    margin=dict(l=10, r=70, t=20, b=10),
+                )
+                st.plotly_chart(fig_d, use_container_width=True, key="hist_delta_off_cliente")
 
-            st.markdown("#### Comparativo por cliente · câmeras offline")
-            st.caption("Comparação da quantidade de câmeras offline por cidade/cliente. 🟧 Snap Antigo/Base · 🟪 Snap Novo/Atual")
-            df_comp_graf = df_comp.copy().sort_values("off_b", ascending=True)
+                st.markdown("---")
+                st.markdown("#### Tabela comparativa detalhada")
+                df_tbl = df_comp[["cliente","tot_a","off_a","pct_a","tot_b","off_b","pct_b","delta_pct","delta_off"]].copy()
+                df_tbl["Situação"] = df_tbl["delta_off"].apply(lambda v: "Piorou" if v > 0 else ("Melhorou" if v < 0 else "Estável"))
+                df_tbl.columns = ["Cliente","Total A","Off A","% A","Total B","Off B","% B","Δ% (pp)","Δ Off","Situação"]
+                df_tbl["% A"]     = df_tbl["% A"].apply(lambda x: f"{x:.1f}%")
+                df_tbl["% B"]     = df_tbl["% B"].apply(lambda x: f"{x:.1f}%")
+                df_tbl["Δ% (pp)"] = df_tbl["Δ% (pp)"].apply(lambda x: f"{'+' if x>0 else ''}{x:.1f}")
+                df_tbl["Δ Off"]   = df_tbl["Δ Off"].apply(lambda x: f"{'+' if x>0 else ''}{int(x)}")
+                df_tbl = df_tbl.sort_values(["Situação", "Δ Off"], ascending=[True, False]).reset_index(drop=True)
+                df_tbl.index += 1
+                render_dataframe(df_tbl, height=min(620,(len(df_tbl)+1)*35+3))
 
-            max_offline_cliente = max(1, float(df_comp_graf[["off_a", "off_b"]].max().max()))
-            fig_comp = go.Figure()
-            fig_comp.add_trace(go.Bar(
-                name=f"Snap Antigo/Base · {leg_a}",
-                y=df_comp_graf["cliente"],
-                x=df_comp_graf["off_a"],
-                orientation="h",
-                marker_color=cor_snap_base,
-                opacity=0.88,
-                customdata=df_comp_graf[["tot_a", "pct_a"]],
-                hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Antigo/Base</extra>",
-            ))
-            fig_comp.add_trace(go.Bar(
-                name=f"Snap Novo/Atual · {leg_b}",
-                y=df_comp_graf["cliente"],
-                x=df_comp_graf["off_b"],
-                orientation="h",
-                marker_color=cor_snap_atual,
-                opacity=0.92,
-                customdata=df_comp_graf[["tot_b", "pct_b"]],
-                hovertemplate="%{y}<br>%{x:.0f} câmeras offline<br>%{customdata[1]:.1f}% da frota · %{customdata[0]:.0f} câmeras totais<extra>Snap Novo/Atual</extra>",
-            ))
-            fig_comp.update_layout(
-                **pdefaults(),
-                barmode="group",
-                height=max(420, len(df_comp_graf) * 42),
-                xaxis=dict(
-                    title="Quantidade de câmeras offline",
-                    range=[0, max_offline_cliente * 1.18],
-                    gridcolor="#E9D5FF",
-                    tickfont=dict(color="#8B7AA3", size=10),
-                    zeroline=False,
-                ),
-                yaxis=dict(tickfont=dict(color="#6B5A7A", size=10)),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-                            font=dict(size=11, color="#8B7AA3"), bgcolor="rgba(0,0,0,0)"),
-                margin=dict(l=10, r=20, t=45, b=10),
-            )
-            st.plotly_chart(fig_comp, use_container_width=True, key="hist_comp_offline_cliente")
-
-            st.markdown("#### Variação líquida de offline")
-            st.caption("Valores positivos indicam piora; valores negativos indicam melhora.")
-            df_delta = df_comp.copy().sort_values("delta_off", ascending=True)
-            cores_d  = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in df_delta["delta_off"]]
-            fig_d = go.Figure(go.Bar(
-                y=df_delta["cliente"], x=df_delta["delta_off"], orientation="h",
-                marker=dict(color=cores_d, line=dict(width=0)),
-                text=[f"{'+' if d>0 else ''}{int(d)}" for d in df_delta["delta_off"]],
-                textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
-                hovertemplate="%{y}<br>Δ %{x:+.0f} câmeras<extra></extra>",
-            ))
-            fig_d.add_vline(x=0, line_color="#C4B5FD", line_width=1)
-            fig_d.update_layout(
-                **pdefaults(), height=max(420, len(df_delta)*32), showlegend=False,
-                xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-                yaxis=dict(tickfont=dict(color="#6B5A7A",size=10)),
-                margin=dict(l=10, r=70, t=20, b=10),
-            )
-            st.plotly_chart(fig_d, use_container_width=True, key="hist_delta_off_cliente")
+                row_b = df_snaps_filtrado[df_snaps_filtrado["id"] == id_b].iloc[0]
+                if str(row_b.get("notas","")).strip():
+                    st.markdown("---")
+                    st.markdown(f"📝 **Observações do snapshot B TESTE:** {row_b['notas']}")
 
             st.markdown("---")
-            st.markdown("#### Tabela comparativa detalhada")
-            df_tbl = df_comp[["cliente","tot_a","off_a","pct_a","tot_b","off_b","pct_b","delta_pct","delta_off"]].copy()
-            df_tbl["Situação"] = df_tbl["delta_off"].apply(lambda v: "Piorou" if v > 0 else ("Melhorou" if v < 0 else "Estável"))
-            df_tbl.columns = ["Cliente","Total A","Off A","% A","Total B","Off B","% B","Δ% (pp)","Δ Off","Situação"]
-            df_tbl["% A"]     = df_tbl["% A"].apply(lambda x: f"{x:.1f}%")
-            df_tbl["% B"]     = df_tbl["% B"].apply(lambda x: f"{x:.1f}%")
-            df_tbl["Δ% (pp)"] = df_tbl["Δ% (pp)"].apply(lambda x: f"{'+' if x>0 else ''}{x:.1f}")
-            df_tbl["Δ Off"]   = df_tbl["Δ Off"].apply(lambda x: f"{'+' if x>0 else ''}{int(x)}")
-            df_tbl = df_tbl.sort_values(["Situação", "Δ Off"], ascending=[True, False]).reset_index(drop=True)
-            df_tbl.index += 1
-            render_dataframe(df_tbl, height=min(620,(len(df_tbl)+1)*35+3))
+            with st.expander("🗑️  Gerenciar snapshots gravados"):
+                for _, row in df_snaps.iterrows():
+                    c1, c2 = st.columns([5,1])
+                    notas_txt = f" · *{str(row['notas'])[:60]}…*" if str(row.get("notas","")).strip() else ""
+                    c1.markdown(f"**{row['label']}** · `{row['gravado_em']}`{notas_txt}")
+                    if c2.button("Excluir", key=f"del_{row['id']}"):
+                        deletar_snapshot(row["id"]); st.rerun()
 
-            row_b = df_snaps_filtrado[df_snaps_filtrado["id"] == id_b].iloc[0]
-            if str(row_b.get("notas","")).strip():
-                st.markdown("---")
-                st.markdown(f"📝 **Observações do snapshot B TESTE:** {row_b['notas']}")
 
-        st.markdown("---")
-        with st.expander("🗑️  Gerenciar snapshots gravados"):
-            for _, row in df_snaps.iterrows():
-                c1, c2 = st.columns([5,1])
-                notas_txt = f" · *{str(row['notas'])[:60]}…*" if str(row.get("notas","")).strip() else ""
-                c1.markdown(f"**{row['label']}** · `{row['gravado_em']}`{notas_txt}")
-                if c2.button("Excluir", key=f"del_{row['id']}"):
-                    deletar_snapshot(row["id"]); st.rerun()
 
 
 
