@@ -71,20 +71,19 @@ st.set_page_config(
 # Carregado de camerite.css, na mesma pasta do script.
 # Para editar cores ou layout, abra camerite.css — sem tocar no Python.
 # ─────────────────────────────────────────────
+CAMERITE_CSS_EMBUTIDO = '\n@import url(\'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap\');\n\n*, *::before, *::after { box-sizing: border-box; }\n\nhtml, body, [data-testid="stAppViewContainer"] {\n    background-color: #FAF7FF !important;\n    color: #171126 !important;\n    font-family: \'DM Sans\', sans-serif !important;\n}\n[data-testid="stHeader"]          { background: transparent !important; }\n[data-testid="stSidebar"]         { background: #ffffff !important; border-right: 1px solid #E9D5FF !important; }\n[data-testid="block-container"]   { padding: 2rem 2.5rem !important; max-width: 1600px; }\nsection[data-testid="stSidebar"] > div { padding: 1.5rem 1rem !important; }\n\n/* ── Sidebar ── */\n.sidebar-logo {\n    display: flex; align-items: center; gap: 10px;\n    padding: 0 0 1.5rem; border-bottom: 1px solid #E9D5FF; margin-bottom: 1.5rem;\n}\n.sidebar-logo-icon {\n    width: 36px; height: 36px;\n    background: linear-gradient(135deg, #7C3AED, #A855F7);\n    border-radius: 10px; display: flex; align-items: center;\n    justify-content: center; font-size: 18px; flex-shrink: 0;\n}\n.sidebar-logo-img { height: 30px; width: auto; }\n.sidebar-logo-text { font-size: 15px; font-weight: 700; color: #171126; line-height: 1; }\n.sidebar-logo-sub  { font-size: 10px; color: #7C3AED; margin-top: 2px; }\n.nav-section {\n    font-size: 10px; font-weight: 600; letter-spacing: 1px;\n    text-transform: uppercase; color: #7C3AED; margin: 1.2rem 0 .5rem;\n}\n\n/* ── Page header ── */\n.page-header {\n    display: flex; align-items: flex-start; justify-content: space-between;\n    margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #E9D5FF;\n}\n.page-title { font-size: 24px; font-weight: 700; color: #171126; letter-spacing: -.4px; }\n.page-sub   { font-size: 13px; color: #6B5A7A; margin-top: 3px; }\n.page-badge {\n    font-family: \'DM Mono\', monospace; font-size: 11px; color: #6D28D9;\n    background: #F3E8FF; padding: 6px 14px; border-radius: 8px;\n    border: 1px solid #DDD6FE; white-space: nowrap;\n}\n\n/* ── KPI cards ── */\n.kpi-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-bottom: 1.5rem; }\n.kpi-card {\n    background: #ffffff; border: 1px solid #E9D5FF; border-radius: 8px;\n    padding: 20px 20px 16px; position: relative; overflow: hidden;\n    box-shadow: 0 10px 28px rgba(16, 42, 63, .06);\n}\n.kpi-card::after {\n    content:\'\'; position:absolute; top:0; left:0; right:0; height:3px; border-radius:8px 8px 0 0;\n}\n.kpi-alert::after   { background: linear-gradient(90deg,#ef4444,#dc2626); }\n.kpi-warn::after    { background: linear-gradient(90deg,#f59e0b,#d97706); }\n.kpi-ok::after      { background: linear-gradient(90deg,#14b8a6,#059669); }\n.kpi-neutral::after { background: linear-gradient(90deg,#7C3AED,#A855F7); }\n\n/* SELETOR DEFINITIVO: Altera textos secundarios do card, exceto o valor principal */\n.kpi-card *:not(.kpi-value):not(.val-alert):not(.val-warn):not(.val-ok):not(.val-purple) {\n    color: #6B5A7A !important;\n    -webkit-text-fill-color: #6B5A7A !important;\n    opacity: 1 !important;\n}\n\n/* Garante que o valor principal (os números grandes) mantenha a cor de status */\n.kpi-value, .val-alert, .val-warn, .val-ok, .val-purple {\n    font-size: 40px !important;\n    font-weight: 700 !important;\n    font-family: \'DM Mono\', monospace !important;\n    -webkit-text-fill-color: currentColor !important; /* Impede o texto secundario de sobrescrever o status */\n}\n\n.val-alert  { color: #f87171 !important; }\n.val-warn   { color: #fbbf24 !important; }\n.val-ok     { color: #14b8a6 !important; }\n.val-purple { color: #7C3AED !important; }\n            \n/* ── Unit cards ── */\n.unit-card {\n    background: #ffffff; border: 1px solid #E9D5FF; border-radius: 8px;\n    padding: 14px 12px 12px; position: relative; overflow: hidden;\n    box-shadow: 0 8px 22px rgba(16, 42, 63, .05);\n    display: flex; flex-direction: column; height: 100%;\n}\n.unit-card::before {\n    content:\'\'; position:absolute; top:0; left:0; right:0;\n    height:3px; border-radius:8px 8px 0 0;\n}\n.card-red::before    { background: linear-gradient(90deg,#ef4444,#dc2626); }\n.card-yellow::before { background: linear-gradient(90deg,#f59e0b,#d97706); }\n.card-ok::before     { background: linear-gradient(90deg,#14b8a6,#059669); }\n.unit-name {\n    font-size:9px; font-weight:600; letter-spacing:.8px; text-transform:uppercase;\n    color:#6D28D9; margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;\n}\n.unit-count { font-size:28px; font-weight:700; line-height:1.1; font-family:\'DM Mono\',monospace; margin-top:4px; margin-bottom:2px; }\n.count-red    { color:#f87171; }\n.count-yellow { color:#fbbf24; }\n.count-ok     { color:#14b8a6; }\n.unit-label { font-size:9px; margin-top:2px; margin-bottom:6px; font-weight:500; letter-spacing:.3px; color:#6B5A7A; line-height:1.3; }\n.label-red    { color:#ff8e8e; }\n.label-yellow { color:#c98500; }\n.label-ok     { color:#0f9f8f; }\n.prog-track { margin: 6px 0 6px 0; height:3px; background:#E9D5FF; border-radius:99px; overflow:hidden; }\n.prog-fill  { height:100%; border-radius:99px; }\n.trend-badge {\n    display:flex; align-items:center; gap:3px;\n    font-size:8px; font-weight:600; padding:2px 6px; border-radius:99px; margin-top:4px; margin-bottom:4px; width: 100%;\n}\n.trend-up   { background:rgba(248,113,113,.12); color:#f87171; }\n.trend-down { background:rgba(20,184,166,.12);  color:#0f9f8f; }\n.trend-same { background:rgba(0,136,204,.12); color:#6D28D9; }\n\n/* ── Tabelas ── */\n.stTable table { background:transparent !important; font-family:\'DM Sans\',sans-serif !important;\n    font-size:13px !important; width:100% !important; border-collapse:collapse !important; }\n.stTable thead th { background:#FAF7FF !important; color:#6D28D9 !important;\n    font-size:10px !important; font-weight:600 !important; letter-spacing:.7px !important;\n    text-transform:uppercase !important; padding:10px 14px !important; border-bottom:1px solid #E9D5FF !important; }\n.stTable tbody tr { background:#ffffff !important; }\n.stTable tbody td { padding:10px 14px !important; border-bottom:1px solid #F5F3FF !important; color:#171126 !important; }\n\n/* ── Botões ── */\n[data-testid="stDataFrame"] {\n    background:#ffffff !important;\n    border:1px solid #E9D5FF !important;\n    border-radius:8px !important;\n    overflow:hidden !important;\n    box-shadow:0 8px 22px rgba(16,42,63,.05) !important;\n}\n[data-testid="stDataFrame"] div,\n[data-testid="stDataFrame"] span,\n[data-testid="stDataFrame"] button,\n[data-testid="stDataFrame"] svg {\n    color:#171126 !important;\n    -webkit-text-fill-color:#171126 !important;\n}\n[data-testid="stDataFrame"] canvas,\n[data-testid="stDataFrame"] [role="grid"],\n[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {\n    background:#ffffff !important;\n}\n\n.stButton > button {\n    width:100% !important; margin-top:8px !important; background:#ffffff !important;\n    border:1px solid #C4B5FD !important; color:#6D28D9 !important; border-radius:8px !important;\n    font-family:\'DM Sans\',sans-serif !important; font-size:11px !important;\n    font-weight:500 !important; padding:5px 10px !important; transition:all .2s !important;\n}\n.stButton > button:hover:not(:disabled) {\n    background:#F3E8FF !important; border-color:#8B5CF6 !important; color:#5B21B6 !important;\n}\n\n/* ── Abas ── */\n/* Formularios e filtros */\n[data-testid="stTextInput"] label,\n[data-testid="stSelectbox"] label,\n[data-testid="stTextArea"] label,\n[data-testid="stDateInput"] label,\n[data-testid="stFileUploader"] label {\n    color:#171126 !important;\n    -webkit-text-fill-color:#171126 !important;\n    font-family:\'DM Sans\',sans-serif !important;\n    font-size:12px !important;\n    font-weight:600 !important;\n}\n[data-testid="stWidgetLabel"],\n[data-testid="stWidgetLabel"] * {\n    color:#171126 !important;\n    -webkit-text-fill-color:#171126 !important;\n}\n[data-testid="stCaptionContainer"],\n[data-testid="stCaptionContainer"] * {\n    color:#6B5A7A !important;\n    -webkit-text-fill-color:#6B5A7A !important;\n}\n[data-testid="stWidgetLabel"] {\n    min-height:22px !important;\n}\n[data-testid="stTextInput"] [data-baseweb="input"] > div,\n[data-testid="stDateInput"] [data-baseweb="input"] > div {\n    background:#ffffff !important;\n    border:1px solid #C4B5FD !important;\n    border-radius:8px !important;\n    box-shadow:none !important;\n}\n[data-testid="stTextInput"] input,\n[data-testid="stDateInput"] input,\n[data-testid="stTextArea"] textarea {\n    background:#ffffff !important;\n    border:1px solid #C4B5FD !important;\n    border-radius:8px !important;\n    color:#171126 !important;\n    -webkit-text-fill-color:#171126 !important;\n    box-shadow:none !important;\n    caret-color:#7C3AED !important;\n}\n[data-testid="stTextInput"] input:focus,\n[data-testid="stDateInput"] input:focus,\n[data-testid="stTextArea"] textarea:focus {\n    border-color:#7C3AED !important;\n    box-shadow:0 0 0 1px #7C3AED !important;\n}\n[data-testid="stTextInput"] input::placeholder,\n[data-testid="stTextArea"] textarea::placeholder {\n    color:#8B7AA3 !important;\n    -webkit-text-fill-color:#8B7AA3 !important;\n    opacity:1 !important;\n}\n[data-testid="stSelectbox"] [data-baseweb="select"] > div {\n    background:#ffffff !important;\n    border:1px solid #C4B5FD !important;\n    border-radius:8px !important;\n    box-shadow:none !important;\n}\n[data-testid="stSelectbox"] [data-baseweb="select"] > div:hover,\n[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {\n    border-color:#7C3AED !important;\n    box-shadow:0 0 0 1px #7C3AED !important;\n}\n[data-testid="stSelectbox"] [data-baseweb="select"] span,\n[data-testid="stSelectbox"] [data-baseweb="select"] svg,\n[data-testid="stSelectbox"] [data-baseweb="select"] div {\n    color:#171126 !important;\n    -webkit-text-fill-color:#171126 !important;\n}\n[data-testid="stFileUploader"] section {\n    background:#ffffff !important;\n    border:1px dashed #C4B5FD !important;\n    border-radius:8px !important;\n    color:#171126 !important;\n}\n[data-baseweb="popover"] [role="listbox"] {\n    background:#ffffff !important;\n    border:1px solid #C4B5FD !important;\n    border-radius:8px !important;\n    box-shadow:0 16px 36px rgba(16,42,63,.14) !important;\n}\n[data-baseweb="popover"] [role="option"] {\n    background:#ffffff !important;\n    color:#171126 !important;\n    -webkit-text-fill-color:#171126 !important;\n}\n[data-baseweb="popover"] [role="option"]:hover,\n[data-baseweb="popover"] [aria-selected="true"] {\n    background:#F3E8FF !important;\n}\n\n[data-testid="stTabs"] [role="tablist"] { border-bottom:1px solid #E9D5FF !important; gap:2px !important; }\n[data-testid="stTabs"] [role="tab"] {\n    background:transparent !important; border:1px solid transparent !important;\n    border-radius:8px 8px 0 0 !important; color:#6B5A7A !important;\n    font-family:\'DM Sans\',sans-serif !important; font-size:13px !important;\n    font-weight:500 !important; padding:8px 18px !important; transition:all .2s !important;\n}\n[data-testid="stTabContent"] { padding-top:1.5rem !important; }\n\n/* ── Expander ── */\n[data-testid="stExpander"] {\n    background:#ffffff !important; border:1px solid #E9D5FF !important;\n    border-radius:8px !important; margin-bottom:8px !important;\n}\n[data-testid="stExpander"] summary { font-weight:500 !important; color:#6D28D9 !important; font-size:13px !important; }\n\n/* ── Misc ── */\nhr { border-color:#E9D5FF !important; margin:1.5rem 0 !important; }\n[data-testid="stAlert"] {\n    background:#ffffff !important; border:1px solid #E9D5FF !important;\n    border-radius:8px !important; color:#171126 !important;\n}\n\n/* ── Download buttons ── */\n.stDownloadButton > button {\n    background:linear-gradient(135deg,rgba(0,136,204,.12),rgba(0,188,212,.12)) !important;\n    border:1px solid rgba(0,136,204,.25) !important; color:#6D28D9 !important;\n    border-radius:8px !important; font-size:12px !important; font-weight:600 !important;\n    padding:8px 16px !important; width:auto !important; margin-top:0 !important; transition:all .2s !important;\n}\n\n/* ── Tempo Offline badges ── */\n.tempo-critico  { background:rgba(220,38,38,.10);  color:#dc2626; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }\n.tempo-atencao  { background:rgba(217,119,6,.10);  color:#d97706; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }\n.tempo-ok       { background:rgba(5,150,105,.10);  color:#059669; font-weight:700; padding:2px 8px; border-radius:6px; font-size:11px; }\n.tempo-nd       { background:rgba(107,132,150,.10);color:#8B7AA3; font-weight:600; padding:2px 8px; border-radius:6px; font-size:11px; }\n\n/* Auditoria operacional */\n.audit-hero {\n    background:#ffffff; border:1px solid #E9D5FF; border-radius:8px;\n    padding:18px 20px; margin-bottom:14px; box-shadow:0 10px 24px rgba(16,42,63,.05);\n}\n.audit-hero-top {\n    display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;\n}\n.audit-title {\n    font-size:22px; font-weight:700; color:#171126; line-height:1.15; margin-bottom:4px;\n}\n.audit-sub {\n    font-size:12px; color:#6B5A7A; max-width:880px; line-height:1.45;\n}\n.audit-badges { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }\n.audit-badge {\n    font-family:\'DM Mono\',monospace; font-size:10px; font-weight:700; text-transform:uppercase;\n    padding:6px 10px; border-radius:6px; border:1px solid currentColor; white-space:nowrap;\n}\n.audit-strip {\n    display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin:12px 0 16px;\n}\n.audit-card {\n    background:#ffffff; border:1px solid #E9D5FF; border-radius:8px; padding:12px 14px;\n    min-height:92px; box-shadow:0 8px 18px rgba(16,42,63,.04);\n}\n.audit-card-label {\n    font-size:10px; color:#7C6A91; font-weight:700; text-transform:uppercase; letter-spacing:.6px;\n    margin-bottom:7px;\n}\n.audit-card-value {\n    font-family:\'DM Mono\',monospace; font-size:24px; line-height:1.05; color:#171126; font-weight:700;\n}\n.audit-card-note { font-size:11px; color:#7C6A91; margin-top:7px; line-height:1.35; }\n.audit-riskbar {\n    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center;\n    background:#FCFAFF; border:1px solid #E9D5FF; border-radius:8px; padding:12px 14px; margin-bottom:16px;\n}\n.audit-risk-track { height:10px; background:#EDE9FE; border-radius:99px; overflow:hidden; }\n.audit-risk-fill { height:100%; border-radius:99px; }\n.audit-risk-label { font-family:\'DM Mono\',monospace; font-size:12px; font-weight:700; white-space:nowrap; }\n.audit-section-title {\n    display:flex; align-items:center; justify-content:space-between; gap:12px; margin:18px 0 8px;\n}\n.audit-section-title strong { font-size:14px; color:#171126; }\n.audit-section-title span { font-size:11px; color:#7C6A91; }\n.audit-action-note {\n    background:#fffaf0; border:1px solid #fde3a7; border-radius:8px; padding:10px 12px;\n    color:#7a5200; font-size:12px; margin:8px 0 12px;\n}\n\n@media (max-width: 1100px) {\n    .audit-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }\n}\n@media (max-width: 700px) {\n    [data-testid="block-container"] { padding:1rem !important; }\n    .audit-strip, .kpi-grid { grid-template-columns:1fr !important; }\n    .audit-riskbar { grid-template-columns:1fr; }\n    .audit-badges { justify-content:flex-start; }\n}\n\n\n/* ── Ajustes finais solicitados ── */\n.sidebar-stat-card {\n    background:#ffffff !important;\n    border:1px solid #E9D5FF !important;\n    border-radius:8px !important;\n    padding:12px 14px !important;\n    box-shadow:0 6px 18px rgba(16,42,63,.04) !important;\n}\n.sidebar-stat-card.offline-card {\n    background:#ffffff !important;\n    border-color:#E9D5FF !important;\n}\n.sidebar-stat-card .stat-label {\n    font-size:10px;color:#8B7AA3;font-weight:600;text-transform:uppercase;letter-spacing:.7px;\n}\n.sidebar-stat-card .stat-value {\n    font-size:24px;font-weight:700;color:#7C3AED;font-family:\'DM Mono\',monospace;\n}\n.sidebar-stat-card.offline-card .stat-value {\n    color:#dc2626 !important;\n    -webkit-text-fill-color:#dc2626 !important;\n}\n.sidebar-stat-card .stat-note { font-size:11px;color:#8B7AA3; }\n\n.compare-hero {\n    background:linear-gradient(135deg,#ffffff 0%,#FBF7FF 100%);\n    border:1px solid #E9D5FF;border-radius:14px;padding:18px 20px;margin:10px 0 16px;\n    box-shadow:0 12px 30px rgba(16,42,63,.07);\n}\n.compare-title { font-size:24px;font-weight:800;color:#171126;letter-spacing:-.4px; }\n.compare-sub { font-size:13px;color:#6B5A7A;margin-top:4px;line-height:1.45; }\n.compare-pill {\n    display:inline-flex;align-items:center;gap:6px;margin-top:10px;\n    font-family:\'DM Mono\',monospace;font-size:11px;color:#6D28D9;background:#F3E8FF;\n    border:1px solid #DDD6FE;border-radius:999px;padding:6px 10px;\n}\n.compare-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0 18px; }\n.compare-card {\n    background:#ffffff !important;border:1px solid #E9D5FF;border-radius:12px;padding:15px 16px;\n    box-shadow:0 10px 24px rgba(16,42,63,.055);position:relative;overflow:hidden;\n}\n.compare-card:before { content:\'\';position:absolute;left:0;right:0;top:0;height:4px;background:#7C3AED; }\n.compare-card.good:before { background:linear-gradient(90deg,#22c55e,#059669); }\n.compare-card.bad:before { background:linear-gradient(90deg,#ff1744,#dc2626); }\n.compare-card.warn:before { background:linear-gradient(90deg,#facc15,#f59e0b); }\n.compare-card.neutral:before { background:linear-gradient(90deg,#7C3AED,#A855F7); }\n.compare-label { font-size:10px;color:#8B7AA3;font-weight:800;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px; }\n.compare-value { font-family:\'DM Mono\',monospace;font-size:30px;font-weight:800;color:#171126;line-height:1; }\n.compare-note { font-size:11px;color:#7C6A91;margin-top:8px;line-height:1.35; }\n.compare-status-box {\n    margin-top:12px;padding:12px 14px;border-radius:10px;background:#ffffff;border:1px solid #E9D5FF;\n    display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;\n}\n.compare-status-text { font-size:13px;color:#6B5A7A; }\n.compare-status-tag { font-family:\'DM Mono\',monospace;font-size:11px;font-weight:800;border-radius:999px;padding:6px 10px;border:1px solid currentColor; }\n@media(max-width:1100px){ .compare-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }\n@media(max-width:700px){ .compare-grid{grid-template-columns:1fr;} }\n\n\n\n/* ─────────────────────────────────────────────\n   Identidade visual Camerite · Roxo\n   Somente aparência: não altera regras, filtros ou funções.\n   ───────────────────────────────────────────── */\n:root {\n    --cam-primary: #7C3AED;\n    --cam-primary-dark: #5B21B6;\n    --cam-primary-soft: #A855F7;\n    --cam-bg: #FAF7FF;\n    --cam-card: #FFFFFF;\n    --cam-border: #E9D5FF;\n    --cam-text: #171126;\n    --cam-muted: #6B5A7A;\n}\n\n[data-testid="stSidebar"] {\n    background: linear-gradient(180deg, #FFFFFF 0%, #FAF7FF 100%) !important;\n    border-right: 1px solid var(--cam-border) !important;\n}\n\n.sidebar-logo-icon {\n    background: linear-gradient(135deg, #5B21B6 0%, #7C3AED 45%, #A855F7 100%) !important;\n    box-shadow: 0 10px 24px rgba(124,58,237,.24) !important;\n}\n\n.sidebar-logo-text,\n.page-title,\n.audit-title,\n.compare-title {\n    color: var(--cam-text) !important;\n}\n\n.sidebar-logo-sub,\n.nav-section,\n.unit-name,\n[data-testid="stExpander"] summary {\n    color: var(--cam-primary) !important;\n    -webkit-text-fill-color: var(--cam-primary) !important;\n}\n\n.page-badge,\n.compare-pill {\n    color: var(--cam-primary-dark) !important;\n    background: #F3E8FF !important;\n    border-color: #DDD6FE !important;\n}\n\n.kpi-card,\n.unit-card,\n.audit-hero,\n.audit-card,\n.compare-card,\n.sidebar-stat-card,\n[data-testid="stExpander"],\n[data-testid="stDataFrame"],\n[data-testid="stAlert"] {\n    border-color: var(--cam-border) !important;\n    box-shadow: 0 14px 34px rgba(91,33,182,.08) !important;\n}\n\n.kpi-neutral::after,\n.compare-card.neutral:before {\n    background: linear-gradient(90deg, #5B21B6, #7C3AED, #A855F7) !important;\n}\n\n.val-purple,\n.sidebar-stat-card .stat-value,\n.compare-card.neutral .compare-value {\n    color: var(--cam-primary) !important;\n    -webkit-text-fill-color: var(--cam-primary) !important;\n}\n\n.stButton > button,\n.stDownloadButton > button {\n    background: linear-gradient(135deg, #7C3AED, #8B5CF6) !important;\n    color: #FFFFFF !important;\n    -webkit-text-fill-color: #FFFFFF !important;\n    border: 1px solid rgba(124,58,237,.35) !important;\n    border-radius: 10px !important;\n    box-shadow: 0 10px 22px rgba(124,58,237,.18) !important;\n}\n\n.stButton > button:hover:not(:disabled),\n.stDownloadButton > button:hover:not(:disabled) {\n    background: linear-gradient(135deg, #5B21B6, #7C3AED) !important;\n    border-color: #7C3AED !important;\n    transform: translateY(-1px);\n}\n\n[data-testid="stTabs"] [role="tab"][aria-selected="true"] {\n    background: #F3E8FF !important;\n    color: var(--cam-primary-dark) !important;\n    border-color: #DDD6FE !important;\n    font-weight: 700 !important;\n}\n\n[data-testid="stTextInput"] input:focus,\n[data-testid="stDateInput"] input:focus,\n[data-testid="stTextArea"] textarea:focus,\n[data-testid="stSelectbox"] [data-baseweb="select"] > div:hover,\n[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within {\n    border-color: var(--cam-primary) !important;\n    box-shadow: 0 0 0 1px var(--cam-primary) !important;\n}\n\n[data-testid="stTextInput"] input,\n[data-testid="stDateInput"] input,\n[data-testid="stTextArea"] textarea,\n[data-testid="stSelectbox"] [data-baseweb="select"] > div,\n[data-testid="stFileUploader"] section {\n    border-color: #C4B5FD !important;\n}\n\n[data-baseweb="popover"] [role="option"]:hover,\n[data-baseweb="popover"] [aria-selected="true"] {\n    background: #F3E8FF !important;\n}\n\n.prog-fill,\n.audit-risk-fill {\n    background: linear-gradient(90deg, #7C3AED, #A855F7) !important;\n}\n\nhr,\n.page-header {\n    border-color: var(--cam-border) !important;\n}\n\n'
+
+
 def _injetar_css() -> None:
-    """Lê camerite.css e injeta no Streamlit via st.markdown.
-    Usa __file__ para localizar o CSS independente de onde o app é executado.
+    """Injeta o CSS do tema direto pelo Python.
+
+    O arquivo camerite.css externo ficou opcional. Você pode deletá-lo do projeto,
+    porque o CSS principal está embutido nesta variável.
     """
-    css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camerite.css")
     try:
-        with open(css_path, "r", encoding="utf-8") as _f:
-            _css = _f.read()
-        st.markdown(f"<style>{_css}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        st.warning(
-            f"⚠️ Arquivo de tema não encontrado: {css_path}\n"
-            "Coloque camerite.css na mesma pasta que monitoramento_V3.py."
-        )
+        st.markdown(f"<style>{CAMERITE_CSS_EMBUTIDO}</style>", unsafe_allow_html=True)
+    except Exception as e:
+        st.warning(f"⚠️ Não foi possível carregar o tema embutido: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -3069,67 +3068,120 @@ def carregar_snapshot_clientes(sid: int, wl_ids_validos: set[str] | None = None)
 def carregar_evolucao_cliente_snapshots(wl_id: str, limite: int = 10) -> pd.DataFrame:
     """Retorna a evolução de um cliente nos últimos snapshots salvos.
 
-    Usa a tabela snapshot_clientes, que já guarda total, offline e % offline por cliente.
-    O limite padrão é 10 snapshots, conforme a visão solicitada para o detalhe do cliente.
+    Primeiro tenta buscar direto na tabela snapshot_clientes, que é a fonte mais rápida.
+    Se não encontrar nada, usa fallback lendo os snapshots antigos via carregar_snapshot().
+    Isso evita o gráfico sumir quando há histórico salvo antes da criação da tabela snapshot_clientes.
     """
     wl_id = str(wl_id or "").strip()
+    colunas = ["snapshot_id", "Snapshot", "Data", "gravado_em", "total", "offline", "pct_offline"]
     if not wl_id or not supabase_configurado():
-        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
+        return pd.DataFrame(columns=colunas)
+
+    def _normalizar_wl(valor) -> str:
+        texto = str(valor or "").strip()
+        if texto.endswith(".0"):
+            texto = texto[:-2]
+        return texto
+
+    wl_norm = _normalizar_wl(wl_id)
 
     df_snaps = _snapshot_datas_df()
     if df_snaps.empty:
-        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
+        return pd.DataFrame(columns=colunas)
 
     df_snaps = df_snaps.copy()
     df_snaps["id"] = pd.to_numeric(df_snaps["id"], errors="coerce")
     df_snaps = df_snaps.dropna(subset=["id"]).copy()
     df_snaps["id"] = df_snaps["id"].astype(int)
-    df_snaps = df_snaps.sort_values("id", ascending=False).head(int(limite))
 
-    if df_snaps.empty:
-        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
+    # Pega os últimos snapshots por ID e depois ordena cronologicamente para desenhar a evolução.
+    df_snaps_ultimos = df_snaps.sort_values("id", ascending=False).head(int(limite)).copy()
+    if df_snaps_ultimos.empty:
+        return pd.DataFrame(columns=colunas)
 
-    ids = df_snaps["id"].astype(str).tolist()
+    ids = df_snaps_ultimos["id"].astype(str).tolist()
     filtro_ids = "in.(" + ",".join(ids) + ")"
+
+    # Caminho rápido: tabela de resumo por cliente.
     df_cli, erro = _supabase_select_all(
         SNAPSHOT_CLIENTES_TABLE,
         params={
             "select": "snapshot_id,id_whitelabel,nome_cliente,total_cameras,total_offline,pct_offline",
             "snapshot_id": filtro_ids,
-            "id_whitelabel": f"eq.{wl_id}",
             "order": "snapshot_id.asc",
         },
-        page_size=1000,
+        page_size=5000,
     )
-    if erro or df_cli.empty:
-        return pd.DataFrame(columns=["snapshot_id", "label", "gravado_em", "total", "offline", "pct_offline"])
 
-    out = pd.DataFrame()
-    out["snapshot_id"] = pd.to_numeric(df_cli.get("snapshot_id", 0), errors="coerce").fillna(0).astype(int)
-    out["total"] = pd.to_numeric(df_cli.get("total_cameras", 0), errors="coerce").fillna(0).astype(int)
-    out["offline"] = pd.to_numeric(df_cli.get("total_offline", 0), errors="coerce").fillna(0).astype(int)
-    out["pct_offline"] = pd.to_numeric(df_cli.get("pct_offline", 0), errors="coerce").fillna(0.0)
+    rows = []
+    if not erro and df_cli is not None and not df_cli.empty:
+        df_cli = df_cli.copy()
+        df_cli["_wl_norm"] = df_cli.get("id_whitelabel", "").apply(_normalizar_wl)
+        df_cli = df_cli[df_cli["_wl_norm"] == wl_norm].copy()
 
-    meta = df_snaps[["id", "label", "gravado_em"]].rename(columns={"id": "snapshot_id"})
+        for _, r in df_cli.iterrows():
+            rows.append({
+                "snapshot_id": int(pd.to_numeric(r.get("snapshot_id"), errors="coerce") or 0),
+                "total": int(pd.to_numeric(r.get("total_cameras"), errors="coerce") or 0),
+                "offline": int(pd.to_numeric(r.get("total_offline"), errors="coerce") or 0),
+                "pct_offline": float(pd.to_numeric(r.get("pct_offline"), errors="coerce") or 0),
+            })
+
+    # Fallback: snapshots antigos que ainda não tinham snapshot_clientes.
+    if not rows:
+        for _, snap in df_snaps_ultimos.iterrows():
+            try:
+                sid = int(snap["id"])
+                df_snap = carregar_snapshot(sid)
+                if df_snap is None or df_snap.empty:
+                    continue
+
+                df_snap = df_snap.copy()
+                df_snap["_wl_norm"] = df_snap.get("wl_id", "").apply(_normalizar_wl)
+                df_one = df_snap[df_snap["_wl_norm"] == wl_norm].copy()
+                if df_one.empty:
+                    continue
+
+                r = df_one.iloc[-1]
+                rows.append({
+                    "snapshot_id": sid,
+                    "total": int(pd.to_numeric(r.get("total"), errors="coerce") or 0),
+                    "offline": int(pd.to_numeric(r.get("offline"), errors="coerce") or 0),
+                    "pct_offline": float(pd.to_numeric(r.get("pct_offline"), errors="coerce") or 0),
+                })
+            except Exception:
+                continue
+
+    if not rows:
+        return pd.DataFrame(columns=colunas)
+
+    out = pd.DataFrame(rows)
+    meta = df_snaps_ultimos[["id", "label", "gravado_em"]].rename(columns={"id": "snapshot_id"})
     out = out.merge(meta, on="snapshot_id", how="left")
+
     out["gravado_em_dt"] = pd.to_datetime(out["gravado_em"], errors="coerce")
-    out = out.sort_values(["gravado_em_dt", "snapshot_id"], ascending=[True, True]).reset_index(drop=True)
+    out = out.sort_values(["gravado_em_dt", "snapshot_id"], ascending=[True, True]).tail(int(limite)).reset_index(drop=True)
+
     out["Data"] = out["gravado_em_dt"].dt.strftime("%d/%m %H:%M")
     out["Data"] = out["Data"].fillna(out["snapshot_id"].astype(str))
     out["Snapshot"] = out["label"].astype(str).replace({"nan": ""})
     out["Snapshot"] = out["Snapshot"].where(out["Snapshot"].str.strip() != "", "Snapshot " + out["snapshot_id"].astype(str))
-    return out[["snapshot_id", "Snapshot", "Data", "gravado_em", "total", "offline", "pct_offline"]]
 
+    return out[colunas]
 
 def render_grafico_evolucao_cliente(wl_id: str) -> None:
     """Desenha gráfico área + bolinhas da evolução individual do cliente."""
-    df_evo = carregar_evolucao_cliente_snapshots(str(wl_id), limite=10)
-
     st.markdown("### 📈 Evolução do cliente")
     st.caption("Últimos 10 snapshots salvos. A área mostra o % offline e cada bolinha representa um snapshot gravado.")
 
+    try:
+        df_evo = carregar_evolucao_cliente_snapshots(str(wl_id), limite=10)
+    except Exception as e:
+        st.warning(f"Não foi possível carregar a evolução deste cliente: {e}")
+        return
+
     if df_evo.empty:
-        st.info("Ainda não há histórico de snapshots suficiente para montar a evolução deste cliente.")
+        st.info("Ainda não há snapshots salvos para este cliente. Salve novos snapshots pela sidebar para a evolução aparecer aqui.")
         return
 
     fig = go.Figure()
@@ -3138,27 +3190,35 @@ def render_grafico_evolucao_cliente(wl_id: str) -> None:
         y=df_evo["pct_offline"],
         mode="lines+markers",
         fill="tozeroy",
-        line=dict(color="#7C3AED", width=3),
-        marker=dict(size=9, color="#7C3AED", line=dict(width=2, color="#ffffff")),
+        line=dict(color="#7C3AED", width=3, shape="spline", smoothing=0.35),
+        marker=dict(size=10, color="#7C3AED", line=dict(width=2, color="#ffffff")),
         customdata=df_evo[["Snapshot", "offline", "total"]].values,
         hovertemplate=(
             "<b>%{customdata[0]}</b><br>"
-            "%{x}<br>"
+            "Data: %{x}<br>"
             "% Offline: %{y:.1f}%<br>"
             "Offline: %{customdata[1]} de %{customdata[2]} câmeras"
             "<extra></extra>"
         ),
         name="% offline",
     ))
+
     fig.update_layout(
         **pdefaults(),
-        height=360,
+        height=380,
         margin=dict(l=10, r=10, t=20, b=10),
         showlegend=False,
         hovermode="x unified",
-        yaxis=dict(title="% offline", ticksuffix="%", rangemode="tozero", gridcolor="#F3E8FF"),
+        yaxis=dict(
+            title="% offline",
+            ticksuffix="%",
+            rangemode="tozero",
+            gridcolor="#F3E8FF",
+            zerolinecolor="#E9D5FF",
+        ),
         xaxis=dict(title="Snapshot", gridcolor="#F8F5FF"),
     )
+
     st.plotly_chart(fig, use_container_width=True, key=f"grafico_evolucao_cliente_{str(wl_id)}")
 
     df_evo_show = df_evo[["Snapshot", "Data", "total", "offline", "pct_offline"]].copy()
@@ -3168,6 +3228,7 @@ def render_grafico_evolucao_cliente(wl_id: str) -> None:
         "pct_offline": "% Offline",
     })
     df_evo_show["% Offline"] = df_evo_show["% Offline"].map(lambda v: f"{float(v):.1f}%")
+
     with st.expander("Ver dados do gráfico", expanded=False):
         render_dataframe(df_evo_show, height=min(420, (len(df_evo_show) + 1) * 35 + 3))
 
