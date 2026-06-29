@@ -4860,10 +4860,13 @@ def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict)
             continue
         top_count = int(vc.max())
         candidatos = [p for p in vc.index if int(vc[p]) == top_count]
-        plano_padrao = max(
-            candidatos,
-            key=lambda p: (_plano_em_dias(p) if _plano_em_dias(p) is not None else -1),
-        )
+        # Padrão = plano com MAIS câmeras no cliente (puro por quantidade, sem viés de duração).
+        # Em empate na contagem do topo, não há vencedor por quantidade → sem padrão definido.
+        if len(candidatos) > 1:
+            sem_padrao += 1
+            resumo.append((wl, nome_cli, "— (empate)", top_count / total, total, 0, "Sem padrão definido"))
+            continue
+        plano_padrao = candidatos[0]
         dom = top_count / total
         if dom < dom_min:
             sem_padrao += 1
