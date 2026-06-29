@@ -4720,9 +4720,23 @@ def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict)
 
     # ── Limpeza do plano ──
     df_base["_plano"] = df_base[plano_col].astype(str).str.strip()
-    df_base = df_base[~df_base["_plano"].str.lower().isin(["", "nan", "none"])].copy()
+    _tokens_vazios = {"", "nan", "none", "null", "nat", "<na>"}
+    serie_plano_raw = df_base["_plano"].copy()
+    df_base = df_base[~df_base["_plano"].str.lower().isin(_tokens_vazios)].copy()
     if df_base.empty:
         st.warning(f"A coluna **{plano_col}** não tem planos preenchidos para avaliar.")
+        with st.expander("🔎 Diagnóstico da coluna de plano", expanded=True):
+            vc = serie_plano_raw.replace({"": "(vazio)"}).value_counts().head(10)
+            st.write(f"Coluna detectada: `{plano_col}` · linhas avaliadas: {len(serie_plano_raw)}")
+            if vc.empty:
+                st.write("A coluna chegou totalmente vazia.")
+            else:
+                st.dataframe(vc.rename("ocorrências"))
+            st.caption(
+                "Se aparecer só `(vazio)`, `None` ou `null`, a coluna `plano_contratado` está nula na "
+                "base do Supabase. Causa provável: o app publicado reimportou o CSV ainda com o código "
+                "antigo (sem o mapeamento de plano). Publique a versão nova e reimporte o CSV."
+            )
         return
 
     # Nome do cliente e cidade
