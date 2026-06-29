@@ -686,6 +686,7 @@ COL_ID_CAM     = "ID_da_Camera"
 COL_NOME_CAM   = "Nome_da_Camera"
 COL_ULT_ATU    = "Ultima_Atualizacao"
 COL_OBS        = "Observacoes"
+COL_DATA_CAD   = "Data_de_Cadastro"
 
 # ─────────────────────────────────────────────
 # SUPABASE / BD ONLINE
@@ -906,7 +907,7 @@ def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
-    colunas_padrao = [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU, COL_OBS]
+    colunas_padrao = [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU, COL_OBS, COL_DATA_CAD]
     for col in colunas_padrao:
         if col not in df.columns:
             df[col] = ""
@@ -933,6 +934,8 @@ def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
     out["ultima_atualizacao"] = parse_ultima_atualizacao(df_valid[COL_ULT_ATU]).dt.strftime("%Y-%m-%d %H:%M:%S")
     out["ultima_atualizacao"] = out["ultima_atualizacao"].where(out["ultima_atualizacao"].notna(), None)
     out["observacoes"] = df_valid[COL_OBS].astype(str).replace({"nan": ""}).str.strip()
+    out["data_cadastro"] = parse_ultima_atualizacao(df_valid[COL_DATA_CAD]).dt.strftime("%Y-%m-%d %H:%M:%S")
+    out["data_cadastro"] = out["data_cadastro"].where(out["data_cadastro"].notna(), None)
     out["cidade"] = df_valid[city_col].astype(str).replace({"nan": ""}).str.strip()
     out["estado"] = df_valid[estado_col].astype(str).replace({"nan": ""}).str.strip()
     out["updated_at"] = agora_sao_paulo_str()
@@ -990,6 +993,7 @@ def converter_supabase_para_df_gov(df: pd.DataFrame) -> pd.DataFrame:
     out[COL_STATUS] = df.get("status_camera", "").astype(str)
     out[COL_ULT_ATU] = df.get("ultima_atualizacao", "").astype(str)
     out[COL_OBS] = df.get("observacoes", "").astype(str)
+    out[COL_DATA_CAD] = df.get("data_cadastro", "").astype(str)
     out["Cidade"] = df.get("cidade", "").astype(str)
     out["UF"] = df.get("estado", "").astype(str)
     return out
@@ -4664,15 +4668,18 @@ def render_aba_ultima_camera_cadastrada(df_origem: pd.DataFrame | None, dados: d
         return
 
     # ── 1) Detecta a coluna com a DATA DE CADASTRO da câmera ──
-    col_cad_auto = encontrar_coluna_por_chaves(
-        df_base,
-        (
-            "datacadastro", "data_cadastro", "datadecadastro", "cadastro",
-            "datacriacao", "data_criacao", "criacao", "criada", "created",
-            "createdat", "datainclusao", "inclusao", "datainstalacao", "instalacao",
-        ),
-        default=None,
-    )
+    if COL_DATA_CAD in df_base.columns:
+        col_cad_auto = COL_DATA_CAD
+    else:
+        col_cad_auto = encontrar_coluna_por_chaves(
+            df_base,
+            (
+                "datadecadastro", "datacadastro", "data_cadastro", "cadastro",
+                "datacriacao", "data_criacao", "criacao", "criada", "created",
+                "createdat", "datainclusao", "inclusao", "datainstalacao", "instalacao",
+            ),
+            default=None,
+        )
     colunas_disp = list(df_base.columns)
     idx_default = colunas_disp.index(col_cad_auto) if col_cad_auto in colunas_disp else 0
     col_cadastro = st.selectbox(
