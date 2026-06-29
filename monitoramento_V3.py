@@ -687,6 +687,8 @@ COL_NOME_CAM   = "Nome_da_Camera"
 COL_ULT_ATU    = "Ultima_Atualizacao"
 COL_OBS        = "Observacoes"
 COL_DATA_CAD   = "Data_de_Cadastro"
+COL_PLANO      = "Plano_Contratado"
+COL_DATA_INAT  = "Data_de_Inativacao"
 
 # ─────────────────────────────────────────────
 # SUPABASE / BD ONLINE
@@ -907,7 +909,7 @@ def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
-    colunas_padrao = [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU, COL_OBS, COL_DATA_CAD]
+    colunas_padrao = [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU, COL_OBS, COL_DATA_CAD, COL_PLANO, COL_DATA_INAT]
     for col in colunas_padrao:
         if col not in df.columns:
             df[col] = ""
@@ -936,6 +938,9 @@ def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
     out["observacoes"] = df_valid[COL_OBS].astype(str).replace({"nan": ""}).str.strip()
     out["data_cadastro"] = parse_ultima_atualizacao(df_valid[COL_DATA_CAD]).dt.strftime("%Y-%m-%d %H:%M:%S")
     out["data_cadastro"] = out["data_cadastro"].where(out["data_cadastro"].notna(), None)
+    out["plano_contratado"] = df_valid[COL_PLANO].astype(str).replace({"nan": ""}).str.strip()
+    out["data_inativacao"] = parse_ultima_atualizacao(df_valid[COL_DATA_INAT]).dt.strftime("%Y-%m-%d %H:%M:%S")
+    out["data_inativacao"] = out["data_inativacao"].where(out["data_inativacao"].notna(), None)
     out["cidade"] = df_valid[city_col].astype(str).replace({"nan": ""}).str.strip()
     out["estado"] = df_valid[estado_col].astype(str).replace({"nan": ""}).str.strip()
     out["updated_at"] = agora_sao_paulo_str()
@@ -994,6 +999,8 @@ def converter_supabase_para_df_gov(df: pd.DataFrame) -> pd.DataFrame:
     out[COL_ULT_ATU] = df.get("ultima_atualizacao", "").astype(str)
     out[COL_OBS] = df.get("observacoes", "").astype(str)
     out[COL_DATA_CAD] = df["data_cadastro"].astype(str) if "data_cadastro" in df.columns else ""
+    out[COL_PLANO] = df["plano_contratado"].astype(str) if "plano_contratado" in df.columns else ""
+    out[COL_DATA_INAT] = df["data_inativacao"].astype(str) if "data_inativacao" in df.columns else ""
     out["Cidade"] = df.get("cidade", "").astype(str)
     out["UF"] = df.get("estado", "").astype(str)
     return out
@@ -4637,6 +4644,287 @@ def _injetar_css_abas_visiveis() -> None:
     )
 
 
+PLANO_DIAS_MAP = {
+    "aovivo": 0, "1dia": 1, "3dias": 3, "5dias": 5, "7dias": 7,
+    "10dias": 10, "15dias": 15, "30dias": 30, "60dias": 60, "90dias": 90,
+}
+
+
+def _plano_normalizado(valor) -> str:
+    return str(valor).strip().lower().replace(" ", "")
+
+
+def _plano_em_dias(valor):
+    return PLANO_DIAS_MAP.get(_plano_normalizado(valor))
+
+
+def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict) -> None:
+    """Sub-aba de Clientes: detecta câmeras cujo plano de armazenamento foge do padrão do cliente.
+
+    O 'padrão' de cada cliente é o plano majoritário (moda). Câmeras em qualquer outro
+    plano são marcadas como fora do padrão, indicando provável configuração errada de
+    retenção (ex.: cliente com 25 câmeras de 30 dias e 5 de 7 dias → 5 fora do padrão).
+    """
+    st.markdown("### 🗄️ Padrão de Armazenamento")
+    st.caption(
+        "Detecta câmeras com plano de retenção divergente do padrão (plano majoritário) "
+        "do cliente — provável configuração errada de armazenamento."
+    )
+
+    df_base = df_origem.copy() if df_origem is not None else pd.DataFrame()
+    if df_base.empty:
+        st.info("Sem dados carregados para avaliar planos de armazenamento.")
+        return
+    df_base.columns = [str(c).strip() for c in df_base.columns]
+
+    # ── Coluna de plano ──
+    if COL_PLANO in df_base.columns:
+        plano_col = COL_PLANO
+    else:
+        plano_col = encontrar_coluna_por_chaves(
+            df_base,
+            ("planocontratado", "plano", "plan", "retencao", "retention",
+             "armazenamento", "storage", "diasarmazenamento"),
+            default=None,
+        )
+    if not plano_col or plano_col not in df_base.columns:
+        st.warning(
+            "Não encontrei a coluna de plano de armazenamento (`Plano_Contratado`). "
+            "Se você lê da base do Supabase, rode o ALTER e reimporte para popular `plano_contratado`."
+        )
+        return
+
+    # ── Mesmo universo do painel ──
+    clientes_map = carregar_clientes()
+    if clientes_map and COL_WL in df_base.columns:
+        df_base[COL_WL] = df_base[COL_WL].astype(str).str.strip()
+        df_base = df_base[df_base[COL_WL].isin(set(clientes_map.keys()))].copy()
+    if df_base.empty:
+        st.info("Nenhuma câmera dos clientes monitorados foi encontrada na base.")
+        return
+
+    # ── Filtro opcional: apenas câmeras ativas (ignora inativadas) ──
+    col_inat = COL_DATA_INAT if COL_DATA_INAT in df_base.columns else None
+    tem_inat = False
+    if col_inat is not None:
+        inat_txt = df_base[col_inat].astype(str).str.strip().str.lower().replace({"nan": "", "none": "", "nat": ""})
+        tem_inat = (inat_txt != "").any()
+    if tem_inat:
+        apenas_ativas = st.checkbox(
+            "Considerar apenas câmeras ativas (ignora inativadas)",
+            value=True,
+            key="pad_arm_apenas_ativas",
+        )
+        if apenas_ativas:
+            df_base = df_base[inat_txt == ""].copy()
+
+    # ── Limpeza do plano ──
+    df_base["_plano"] = df_base[plano_col].astype(str).str.strip()
+    df_base = df_base[~df_base["_plano"].str.lower().isin(["", "nan", "none"])].copy()
+    if df_base.empty:
+        st.warning(f"A coluna **{plano_col}** não tem planos preenchidos para avaliar.")
+        return
+
+    # Nome do cliente e cidade
+    if clientes_map:
+        df_base["_cliente"] = df_base[COL_WL].map(clientes_map).fillna(
+            df_base[COL_WL].apply(lambda x: f"ID {x}")
+        )
+    elif COL_EMPRESA in df_base.columns:
+        df_base["_cliente"] = df_base[COL_EMPRESA].astype(str)
+    else:
+        df_base["_cliente"] = df_base[COL_WL].astype(str)
+    city_col = encontrar_coluna_por_chaves(df_base, ("cidade", "municipio", "city", "prefeitura"), default=None)
+    df_base["_cidade"] = df_base[city_col].astype(str).replace({"nan": ""}).str.strip() if city_col else ""
+
+    # ── Controle de dominância mínima ──
+    dom_min = st.slider(
+        "Dominância mínima para definir o plano padrão (%)",
+        min_value=50, max_value=100, value=60, step=5,
+        key="pad_arm_dominancia",
+        help="Abaixo desse percentual o cliente é tratado como 'sem padrão definido' (planos muito divididos).",
+    ) / 100.0
+
+    # ── Cálculo por cliente ──
+    resumo = []
+    detalhe_rows = []
+    sem_padrao = 0
+    for wl, g in df_base.groupby(COL_WL):
+        vc = g["_plano"].value_counts()
+        total = int(vc.sum())
+        nome_cli = str(g["_cliente"].iloc[0])
+        if len(vc) == 1:
+            resumo.append((wl, nome_cli, vc.index[0], 1.0, total, 0, "Conforme"))
+            continue
+        top_count = int(vc.max())
+        candidatos = [p for p in vc.index if int(vc[p]) == top_count]
+        plano_padrao = max(
+            candidatos,
+            key=lambda p: (_plano_em_dias(p) if _plano_em_dias(p) is not None else -1),
+        )
+        dom = top_count / total
+        if dom < dom_min:
+            sem_padrao += 1
+            resumo.append((wl, nome_cli, "—", dom, total, 0, "Sem padrão definido"))
+            continue
+        fora = total - top_count
+        resumo.append((wl, nome_cli, plano_padrao, dom, total, fora, "Fora do padrão" if fora else "Conforme"))
+        if fora:
+            dias_padrao = _plano_em_dias(plano_padrao)
+            g_fora = g[g["_plano"] != plano_padrao]
+            for _, row in g_fora.iterrows():
+                dias_atual = _plano_em_dias(row["_plano"])
+                if dias_atual is None or dias_padrao is None:
+                    direcao = "Diferente"
+                elif dias_atual < dias_padrao:
+                    direcao = "⬇️ Abaixo do padrão"
+                elif dias_atual > dias_padrao:
+                    direcao = "⬆️ Acima do padrão"
+                else:
+                    direcao = "Diferente"
+                detalhe_rows.append({
+                    "Cliente": nome_cli,
+                    "Cidade": row["_cidade"],
+                    "Câmera": str(row.get(COL_NOME_CAM, "")),
+                    "Plano atual": row["_plano"],
+                    "Plano padrão": plano_padrao,
+                    "Divergência": direcao,
+                    "Status": str(row.get(COL_STATUS, "")).lower(),
+                    "_wl": wl,
+                })
+
+    df_resumo = pd.DataFrame(resumo, columns=["_wl", "Cliente", "Plano padrão", "_dom", "Câmeras", "Fora", "Situação"])
+    df_det = pd.DataFrame(detalhe_rows)
+
+    total_cameras = int(df_resumo["Câmeras"].sum())
+    fora_total = int(df_resumo["Fora"].sum())
+    clientes_afetados = int((df_resumo["Fora"] > 0).sum())
+    conformidade = (1 - fora_total / total_cameras) * 100 if total_cameras else 100.0
+    if fora_total and not df_det.empty:
+        plano_padrao_comum = df_resumo[df_resumo["Fora"] > 0]["Plano padrão"].mode()
+        plano_padrao_comum = plano_padrao_comum.iloc[0] if not plano_padrao_comum.empty else "—"
+    else:
+        plano_padrao_comum = "—"
+
+    # ── KPIs ──
+    st.markdown(f"""
+    <div class="compare-hero">
+        <div class="compare-title">🗄️ Conformidade de armazenamento por cliente</div>
+        <div class="compare-sub">Câmeras cujo plano de retenção difere do plano majoritário do cliente.</div>
+    </div>
+    <div class="compare-grid">
+        <div class="compare-card bad">
+            <div class="compare-label">Câmeras fora do padrão</div>
+            <div class="compare-value" style="color:#dc2626">{fora_total}</div>
+            <div class="compare-note">de {total_cameras} câmeras avaliadas</div>
+        </div>
+        <div class="compare-card warn">
+            <div class="compare-label">Clientes afetados</div>
+            <div class="compare-value" style="color:#d97706">{clientes_afetados}</div>
+            <div class="compare-note">{sem_padrao} sem padrão definido (&lt; {int(dom_min*100)}%)</div>
+        </div>
+        <div class="compare-card good">
+            <div class="compare-label">Conformidade global</div>
+            <div class="compare-value" style="color:#059669">{conformidade:.1f}%</div>
+            <div class="compare-note">câmeras no plano padrão</div>
+        </div>
+        <div class="compare-card neutral">
+            <div class="compare-label">Plano padrão mais comum</div>
+            <div class="compare-value">{escape_html(str(plano_padrao_comum))}</div>
+            <div class="compare-note">entre os clientes afetados</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if fora_total == 0:
+        st.success("✅ Nenhuma câmera fora do padrão de armazenamento com os critérios atuais.")
+        return
+
+    # ── Ranking de clientes com mais câmeras fora ──
+    st.markdown("#### Clientes com mais câmeras fora do padrão")
+    df_rank = df_resumo[df_resumo["Fora"] > 0].copy()
+    qtd_max = st.slider(
+        "Clientes no gráfico",
+        min_value=5,
+        max_value=max(5, min(40, len(df_rank))),
+        value=min(15, len(df_rank)),
+        key="pad_arm_qtd_clientes",
+    )
+    top_rank = df_rank.sort_values("Fora", ascending=False).head(int(qtd_max)).sort_values("Fora", ascending=True)
+    max_x = max(2, int(top_rank["Fora"].max()) + 1)
+    altura = max(360, min(720, 40 * len(top_rank) + 130))
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=top_rank["Fora"],
+        y=top_rank["Cliente"].astype(str),
+        orientation="h",
+        marker=dict(color="#dc2626", line=dict(color="#ffffff", width=0.5)),
+        text=top_rank["Fora"],
+        textposition="outside",
+        customdata=top_rank[["Plano padrão", "Câmeras"]],
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Fora do padrão: %{x}<br>"
+            "Plano padrão: %{customdata[0]}<br>"
+            "Total de câmeras: %{customdata[1]}<extra></extra>"
+        ),
+    ))
+    fig.update_layout(
+        **pdefaults(),
+        height=altura,
+        margin=dict(l=10, r=60, t=10, b=35),
+        xaxis=dict(
+            title="Câmeras fora do padrão",
+            range=[0, max_x],
+            gridcolor="#E9D5FF",
+            tickfont=dict(color="#8B7AA3", size=10),
+            zeroline=False,
+        ),
+        yaxis=dict(
+            title="",
+            type="category",
+            categoryorder="array",
+            categoryarray=top_rank["Cliente"].astype(str).tolist(),
+            tickfont=dict(color="#6B5A7A", size=11),
+            automargin=True,
+        ),
+        showlegend=False,
+        bargap=0.35,
+    )
+    st.plotly_chart(fig, use_container_width=True, key="padrao_armazenamento_ranking")
+
+    # ── Drilldown por cliente ──
+    st.markdown("#### Detalhe por cliente")
+    opcoes = df_rank.sort_values("Fora", ascending=False)["Cliente"].astype(str).tolist()
+    cliente_sel = st.selectbox("Cliente", options=opcoes, index=0, key="pad_arm_cliente_sel")
+    df_cli = df_det[df_det["Cliente"] == cliente_sel].copy()
+    info_cli = df_rank[df_rank["Cliente"] == cliente_sel].iloc[0]
+    st.markdown(
+        f"**{escape_html(cliente_sel)}** — plano padrão **{escape_html(str(info_cli['Plano padrão']))}** "
+        f"· {int(info_cli['Fora'])} de {int(info_cli['Câmeras'])} câmeras fora do padrão "
+        f"({info_cli['_dom']*100:.0f}% de dominância)."
+    )
+    render_dataframe(
+        df_cli.drop(columns=["_wl"], errors="ignore").reset_index(drop=True),
+        height=min(420, 80 + 38 * max(1, len(df_cli))),
+    )
+
+    # ── Tabela completa + download ──
+    st.markdown("#### Todas as câmeras fora do padrão")
+    df_full = df_det.drop(columns=["_wl"], errors="ignore").sort_values(["Cliente", "Câmera"]).reset_index(drop=True)
+    render_dataframe(df_full, height=480)
+    csv_out = df_full.to_csv(index=False, sep=";", encoding="utf-8-sig")
+    st.download_button(
+        "📥 Baixar câmeras fora do padrão (CSV)",
+        data=csv_out,
+        file_name=f"padrao_armazenamento_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="dl_padrao_armazenamento_csv_v1",
+    )
+
+
 def render_aba_ultima_camera_cadastrada(df_origem: pd.DataFrame | None, dados: dict) -> None:
     """Sub-aba de Clientes: ranking por cidade do tempo desde o último cadastro de câmera.
 
@@ -5853,7 +6141,7 @@ def main():
     with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🆕 Última Câmera Cadastrada"])
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🆕 Última Câmera Cadastrada", "🗄️ Padrão de Armazenamento"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -6222,6 +6510,9 @@ def main():
 
     with clientes_subtabs[3]:
         render_aba_ultima_camera_cadastrada(df_origem, dados)
+
+    with clientes_subtabs[4]:
+        render_aba_padrao_armazenamento(df_origem, dados)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
