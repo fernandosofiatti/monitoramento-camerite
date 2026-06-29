@@ -993,7 +993,7 @@ def converter_supabase_para_df_gov(df: pd.DataFrame) -> pd.DataFrame:
     out[COL_STATUS] = df.get("status_camera", "").astype(str)
     out[COL_ULT_ATU] = df.get("ultima_atualizacao", "").astype(str)
     out[COL_OBS] = df.get("observacoes", "").astype(str)
-    out[COL_DATA_CAD] = df.get("data_cadastro", "").astype(str)
+    out[COL_DATA_CAD] = df["data_cadastro"].astype(str) if "data_cadastro" in df.columns else ""
     out["Cidade"] = df.get("cidade", "").astype(str)
     out["UF"] = df.get("estado", "").astype(str)
     return out
@@ -4735,9 +4735,12 @@ def render_aba_ultima_camera_cadastrada(df_origem: pd.DataFrame | None, dados: d
         df_recent["_cliente"] = df_recent[COL_WL].map(clientes_map).fillna(
             df_recent[COL_WL].apply(lambda x: f"ID {x}")
         )
+    elif COL_EMPRESA in df_recent.columns:
+        df_recent["_cliente"] = df_recent[COL_EMPRESA].astype(str)
     else:
-        df_recent["_cliente"] = df_recent.get(COL_EMPRESA, "").astype(str)
-    mapa_cam = dict(zip(df_recent["_cidade"], df_recent.get(COL_NOME_CAM, "").astype(str)))
+        df_recent["_cliente"] = ""
+    nomes_cam = df_recent[COL_NOME_CAM].astype(str) if COL_NOME_CAM in df_recent.columns else ""
+    mapa_cam = dict(zip(df_recent["_cidade"], nomes_cam)) if COL_NOME_CAM in df_recent.columns else {}
     mapa_cli = dict(zip(df_recent["_cidade"], df_recent["_cliente"].astype(str)))
     grp["camera_recente"] = grp["_cidade"].map(mapa_cam).fillna("")
     grp["cliente_recente"] = grp["_cidade"].map(mapa_cli).fillna("")
