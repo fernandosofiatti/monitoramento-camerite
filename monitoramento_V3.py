@@ -4778,10 +4778,14 @@ def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict)
 
     # ── Filtro opcional: apenas câmeras ativas (ignora inativadas) ──
     col_inat = COL_DATA_INAT if COL_DATA_INAT in df_base.columns else None
+    inat_ativa = None
     tem_inat = False
     if col_inat is not None:
-        inat_txt = df_base[col_inat].astype(str).str.strip().str.lower().replace({"nan": "", "none": "", "nat": ""})
-        tem_inat = (inat_txt != "").any()
+        _raw_inat = df_base[col_inat]
+        _txt_inat = _raw_inat.astype(str).str.strip().str.lower()
+        # "ativa" = SEM data de inativação: null/NaN, vazio, ou tokens de nulo ("nan"/"none"/"nat"...).
+        inat_ativa = _raw_inat.isna() | _txt_inat.isin(_tokens_vazios)
+        tem_inat = bool((~inat_ativa).any())
     if tem_inat:
         apenas_ativas = st.checkbox(
             "Considerar apenas câmeras ativas (ignora inativadas)",
@@ -4789,7 +4793,7 @@ def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict)
             key="pad_arm_apenas_ativas",
         )
         if apenas_ativas:
-            df_base = df_base[inat_txt == ""].copy()
+            df_base = df_base[inat_ativa].copy()
     n_apos_ativas = len(df_base)
 
     # ── Limpeza do plano ──
