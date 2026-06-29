@@ -4633,6 +4633,248 @@ def _injetar_css_abas_visiveis() -> None:
     )
 
 
+def render_aba_ultima_camera_cadastrada(df_origem: pd.DataFrame | None, dados: dict) -> None:
+    """Sub-aba de Clientes: ranking por cidade do tempo desde o último cadastro de câmera.
+
+    Para cada cidade pegamos a câmera com a DATA DE CADASTRO mais recente e calculamos
+    há quanto tempo isso aconteceu. O gráfico de área (mesmo estilo do 'LPRs Offline')
+    lista do topo (mais tempo sem cadastrar) para a base (cadastrou recentemente).
+    """
+    st.markdown("### 🆕 Última Câmera Cadastrada")
+    st.caption(
+        "Ranking por cidade pelo tempo desde o cadastro da câmera mais recente — "
+        "do topo (há mais tempo sem cadastrar) para a base (cadastrou há menos tempo)."
+    )
+
+    df_base = df_origem.copy() if df_origem is not None else pd.DataFrame()
+    if df_base.empty:
+        st.info("Sem dados carregados para avaliar cadastros de câmeras.")
+        return
+
+    df_base.columns = [str(c).strip() for c in df_base.columns]
+
+    # Mantém o mesmo universo do painel: apenas clientes do nome_clientes.xlsx.
+    clientes_map = carregar_clientes()
+    if clientes_map and COL_WL in df_base.columns:
+        df_base[COL_WL] = df_base[COL_WL].astype(str).str.strip()
+        df_base = df_base[df_base[COL_WL].isin(set(clientes_map.keys()))].copy()
+
+    if df_base.empty:
+        st.info("Nenhuma câmera dos clientes monitorados foi encontrada na base.")
+        return
+
+    # ── 1) Detecta a coluna com a DATA DE CADASTRO da câmera ──
+    col_cad_auto = encontrar_coluna_por_chaves(
+        df_base,
+        (
+            "datacadastro", "data_cadastro", "datadecadastro", "cadastro",
+            "datacriacao", "data_criacao", "criacao", "criada", "created",
+            "createdat", "datainclusao", "inclusao", "datainstalacao", "instalacao",
+        ),
+        default=None,
+    )
+    colunas_disp = list(df_base.columns)
+    idx_default = colunas_disp.index(col_cad_auto) if col_cad_auto in colunas_disp else 0
+    col_cadastro = st.selectbox(
+        "Coluna com a DATA DE CADASTRO da câmera",
+        options=colunas_disp,
+        index=idx_default,
+        key="ultima_cam_col_cadastro",
+        help="Detectada automaticamente pelo nome. Ajuste aqui se a coluna tiver outro nome.",
+    )
+
+    # ── 2) Detecta a coluna de cidade ──
+    city_col = encontrar_coluna_por_chaves(
+        df_base, ("cidade", "municipio", "city", "prefeitura"), default=None
+    )
+    if not city_col or city_col not in df_base.columns:
+        st.warning("Não encontrei uma coluna de cidade na base para agrupar os cadastros.")
+        return
+
+    # ── 3) Parse das datas (reaproveita o parser do CSV da Camerite) ──
+    df_base["_data_cadastro"] = parse_ultima_atualizacao(df_base[col_cadastro])
+    df_validas = df_base[df_base["_data_cadastro"].notna()].copy()
+    if df_validas.empty:
+        st.warning(
+            f"A coluna **{col_cadastro}** não tem datas reconhecíveis. "
+            "Selecione a coluna correta de data de cadastro acima."
+        )
+        return
+
+    df_validas["_cidade"] = df_validas[city_col].astype(str).replace({"nan": ""}).str.strip()
+    df_validas = df_validas[df_validas["_cidade"] != ""].copy()
+    if df_validas.empty:
+        st.warning("Nenhuma cidade preenchida nas linhas com data de cadastro válida.")
+        return
+
+    agora = agora_sao_paulo()
+
+    # ── 4) Por cidade: câmera MAIS recente (max da data de cadastro) ──
+    grp = df_validas.groupby("_cidade", as_index=False).agg(
+        ultimo_cadastro=("_data_cadastro", "max"),
+        cameras=("_data_cadastro", "count"),
+    )
+    grp["_delta"] = grp["ultimo_cadastro"].apply(
+        lambda d: max(agora - d, timedelta(seconds=0)) if pd.notna(d) else timedelta(seconds=0)
+    )
+    grp["dias_sem_cadastrar"] = grp["_delta"].apply(lambda x: int(x.total_seconds() // 86400))
+    grp["tempo_sem_cadastrar"] = grp["_delta"].apply(fmt_tempo)
+    grp["ultimo_cadastro_fmt"] = grp["ultimo_cadastro"].dt.strftime("%d/%m/%Y")
+
+    # Linha mais recente por cidade (para mostrar nome da câmera / cliente).
+    idx_recent = df_validas.groupby("_cidade")["_data_cadastro"].idxmax()
+    df_recent = df_validas.loc[idx_recent].copy()
+    if clientes_map:
+        df_recent["_cliente"] = df_recent[COL_WL].map(clientes_map).fillna(
+            df_recent[COL_WL].apply(lambda x: f"ID {x}")
+        )
+    else:
+        df_recent["_cliente"] = df_recent.get(COL_EMPRESA, "").astype(str)
+    mapa_cam = dict(zip(df_recent["_cidade"], df_recent.get(COL_NOME_CAM, "").astype(str)))
+    mapa_cli = dict(zip(df_recent["_cidade"], df_recent["_cliente"].astype(str)))
+    grp["camera_recente"] = grp["_cidade"].map(mapa_cam).fillna("")
+    grp["cliente_recente"] = grp["_cidade"].map(mapa_cli).fillna("")
+
+    grp = grp.sort_values("dias_sem_cadastrar", ascending=False).reset_index(drop=True)
+
+    # ── 5) KPIs (mesmo visual do Radar LPR Offline) ──
+    total_cidades = int(len(grp))
+    pior = grp.iloc[0] if total_cidades else None
+    melhor = grp.iloc[-1] if total_cidades else None
+    media_dias = int(grp["dias_sem_cadastrar"].mean()) if total_cidades else 0
+    cidades_30d = int((grp["dias_sem_cadastrar"] > 30).sum())
+
+    st.markdown(f"""
+    <div class="compare-hero">
+        <div class="compare-title">🆕 Tempo desde o último cadastro por cidade</div>
+        <div class="compare-sub">Baseado na câmera com cadastro mais recente em cada cidade da carteira filtrada.</div>
+    </div>
+    <div class="compare-grid">
+        <div class="compare-card bad">
+            <div class="compare-label">Há mais tempo sem cadastrar</div>
+            <div class="compare-value" style="color:#dc2626">{(pior['tempo_sem_cadastrar'] if pior is not None else 'N/D')}</div>
+            <div class="compare-note">{escape_html(str(pior['_cidade'])) if pior is not None else '—'}</div>
+        </div>
+        <div class="compare-card warn">
+            <div class="compare-label">Cidades &gt; 30 dias</div>
+            <div class="compare-value" style="color:#d97706">{cidades_30d}</div>
+            <div class="compare-note">de {total_cidades} cidades com cadastro datado</div>
+        </div>
+        <div class="compare-card neutral">
+            <div class="compare-label">Média sem cadastrar</div>
+            <div class="compare-value">{media_dias} dias</div>
+            <div class="compare-note">média entre as {total_cidades} cidades</div>
+        </div>
+        <div class="compare-card good">
+            <div class="compare-label">Cadastro mais recente</div>
+            <div class="compare-value" style="color:#059669">{(melhor['tempo_sem_cadastrar'] if melhor is not None else 'N/D')}</div>
+            <div class="compare-note">{escape_html(str(melhor['_cidade'])) if melhor is not None else '—'}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── 6) Gráfico de área (idêntico ao 'LPRs Offline') ──
+    st.markdown("#### Ranking por cidade")
+    qtd_max = st.slider(
+        "Cidades no gráfico",
+        min_value=5,
+        max_value=max(5, min(40, total_cidades)),
+        value=min(15, total_cidades),
+        key="ultima_cam_qtd_cidades",
+    )
+
+    top_area = grp.head(int(qtd_max)).sort_values("dias_sem_cadastrar", ascending=True).copy()
+    top_area["Cidade eixo"] = top_area["_cidade"].astype(str)
+    max_area = max(3, int(top_area["dias_sem_cadastrar"].max()) + 1) if not top_area.empty else 3
+    altura_area = max(380, min(720, 42 * len(top_area) + 140))
+
+    fig_area = go.Figure()
+    fig_area.add_trace(go.Scatter(
+        name="Dias sem cadastrar",
+        x=top_area["dias_sem_cadastrar"],
+        y=top_area["Cidade eixo"],
+        mode="lines+markers+text",
+        fill="tozerox",
+        line=dict(color="#dc2626", width=3.0, shape="spline", smoothing=0.65),
+        marker=dict(color="#dc2626", size=9, line=dict(color="#ffffff", width=1)),
+        fillcolor="rgba(220, 38, 38, 0.18)",
+        text=top_area["tempo_sem_cadastrar"],
+        textposition="middle right",
+        customdata=top_area[["cliente_recente", "camera_recente", "ultimo_cadastro_fmt", "cameras"]],
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Cliente: %{customdata[0]}<br>"
+            "Última câmera: %{customdata[1]}<br>"
+            "Cadastrada em: %{customdata[2]}<br>"
+            "Câmeras com data: %{customdata[3]}<br>"
+            "Dias sem cadastrar: %{x}<extra></extra>"
+        ),
+    ))
+    fig_area.update_layout(
+        **pdefaults(),
+        height=altura_area,
+        margin=dict(l=10, r=70, t=10, b=35),
+        xaxis=dict(
+            title="Dias desde o último cadastro",
+            range=[0, max_area],
+            gridcolor="#E9D5FF",
+            tickfont=dict(color="#8B7AA3", size=10),
+            zeroline=False,
+        ),
+        yaxis=dict(
+            title="",
+            type="category",
+            categoryorder="array",
+            categoryarray=top_area["Cidade eixo"].tolist(),
+            tickfont=dict(color="#6B5A7A", size=11),
+            automargin=True,
+        ),
+        showlegend=False,
+        hovermode="closest",
+    )
+    st.plotly_chart(fig_area, use_container_width=True, key="ultima_camera_cadastrada_area_horizontal")
+
+    # ── 7) Detalhamento + download ──
+    st.markdown("#### Detalhamento por cidade")
+    busca = st.text_input(
+        "Buscar por cidade, cliente ou câmera",
+        key="busca_ultima_camera_cadastrada",
+    )
+    df_lista = grp.copy()
+    if busca.strip():
+        termo = busca.strip().lower()
+        texto_busca = (
+            df_lista["_cidade"].astype(str) + " " +
+            df_lista["cliente_recente"].astype(str) + " " +
+            df_lista["camera_recente"].astype(str)
+        ).str.lower()
+        df_lista = df_lista[texto_busca.str.contains(re.escape(termo), na=False)].copy()
+
+    df_lista = df_lista[[
+        "_cidade", "tempo_sem_cadastrar", "dias_sem_cadastrar",
+        "ultimo_cadastro_fmt", "cliente_recente", "camera_recente", "cameras",
+    ]].rename(columns={
+        "_cidade": "Cidade",
+        "tempo_sem_cadastrar": "Tempo sem cadastrar",
+        "dias_sem_cadastrar": "Dias",
+        "ultimo_cadastro_fmt": "Último cadastro",
+        "cliente_recente": "Cliente",
+        "camera_recente": "Última câmera",
+        "cameras": "Câmeras c/ data",
+    })
+    render_dataframe(df_lista, height=480)
+
+    csv_out = df_lista.to_csv(index=False, sep=";", encoding="utf-8-sig")
+    st.download_button(
+        "📥 Baixar ranking de cadastros em CSV",
+        data=csv_out,
+        file_name=f"ultima_camera_cadastrada_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="dl_ultima_camera_cadastrada_csv_v1",
+    )
+
+
 def render_aba_tendencia(dados: dict) -> None:
     """Aba Tendencia: evolucao do percentual offline por cliente ao longo dos snapshots."""
     st.markdown("### 📈 Tendência")
@@ -5601,7 +5843,7 @@ def main():
     with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência"])
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🆕 Última Câmera Cadastrada"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -5967,6 +6209,9 @@ def main():
 
     with clientes_subtabs[2]:
         render_aba_tendencia(dados)
+
+    with clientes_subtabs[3]:
+        render_aba_ultima_camera_cadastrada(df_origem, dados)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
