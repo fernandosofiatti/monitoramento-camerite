@@ -2453,6 +2453,33 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
 
         render_dataframe(df_preview.head(100), height=320)
 
+        # Diagnóstico de escopo: quantos clientes/linhas do CSV ficam FORA do filtro do painel.
+        def _norm_wl(serie):
+            return set(serie.astype(str).str.strip().str.replace(r"\.0$", "", regex=True))
+        wl_csv = _norm_wl(df_csv[COL_WL]) if COL_WL in df_csv.columns else set()
+        wl_filtro = _norm_wl(df_csv_filtrado[COL_WL]) if COL_WL in df_csv_filtrado.columns else set()
+        wl_fora = wl_csv - wl_filtro
+        if wl_fora:
+            st.info(
+                f"**Escopo da importação:** {fmt_card_num(total_csv_filtro)} linhas de "
+                f"{len(wl_filtro)} clientes entram (presentes em `nome_clientes.xlsx`). "
+                f"{len(wl_fora)} clientes do CSV "
+                f"({fmt_card_num(total_csv_bruto - total_csv_filtro)} linhas) ficam **de fora** do filtro — "
+                "é por isso que a base pode não refletir tudo que está no CSV."
+            )
+
+        importar_tudo = st.checkbox(
+            "Importar todos os clientes do CSV (ignorar filtro do painel)",
+            value=False,
+            key="importar_csv_completo",
+            help="Por padrão a importação grava apenas os whitelabels listados em nome_clientes.xlsx. "
+                 "Marque para sincronizar a base online com o CSV inteiro.",
+        )
+        df_para_enviar = df_csv if importar_tudo else df_csv_filtrado
+        if importar_tudo:
+            st.caption(f"Modo CSV completo: {fmt_card_num(len(df_csv))} linhas serão sincronizadas.")
+
+
         if st.button("🚀 Atualizar base online", type="primary", use_container_width=True, key="btn_atualizar_base_online_v1"):
             status_box = st.empty()
             progress_bar = st.progress(0)
@@ -2485,13 +2512,13 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
             atualizar_barra(10, "Preparando registros filtrados para importação...")
             atualizar_barra(15, "Iniciando atualização da base online. Não feche esta página.")
 
-            ok, msg, total = enviar_df_supabase(df_csv_filtrado, progress_callback=atualizar_upload)
+            ok, msg, total = enviar_df_supabase(df_para_enviar, progress_callback=atualizar_upload)
             if ok:
                 atualizar_barra(85, "Base online atualizada. Registrando histórico da importação...")
                 try:
                     atualizar_barra(90, "Gravando snapshot automático da nova importação...")
                     df_snapshot = preencher_cidade_estado_por_clientes(
-                        df_csv_filtrado.copy(),
+                        df_para_enviar.copy(),
                         carregar_clientes_prefeitura(),
                     )
                     dados_snapshot = processar_df_gov(df_snapshot, clientes_map)
@@ -2612,7 +2639,8 @@ def carregar_clientes() -> dict:
         # Aceitar qualquer variação de nome de coluna
         col_id = next((c for c in df.columns if "whitelabel" in c.lower() or "id" in c.lower()), df.columns[0])
         col_nom = next((c for c in df.columns if "nome" in c.lower() or "client" in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
-        return dict(zip(df[col_id].astype(str).str.strip(), df[col_nom].astype(str).str.strip()))
+        chaves = df[col_id].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+        return dict(zip(chaves, df[col_nom].astype(str).str.strip()))
     except Exception:
         return {}
 
