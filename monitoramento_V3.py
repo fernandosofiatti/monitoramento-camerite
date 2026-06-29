@@ -4761,10 +4761,17 @@ def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict)
         return
 
     # ── Mesmo universo do painel ──
+    _tokens_vazios = {"", "nan", "none", "null", "nat", "<na>"}
+    # Snapshot do universo completo (antes de qualquer filtro) p/ diagnóstico.
+    _serie_plano_full = df_base[plano_col].astype(str).str.strip()
+    n_full = len(df_base)
+    n_full_plano = int((~_serie_plano_full.str.lower().isin(_tokens_vazios)).sum())
+
     clientes_map = carregar_clientes()
     if clientes_map and COL_WL in df_base.columns:
         df_base[COL_WL] = df_base[COL_WL].astype(str).str.strip()
         df_base = df_base[df_base[COL_WL].isin(set(clientes_map.keys()))].copy()
+    n_apos_clientes = len(df_base)
     if df_base.empty:
         st.info("Nenhuma câmera dos clientes monitorados foi encontrada na base.")
         return
@@ -4783,26 +4790,37 @@ def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict)
         )
         if apenas_ativas:
             df_base = df_base[inat_txt == ""].copy()
+    n_apos_ativas = len(df_base)
 
     # ── Limpeza do plano ──
     df_base["_plano"] = df_base[plano_col].astype(str).str.strip()
-    _tokens_vazios = {"", "nan", "none", "null", "nat", "<na>"}
     serie_plano_raw = df_base["_plano"].copy()
     df_base = df_base[~df_base["_plano"].str.lower().isin(_tokens_vazios)].copy()
     if df_base.empty:
         st.warning(f"A coluna **{plano_col}** não tem planos preenchidos para avaliar.")
         with st.expander("🔎 Diagnóstico da coluna de plano", expanded=True):
+            st.write(f"**No `df_origem` completo (antes de filtros):** {n_full_plano} de {n_full} linhas têm plano preenchido.")
+            st.write(f"**Após filtro de clientes** (`nome_clientes.xlsx`): {n_apos_clientes} linhas.")
+            st.write(f"**Após filtro de ativas:** {n_apos_ativas} linhas.")
             vc = serie_plano_raw.replace({"": "(vazio)"}).value_counts().head(10)
-            st.write(f"Coluna detectada: `{plano_col}` · linhas avaliadas: {len(serie_plano_raw)}")
-            if vc.empty:
-                st.write("A coluna chegou totalmente vazia.")
-            else:
+            if not vc.empty:
+                st.write("Valores na coluna de plano (após filtros):")
                 st.dataframe(vc.rename("ocorrências"))
-            st.caption(
-                "Se aparecer só `(vazio)`, `None` ou `null`, a coluna `plano_contratado` está nula na "
-                "base do Supabase. Causa provável: o app publicado reimportou o CSV ainda com o código "
-                "antigo (sem o mapeamento de plano). Publique a versão nova e reimporte o CSV."
-            )
+            if n_full_plano == 0:
+                st.error(
+                    "O app **não enxerga plano em nenhuma linha**, mesmo a base tendo o dado. "
+                    "Isso é **cache / leitura antiga**: clique em **🔄 Atualizar dados** na barra lateral "
+                    "(limpa o cache) e reabra esta aba. Se persistir, o deploy do código de leitura "
+                    "(`converter_supabase_para_df_gov`) ainda está desatualizado."
+                )
+            else:
+                st.warning(
+                    f"O plano **existe** no `df_origem` ({n_full_plano} linhas), mas **nenhum** dos clientes "
+                    "do `nome_clientes.xlsx` (ou das câmeras ativas) tem plano preenchido. "
+                    "Ou seja, os clientes do painel não foram reimportados com plano. "
+                    "Reimporte marcando **“Importar todos os clientes do CSV”**, "
+                    "ou desmarque “apenas câmeras ativas” acima."
+                )
         return
 
     # Nome do cliente e cidade
