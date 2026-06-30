@@ -4172,6 +4172,126 @@ def gerar_relatorio_franquia_html(nome_franquia: str, df_clientes_franquia: pd.D
 </div></body></html>"""
 
 
+def html_para_pdf_bytes(html: str) -> bytes | None:
+    """Converte HTML (CSS inline / tabelas) em PDF. Retorna None se a lib não estiver disponível."""
+    try:
+        import io
+        from xhtml2pdf import pisa
+    except Exception:
+        return None
+    try:
+        buf = io.BytesIO()
+        resultado = pisa.CreatePDF(src=html, dest=buf, encoding="utf-8")
+        if resultado.err:
+            return None
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def gerar_relatorio_armazenamento_html(nome_franquia: str, df_resumo_fr: pd.DataFrame, df_det_fr: pd.DataFrame, dom_min: float) -> str:
+    """Gera o HTML do relatório de Padrão de Armazenamento de uma franquia (ou geral)."""
+    nome_franquia = str(nome_franquia or "Todas as franquias").strip()
+    data_ref = carregar_ultima_atualizacao_base()
+    data_geracao = agora_sao_paulo_str("%d/%m/%Y %H:%M")
+
+    total_clientes = int(len(df_resumo_fr))
+    total_cameras = int(pd.to_numeric(df_resumo_fr.get("Câmeras", 0), errors="coerce").fillna(0).sum()) if not df_resumo_fr.empty else 0
+    fora_total = int(pd.to_numeric(df_resumo_fr.get("Fora", 0), errors="coerce").fillna(0).sum()) if not df_resumo_fr.empty else 0
+    clientes_afetados = int((pd.to_numeric(df_resumo_fr.get("Fora", 0), errors="coerce").fillna(0) > 0).sum()) if not df_resumo_fr.empty else 0
+    conformidade = round((1 - fora_total / total_cameras) * 100, 1) if total_cameras else 100.0
+    cor_conf = "#059669" if conformidade >= 95 else ("#D97706" if conformidade >= 85 else "#DC2626")
+
+    # Resumo por cliente (ordena pelos com mais câmeras fora)
+    linhas_clientes = []
+    if not df_resumo_fr.empty:
+        df_ord = df_resumo_fr.sort_values("Fora", ascending=False)
+        for _, row in df_ord.iterrows():
+            situacao = str(row.get("Situação", ""))
+            if situacao == "Fora do padrão":
+                cor_s, bg_s = "#DC2626", "#FEE2E2"
+            elif situacao == "Conforme":
+                cor_s, bg_s = "#059669", "#D1FAE5"
+            else:
+                cor_s, bg_s = "#6B5A7A", "#F3E8FF"
+            dom_txt = f"{float(row.get('_dom', 0))*100:.0f}%" if pd.notna(row.get("_dom")) else "—"
+            linhas_clientes.append(
+                '<tr>'
+                f'<td style="padding:9px 12px;border-bottom:1px solid #E9D5FF;color:#171126;font-weight:700">{escape_html(str(row.get("Cliente","")))}<br><span style="font-size:11px;color:#8B7AA3;font-weight:500">ID {escape_html(str(row.get("_wl","")))}</span></td>'
+                f'<td style="padding:9px 12px;border-bottom:1px solid #E9D5FF;text-align:center;color:#5B21B6;font-weight:800">{escape_html(str(row.get("Plano padrão","")))}</td>'
+                f'<td style="padding:9px 12px;border-bottom:1px solid #E9D5FF;text-align:right;color:#6B5A7A">{dom_txt}</td>'
+                f'<td style="padding:9px 12px;border-bottom:1px solid #E9D5FF;text-align:right;color:#171126">{int(row.get("Câmeras",0) or 0)}</td>'
+                f'<td style="padding:9px 12px;border-bottom:1px solid #E9D5FF;text-align:right;color:#DC2626;font-weight:700">{int(row.get("Fora",0) or 0)}</td>'
+                f'<td style="padding:9px 12px;border-bottom:1px solid #E9D5FF;text-align:center"><span style="display:inline-block;background:{bg_s};color:{cor_s};border-radius:999px;padding:4px 9px;font-size:11px;font-weight:800">{escape_html(situacao)}</span></td>'
+                '</tr>'
+            )
+
+    # Câmeras fora do padrão
+    linhas_fora = []
+    if df_det_fr is not None and not df_det_fr.empty:
+        for _, row in df_det_fr.sort_values(["Cliente", "Câmera"]).iterrows():
+            linhas_fora.append(
+                '<tr>'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #F3E8FF;color:#171126;font-weight:700">{escape_html(str(row.get("Cliente","")))}</td>'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #F3E8FF;color:#6B5A7A">{escape_html(str(row.get("Cidade","")))}</td>'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #F3E8FF;color:#171126">{escape_html(str(row.get("Câmera","")))}</td>'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #F3E8FF;text-align:center;color:#DC2626;font-weight:700">{escape_html(str(row.get("Plano atual","")))}</td>'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #F3E8FF;text-align:center;color:#5B21B6;font-weight:700">{escape_html(str(row.get("Plano padrão","")))}</td>'
+                f'<td style="padding:8px 10px;border-bottom:1px solid #F3E8FF;color:#171126">{escape_html(str(row.get("Divergência","")))}</td>'
+                '</tr>'
+            )
+
+    if linhas_fora:
+        tabela_fora = (
+            '<h2 style="font-size:18px;color:#171126;margin:26px 0 10px">Câmeras fora do padrão</h2>'
+            '<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;background:#FFFFFF;border:1px solid #E9D5FF;border-radius:12px;overflow:hidden">'
+            '<thead><tr style="background:#F3E8FF">'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Cliente</th>'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Cidade</th>'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Câmera</th>'
+            '<th align="center" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Plano atual</th>'
+            '<th align="center" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Plano padrão</th>'
+            '<th align="left" style="padding:10px;color:#5B21B6;font-size:11px;text-transform:uppercase">Divergência</th>'
+            '</tr></thead><tbody>' + "".join(linhas_fora) + '</tbody></table>'
+        )
+    else:
+        tabela_fora = '<div style="background:#ECFDF5;border:1px solid #A7F3D0;border-radius:12px;padding:14px;color:#047857;font-weight:700;margin-top:18px">Nenhuma câmera fora do padrão de armazenamento nesta franquia.</div>'
+
+    return f"""<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#FAF7FF;font-family:Arial,Helvetica,sans-serif;color:#171126">
+<div style="max-width:980px;margin:0 auto;padding:24px">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#5B21B6" style="background-color:#5B21B6;border-radius:18px"><tr><td bgcolor="#5B21B6" style="background-color:#5B21B6;padding:24px;color:#FFFFFF;border-radius:18px">
+        <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;opacity:.9;color:#FFFFFF">Camerite BI · Monitoramento</div>
+        <h1 style="font-size:26px;line-height:1.2;margin:8px 0 4px;color:#FFFFFF">Relatório de Padrão de Armazenamento</h1>
+        <div style="font-size:16px;font-weight:700;color:#FFFFFF">{escape_html(nome_franquia)}</div>
+        <div style="font-size:12px;margin-top:12px;opacity:.9;color:#FFFFFF">Base: {escape_html(data_ref)} · Gerado em: {escape_html(data_geracao)}</div>
+    </td></tr></table>
+    <div style="display:block;background:#FFFFFF;border:1px solid #E9D5FF;border-radius:16px;padding:18px;margin-top:16px">
+        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse"><tr>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Clientes</div><div style="font-size:28px;font-weight:900;color:#7C3AED">{total_clientes}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Câmeras</div><div style="font-size:28px;font-weight:900;color:#171126">{total_cameras}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Fora do padrão</div><div style="font-size:28px;font-weight:900;color:#DC2626">{fora_total}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Clientes afetados</div><div style="font-size:28px;font-weight:900;color:#D97706">{clientes_afetados}</div></td>
+            <td style="width:20%;padding:8px"><div style="font-size:11px;color:#8B7AA3;font-weight:800;text-transform:uppercase">Conformidade</div><div style="font-size:28px;font-weight:900;color:{cor_conf}">{conformidade:.1f}%</div></td>
+        </tr></table>
+    </div>
+    <h2 style="font-size:18px;color:#171126;margin:26px 0 10px">Resumo por cliente</h2>
+    <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;background:#FFFFFF;border:1px solid #E9D5FF;border-radius:12px;overflow:hidden">
+        <thead><tr style="background:#F3E8FF">
+            <th align="left" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Cliente</th>
+            <th align="center" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Plano padrão</th>
+            <th align="right" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Dominância</th>
+            <th align="right" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Câmeras</th>
+            <th align="right" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Fora</th>
+            <th align="center" style="padding:10px 12px;color:#5B21B6;font-size:11px;text-transform:uppercase">Situação</th>
+        </tr></thead><tbody>{''.join(linhas_clientes)}</tbody>
+    </table>
+    {tabela_fora}
+    <p style="font-size:12px;color:#6B5A7A;margin-top:22px;line-height:1.5">O “plano padrão” de cada cliente é o plano de retenção com mais câmeras (maioria por quantidade). Câmeras em plano diferente são listadas como fora do padrão. Clientes sem maioria clara (dominância abaixo de {int(dom_min*100)}%) ou com empate são tratados como “sem padrão definido”.</p>
+</div></body></html>"""
+
+
 def _cidade_relatorio_franquia(wl_id: str, row: pd.Series | None, dados: dict) -> str:
     """Define a cidade usada para separar os anexos XLSX do e-mail."""
     info = dados.get(str(wl_id), {}) if isinstance(dados, dict) else {}
@@ -4940,6 +5060,63 @@ def render_aba_padrao_armazenamento(df_origem: pd.DataFrame | None, dados: dict)
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Relatório por franquia (HTML + PDF) — sempre visível, no topo da aba ──
+    st.markdown("#### 📄 Relatório por franquia")
+    franq_map = carregar_clientes_franqueado()
+    df_resumo["_franqueado"] = (
+        df_resumo["_wl"].map(franq_map).fillna("Sem franquia").replace({"": "Sem franquia", "nan": "Sem franquia"})
+    )
+    if not df_det.empty:
+        df_det["_franqueado"] = (
+            df_det["_wl"].map(franq_map).fillna("Sem franquia").replace({"": "Sem franquia", "nan": "Sem franquia"})
+        )
+
+    franquias = sorted(df_resumo["_franqueado"].astype(str).unique().tolist())
+    opcoes_fr = ["Todas as franquias"] + franquias
+    sel_fr = st.selectbox("Franquia do relatório", options=opcoes_fr, index=0, key="pad_arm_franquia_rel")
+
+    if sel_fr == "Todas as franquias":
+        resumo_fr, det_fr, nome_fr = df_resumo, df_det, "Todas as franquias"
+    else:
+        resumo_fr = df_resumo[df_resumo["_franqueado"] == sel_fr].copy()
+        det_fr = df_det[df_det["_franqueado"] == sel_fr].copy() if not df_det.empty else df_det
+        nome_fr = sel_fr
+
+    html_rel = gerar_relatorio_armazenamento_html(nome_fr, resumo_fr, det_fr, dom_min)
+    slug = slug_arquivo(nome_fr)
+    nome_base = f"relatorio_armazenamento_{slug}_{agora_sao_paulo_str('%Y%m%d')}"
+
+    c_html, c_pdf = st.columns(2)
+    c_html.download_button(
+        "⬇ Baixar HTML",
+        data=html_rel.encode("utf-8"),
+        file_name=f"{nome_base}.html",
+        mime="text/html",
+        use_container_width=True,
+        key=f"pad_arm_dl_html_{slug}",
+    )
+    with c_pdf:
+        if st.button("🧾 Gerar PDF", use_container_width=True, key=f"pad_arm_btn_pdf_{slug}"):
+            with st.spinner("Gerando PDF..."):
+                st.session_state[f"pad_arm_pdf_bytes_{slug}"] = html_para_pdf_bytes(html_rel)
+        pdf_bytes = st.session_state.get(f"pad_arm_pdf_bytes_{slug}")
+        if pdf_bytes:
+            st.download_button(
+                "⬇ Baixar PDF",
+                data=pdf_bytes,
+                file_name=f"{nome_base}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key=f"pad_arm_dl_pdf_{slug}",
+            )
+        elif pdf_bytes is None and f"pad_arm_pdf_bytes_{slug}" in st.session_state:
+            st.warning("Não consegui gerar o PDF. Adicione `xhtml2pdf` ao requirements.txt e reinicie o app.")
+
+    with st.expander("👁 Pré-visualizar relatório"):
+        st.components.v1.html(html_rel, height=600, scrolling=True)
+
+    st.divider()
 
     if fora_total == 0:
         st.success("✅ Nenhuma câmera fora do padrão de armazenamento com os critérios atuais.")
