@@ -5727,15 +5727,18 @@ def _area_horizontal_franquia(
     sufixo: str = "",
     formato_texto=None,
 ) -> None:
-    """Renderiza um gráfico de área horizontal (padrão 'LPRs Offline') para franquias."""
+    """Renderiza um gráfico de área horizontal (padrão 'LPRs Offline') para franquias.
+
+    formato_texto recebe a linha (pd.Series) e devolve o rótulo exibido no ponto.
+    """
     dfp = df_plot.sort_values(valor_col, ascending=True).copy()
     dfp["Franquia eixo"] = dfp["Franqueado"].astype(str)
     if formato_texto is None:
-        formato_texto = lambda v: f"{v:g}{sufixo}"
-    dfp["_texto"] = dfp[valor_col].apply(formato_texto)
+        formato_texto = lambda r: f"{r[valor_col]:g}{sufixo}"
+    dfp["_texto"] = dfp.apply(formato_texto, axis=1)
 
     max_x = float(dfp[valor_col].max()) if not dfp.empty else 0.0
-    max_x = max(max_x * 1.18, 1.0)
+    max_x = max(max_x * 1.28, 1.0)
     altura = max(320, min(760, 44 * len(dfp) + 130))
 
     fig = go.Figure()
@@ -5764,7 +5767,7 @@ def _area_horizontal_franquia(
     fig.update_layout(
         **pdefaults(),
         height=altura,
-        margin=dict(l=10, r=80, t=10, b=35),
+        margin=dict(l=10, r=110, t=10, b=35),
         xaxis=dict(
             title=titulo_eixo,
             range=[0, max_x],
@@ -5855,7 +5858,7 @@ def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
         titulo_eixo="Câmeras offline",
         key="total_franquia_area_qtd",
         sufixo="",
-        formato_texto=lambda v: f"{int(v)}",
+        formato_texto=lambda r: f"{int(r['Offline'])}",
     )
 
     st.markdown("#### % Offline por franquia")
@@ -5869,7 +5872,7 @@ def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
         titulo_eixo="% Offline",
         key="total_franquia_area_pct",
         sufixo="%",
-        formato_texto=lambda v: f"{v:.1f}%",
+        formato_texto=lambda r: f"{r['Pct']:.1f}% ({int(r['Offline'])}/{int(r['Total'])})",
     )
 
     with st.expander("Ver tabela consolidada por franquia"):
