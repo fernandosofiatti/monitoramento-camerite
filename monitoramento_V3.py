@@ -5456,11 +5456,11 @@ def render_aba_ultima_camera_cadastrada(df_origem: pd.DataFrame | None, dados: d
 
 
 def render_aba_tendencia(dados: dict) -> None:
-    """Aba Tendencia: evolucao do percentual offline por cliente ao longo dos snapshots."""
+    """Aba Tendencia: evolucao do percentual offline por cliente ou franquia ao longo dos snapshots."""
     st.markdown("### 📈 Tendência")
-    st.caption("Evolução do percentual offline por cliente a partir dos snapshots salvos.")
+    st.caption("Evolução do percentual offline a partir dos snapshots salvos.")
 
-    col_periodo, col_cliente = st.columns([1, 2])
+    col_periodo, col_modo = st.columns([1, 2])
     with col_periodo:
         dias = st.selectbox(
             "Período",
@@ -5468,6 +5468,13 @@ def render_aba_tendencia(dados: dict) -> None:
             index=2,
             format_func=lambda d: f"Últimos {d} dias",
             key="tend_periodo",
+        )
+    with col_modo:
+        modo = st.radio(
+            "Filtrar por",
+            options=["Cliente", "Franquia"],
+            horizontal=True,
+            key="tend_modo",
         )
 
     with st.spinner("Carregando histórico de snapshots..."):
@@ -5483,6 +5490,14 @@ def render_aba_tendencia(dados: dict) -> None:
         st.info("Os snapshots encontrados não possuem data válida para montar a tendência.")
         return
 
+    if modo == "Franquia":
+        _render_tendencia_por_franquia(df_hist, dados)
+    else:
+        _render_tendencia_por_cliente(df_hist, dados)
+
+
+def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
+    """Tendência de um cliente (whitelabel) individual ao longo dos snapshots."""
     clientes_hist = (
         df_hist[["wl_id", "nome_cliente"]]
         .drop_duplicates("wl_id")
@@ -5493,13 +5508,12 @@ def render_aba_tendencia(dados: dict) -> None:
         clientes_hist.setdefault(str(wl_id), v.get("cidade_estado") or v.get("nome_cliente", f"ID {wl_id}"))
 
     opcoes_ids = sorted(clientes_hist.keys(), key=lambda wl: clientes_hist.get(wl, wl))
-    with col_cliente:
-        wl_sel = st.selectbox(
-            "Cliente",
-            options=opcoes_ids,
-            format_func=lambda wl: clientes_hist.get(wl, wl),
-            key="tend_cliente",
-        )
+    wl_sel = st.selectbox(
+        "Cliente",
+        options=opcoes_ids,
+        format_func=lambda wl: clientes_hist.get(wl, wl),
+        key="tend_cliente",
+    )
 
     df_cli = (
         df_hist[df_hist["wl_id"].astype(str) == str(wl_sel)]
@@ -5563,6 +5577,143 @@ def render_aba_tendencia(dados: dict) -> None:
         df_tabela.columns = ["Data", "Rótulo", "Total", "Offline", "% Offline"]
         df_tabela["% Offline"] = df_tabela["% Offline"].apply(lambda v: f"{v:.1f}%")
         render_dataframe(df_tabela, height=min(400, (len(df_tabela) + 1) * 35 + 3))
+
+
+def _render_tendencia_por_franquia(df_hist: pd.DataFrame, dados: dict) -> None:
+    """Tendência consolidada de uma franquia: linha total + uma linha por cidade."""
+    franqueados_map = carregar_clientes_franqueado()  # {wl_id: Franqueado}
+    if not franqueados_map:
+        st.info(
+            "Nenhum dado de franquia encontrado. Confira se o arquivo "
+            "**nome_clientes.xlsx** possui a coluna *Franqueado*."
+        )
+        return
+
+    df = df_hist.copy()
+    df["wl_id"] = df["wl_id"].astype(str).str.strip()
+    df["franquia"] = df["wl_id"].map(lambda w: (franqueados_map.get(w, "") or "").strip())
+    df = df[df["franquia"] != ""].copy()
+    if df.empty:
+        st.info("Nenhum snapshot do período possui cliente vinculado a uma franquia.")
+        return
+
+    franquias = sorted(df["franquia"].unique(), key=lambda s: s.lower())
+    fr_sel = st.selectbox("Franquia", options=franquias, key="tend_franquia")
+
+    df_fr = df[df["franquia"] == fr_sel].sort_values("gravado_dt").copy()
+    if df_fr.empty:
+        st.warning(f"Nenhum snapshot encontrado para **{fr_sel}** no período.")
+        return
+
+    # Nome de exibição de cada cidade (whitelabel) da franquia.
+    nomes_cidade: dict[str, str] = {}
+    for wl in df_fr["wl_id"].unique():
+        v = (dados or {}).get(wl) or (dados or {}).get(str(wl))
+        if isinstance(v, dict):
+            nomes_cidade[wl] = str(v.get("cidade_estado") or v.get("nome_cliente") or f"ID {wl}")
+        else:
+            nome = df_fr.loc[df_fr["wl_id"] == wl, "nome_cliente"].iloc[-1]
+            nomes_cidade[wl] = str(nome or f"ID {wl}")
+
+    n_cidades = df_fr["wl_id"].nunique()
+
+    # Agregado da franquia por snapshot: soma total e offline de todas as cidades.
+    agg = (
+        df_fr.groupby(["snapshot_id", "gravado_dt"], as_index=False)
+        .agg(total=("total", "sum"), offline=("offline", "sum"), label=("label", "first"))
+        .sort_values("gravado_dt")
+        .reset_index(drop=True)
+    )
+    agg["pct_offline"] = agg.apply(
+        lambda r: (float(r["offline"]) / float(r["total"]) * 100.0) if r["total"] else 0.0,
+        axis=1,
+    )
+
+    pct_atual = float(agg["pct_offline"].iloc[-1])
+    pct_inicio = float(agg["pct_offline"].iloc[0])
+    pct_max = float(agg["pct_offline"].max())
+    pct_min = float(agg["pct_offline"].min())
+    variacao = pct_atual - pct_inicio
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("% Offline atual (franquia)", f"{pct_atual:.1f}%")
+    m2.metric("Variação", f"{variacao:+.1f} p.p.")
+    m3.metric("Pior momento", f"{pct_max:.1f}%")
+    m4.metric("Melhor momento", f"{pct_min:.1f}%")
+    m5.metric("Cidades", f"{n_cidades}")
+
+    fig = go.Figure()
+    fig.add_hrect(y0=0, y1=5, fillcolor="#dff8f3", opacity=0.25, line_width=0, layer="below")
+    fig.add_hrect(y0=5, y1=10, fillcolor="#fef9c3", opacity=0.25, line_width=0, layer="below")
+    fig.add_hrect(y0=10, y1=100, fillcolor="#fee2e2", opacity=0.20, line_width=0, layer="below")
+
+    # Uma linha por cidade (finas, para leitura individual da tendência).
+    for wl, grupo in df_fr.groupby("wl_id"):
+        grupo = grupo.sort_values("gravado_dt")
+        nome_cid = nomes_cidade.get(wl, wl)
+        fig.add_trace(go.Scatter(
+            x=grupo["gravado_dt"],
+            y=grupo["pct_offline"].tolist(),
+            mode="lines+markers",
+            line=dict(width=1.4),
+            marker=dict(size=5),
+            opacity=0.8,
+            name=nome_cid[:24],
+            text=[
+                f"<b>{escape_html(nome_cid)}</b><br>{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
+                f"% Offline: <b>{r['pct_offline']:.1f}%</b><br>Offline: {int(r['offline'])} de {int(r['total'])}"
+                for _, r in grupo.iterrows()
+            ],
+            hovertemplate="%{text}<extra></extra>",
+        ))
+
+    # Linha agregada da franquia (destaque).
+    fig.add_trace(go.Scatter(
+        x=agg["gravado_dt"],
+        y=agg["pct_offline"].tolist(),
+        mode="lines+markers",
+        line=dict(color="#171126", width=3),
+        marker=dict(color=[cor_hex(v) for v in agg["pct_offline"]], size=9),
+        name="Franquia (total)",
+        text=[
+            f"<b>Franquia · {escape_html(fr_sel)}</b><br>{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
+            f"% Offline: <b>{r['pct_offline']:.1f}%</b><br>Offline: {int(r['offline'])} de {int(r['total'])}"
+            for _, r in agg.iterrows()
+        ],
+        hovertemplate="%{text}<extra></extra>",
+    ))
+
+    fig.add_hline(y=5, line_dash="dot", line_color="#14b8a6", line_width=1)
+    fig.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1)
+    y_top = max(pct_max * 1.25, float(df_fr["pct_offline"].max()) * 1.1, 12)
+    fig.update_layout(
+        **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=440,
+        margin=dict(l=10, r=30, t=20, b=70),
+        xaxis=dict(tickangle=-35, gridcolor="#F3E8FF", tickformat="%d/%m %H:%M"),
+        yaxis=dict(ticksuffix="%", gridcolor="#F3E8FF", range=[0, y_top]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"tend_fr_{slug_arquivo(fr_sel)}")
+
+    with st.expander("Ver tabela consolidada da franquia"):
+        df_tab = agg[["gravado_dt", "label", "total", "offline", "pct_offline"]].copy()
+        df_tab["gravado_dt"] = df_tab["gravado_dt"].dt.strftime("%d/%m/%Y %H:%M")
+        df_tab.columns = ["Data", "Rótulo", "Total", "Offline", "% Offline"]
+        df_tab["% Offline"] = df_tab["% Offline"].apply(lambda v: f"{v:.1f}%")
+        render_dataframe(df_tab, height=min(400, (len(df_tab) + 1) * 35 + 3))
+
+    with st.expander("Ver tabela por cidade"):
+        df_cid = df_fr[["gravado_dt", "wl_id", "total", "offline", "pct_offline"]].copy()
+        df_cid["Cidade"] = df_cid["wl_id"].map(lambda w: nomes_cidade.get(w, w))
+        df_cid["gravado_dt"] = df_cid["gravado_dt"].dt.strftime("%d/%m/%Y %H:%M")
+        df_cid = df_cid[["gravado_dt", "Cidade", "total", "offline", "pct_offline"]]
+        df_cid.columns = ["Data", "Cidade", "Total", "Offline", "% Offline"]
+        df_cid["% Offline"] = df_cid["% Offline"].apply(lambda v: f"{v:.1f}%")
+        df_cid = df_cid.sort_values(["Cidade", "Data"])
+        render_dataframe(df_cid, height=min(500, (len(df_cid) + 1) * 35 + 3))
 
 
 def render_aba_detalhe_cliente_snap(dados: dict) -> None:
