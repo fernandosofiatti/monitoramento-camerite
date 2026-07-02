@@ -5716,6 +5716,183 @@ def _render_tendencia_por_franquia(df_hist: pd.DataFrame, dados: dict) -> None:
         render_dataframe(df_cid, height=min(500, (len(df_cid) + 1) * 35 + 3))
 
 
+def _area_horizontal_franquia(
+    df_plot: pd.DataFrame,
+    valor_col: str,
+    label_col: str,
+    cor: str,
+    cor_fill: str,
+    titulo_eixo: str,
+    key: str,
+    sufixo: str = "",
+    formato_texto=None,
+) -> None:
+    """Renderiza um gráfico de área horizontal (padrão 'LPRs Offline') para franquias."""
+    dfp = df_plot.sort_values(valor_col, ascending=True).copy()
+    dfp["Franquia eixo"] = dfp["Franqueado"].astype(str)
+    if formato_texto is None:
+        formato_texto = lambda v: f"{v:g}{sufixo}"
+    dfp["_texto"] = dfp[valor_col].apply(formato_texto)
+
+    max_x = float(dfp[valor_col].max()) if not dfp.empty else 0.0
+    max_x = max(max_x * 1.18, 1.0)
+    altura = max(320, min(760, 44 * len(dfp) + 130))
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        name=titulo_eixo,
+        x=dfp[valor_col],
+        y=dfp["Franquia eixo"],
+        mode="lines+markers+text",
+        fill="tozerox",
+        line=dict(color=cor, width=3.0, shape="spline", smoothing=0.65),
+        marker=dict(color=cor, size=9, line=dict(color="#ffffff", width=1)),
+        fillcolor=cor_fill,
+        text=dfp["_texto"],
+        textposition="middle right",
+        textfont=dict(color="#6B5A7A", size=11),
+        customdata=dfp[["Cidades", "Total", "Offline", "Online", "Pct"]],
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Cidades: %{customdata[0]}<br>"
+            "Total de câmeras: %{customdata[1]}<br>"
+            "Offline: %{customdata[2]}<br>"
+            "Online: %{customdata[3]}<br>"
+            "Perc. Offline: %{customdata[4]:.1f}%<extra></extra>"
+        ),
+    ))
+    fig.update_layout(
+        **pdefaults(),
+        height=altura,
+        margin=dict(l=10, r=80, t=10, b=35),
+        xaxis=dict(
+            title=titulo_eixo,
+            range=[0, max_x],
+            ticksuffix=sufixo,
+            gridcolor="#E9D5FF",
+            tickfont=dict(color="#8B7AA3", size=10),
+            zeroline=False,
+        ),
+        yaxis=dict(
+            title="",
+            type="category",
+            categoryorder="array",
+            categoryarray=dfp["Franquia eixo"].tolist(),
+            tickfont=dict(color="#6B5A7A", size=11),
+            automargin=True,
+        ),
+        showlegend=False,
+        hovermode="closest",
+    )
+    st.plotly_chart(fig, use_container_width=True, key=key)
+
+
+def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
+    """Total por Franquia: câmeras offline e % offline consolidados por franquia (todas as cidades somadas)."""
+    st.markdown("### 🏆 Total por Franquia")
+    st.caption("Consolidação por franquia: total de câmeras offline e percentual offline, somando todas as cidades de cada franquia.")
+
+    if df_clientes_ops is None or df_clientes_ops.empty or "Franqueado" not in df_clientes_ops.columns:
+        st.info("Nenhum dado de franquia disponível.")
+        return
+
+    df = df_clientes_ops.copy()
+    df["Franqueado"] = df["Franqueado"].fillna("").astype(str).str.strip()
+    df = df[df["Franqueado"] != ""].copy()
+    if df.empty:
+        st.info("Nenhum cliente possui franquia definida.")
+        return
+
+    for col in ["Total", "Offline"]:
+        df[col] = pd.to_numeric(df.get(col), errors="coerce").fillna(0)
+
+    grp = (
+        df.groupby("Franqueado", as_index=False)
+        .agg(Total=("Total", "sum"), Offline=("Offline", "sum"), Cidades=("ID", "nunique"))
+    )
+    grp["Online"] = grp["Total"] - grp["Offline"]
+    grp["Pct"] = grp.apply(
+        lambda r: round(r["Offline"] / r["Total"] * 100, 1) if r["Total"] else 0.0,
+        axis=1,
+    )
+
+    # Só as franquias que têm ao menos uma câmera offline.
+    grp_off = grp[grp["Offline"] > 0].copy()
+    if grp_off.empty:
+        st.success("Nenhuma câmera offline nas franquias no momento. 🎉")
+        return
+
+    total_franquias = int(grp_off["Franqueado"].nunique())
+    total_offline = int(grp_off["Offline"].sum())
+    total_cameras = int(grp_off["Total"].sum())
+    pct_geral = round(total_offline / total_cameras * 100, 1) if total_cameras else 0.0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Franquias com offline", f"{total_franquias}")
+    m2.metric("Câmeras offline (total)", f"{total_offline}")
+    m3.metric("Câmeras monitoradas", f"{total_cameras}")
+    m4.metric("% Offline geral", f"{pct_geral:.1f}%")
+
+    if total_franquias > 5:
+        qtd_max = st.slider(
+            "Franquias nos gráficos",
+            min_value=5,
+            max_value=int(min(40, total_franquias)),
+            value=int(min(15, total_franquias)),
+            key="total_franquia_qtd",
+        )
+    else:
+        qtd_max = total_franquias
+
+    st.markdown("#### Câmeras offline por franquia")
+    top_qtd = grp_off.sort_values("Offline", ascending=False).head(int(qtd_max)).copy()
+    _area_horizontal_franquia(
+        top_qtd,
+        valor_col="Offline",
+        label_col="Franqueado",
+        cor="#7B2FFF",
+        cor_fill="rgba(123, 47, 255, 0.16)",
+        titulo_eixo="Câmeras offline",
+        key="total_franquia_area_qtd",
+        sufixo="",
+        formato_texto=lambda v: f"{int(v)}",
+    )
+
+    st.markdown("#### % Offline por franquia")
+    top_pct = grp_off.sort_values("Pct", ascending=False).head(int(qtd_max)).copy()
+    _area_horizontal_franquia(
+        top_pct,
+        valor_col="Pct",
+        label_col="Franqueado",
+        cor="#dc2626",
+        cor_fill="rgba(220, 38, 38, 0.16)",
+        titulo_eixo="% Offline",
+        key="total_franquia_area_pct",
+        sufixo="%",
+        formato_texto=lambda v: f"{v:.1f}%",
+    )
+
+    with st.expander("Ver tabela consolidada por franquia"):
+        df_tab = grp_off.sort_values("Offline", ascending=False)[
+            ["Franqueado", "Cidades", "Total", "Online", "Offline", "Pct"]
+        ].copy()
+        df_tab.columns = ["Franquia", "Cidades", "Total", "Online", "Offline", "% Offline"]
+        df_tab["% Offline"] = df_tab["% Offline"].apply(lambda v: f"{v:.1f}%")
+        render_dataframe(df_tab, height=min(560, (len(df_tab) + 1) * 35 + 3))
+
+        csv_out = grp_off.sort_values("Offline", ascending=False)[
+            ["Franqueado", "Cidades", "Total", "Online", "Offline", "Pct"]
+        ].to_csv(index=False, sep=";", encoding="utf-8-sig")
+        st.download_button(
+            "📥 Baixar total por franquia em CSV",
+            data=csv_out,
+            file_name=f"total_por_franquia_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="dl_total_por_franquia_csv",
+        )
+
+
 def render_aba_detalhe_cliente_snap(dados: dict) -> None:
     """Aba Detalhe Cliente Snap: consulta de cliente dentro de um snapshot salvo."""
     st.markdown("### 📈 Detalhe Cliente Snap")
@@ -6574,7 +6751,7 @@ def main():
     with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🆕 Última Câmera Cadastrada", "🗄️ Padrão de Armazenamento"])
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🏆 Total por Franquia"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -6942,10 +7119,7 @@ def main():
         render_aba_tendencia(dados)
 
     with clientes_subtabs[3]:
-        render_aba_ultima_camera_cadastrada(df_origem, dados)
-
-    with clientes_subtabs[4]:
-        render_aba_padrao_armazenamento(df_origem, dados)
+        render_aba_total_por_franquia(df_clientes_ops)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
