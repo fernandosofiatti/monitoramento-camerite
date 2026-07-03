@@ -5460,6 +5460,9 @@ def render_aba_tendencia(dados: dict) -> None:
     st.markdown("### 📈 Tendência")
     st.caption("Evolução do percentual offline a partir dos snapshots salvos.")
 
+    _render_tendencia_alertas(dados)
+    st.divider()
+
     col_periodo, col_modo = st.columns([1, 2])
     with col_periodo:
         dias = st.selectbox(
@@ -5494,6 +5497,127 @@ def render_aba_tendencia(dados: dict) -> None:
         _render_tendencia_por_franquia(df_hist, dados)
     else:
         _render_tendencia_por_cliente(df_hist, dados)
+
+
+def _render_tendencia_alertas(dados: dict, dias: int = 14, top_n: int = 5) -> None:
+    """Destaca as tendências mais preocupantes: maiores aumentos de offline nas últimas 2 semanas.
+
+    Compara o primeiro e o último snapshot de cada cliente dentro da janela e ranqueia
+    pela piora (aumento) em pontos percentuais e em número absoluto de câmeras offline.
+    """
+    semanas = dias // 7
+    if semanas >= 1 and dias % 7 == 0:
+        janela_txt = f"últimas {semanas} semana{'s' if semanas > 1 else ''}"
+    else:
+        janela_txt = f"últimos {dias} dias"
+    st.markdown(f"#### 🚨 Tendências mais preocupantes ({janela_txt})")
+
+    with st.spinner("Analisando piora recente..."):
+        df = carregar_historico_clientes(dias)
+
+    if df is None or df.empty:
+        st.info("Sem histórico suficiente para calcular as tendências recentes.")
+        return
+
+    df = df.copy()
+    df["gravado_dt"] = pd.to_datetime(df["gravado_em"], errors="coerce")
+    df = df[df["gravado_dt"].notna()].copy()
+    df["wl_id"] = df["wl_id"].astype(str).str.strip()
+    for col in ["pct_offline", "offline", "total"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+    df = df.sort_values("gravado_dt")
+    if df.empty:
+        st.info("Sem histórico com data válida para calcular as tendências recentes.")
+        return
+
+    # Nome de exibição por cliente.
+    nomes = (
+        df[["wl_id", "nome_cliente"]].drop_duplicates("wl_id").set_index("wl_id")["nome_cliente"].to_dict()
+    )
+
+    def nome_de(wl: str) -> str:
+        v = (dados or {}).get(wl) or (dados or {}).get(str(wl))
+        if isinstance(v, dict):
+            return str(v.get("cidade_estado") or v.get("nome_cliente") or nomes.get(wl) or f"ID {wl}")
+        return str(nomes.get(wl) or f"ID {wl}")
+
+    # Resumo por cliente: primeiro x último snapshot da janela.
+    linhas = []
+    for wl, grupo in df.groupby("wl_id"):
+        if grupo["gravado_dt"].nunique() < 2:
+            continue  # precisa de ao menos dois pontos para medir aumento
+        primeiro = grupo.iloc[0]
+        ultimo = grupo.iloc[-1]
+        linhas.append({
+            "wl_id": wl,
+            "nome": nome_de(wl),
+            "delta_pct": float(ultimo["pct_offline"] - primeiro["pct_offline"]),
+            "delta_off": int(ultimo["offline"] - primeiro["offline"]),
+            "pct_fim": float(ultimo["pct_offline"]),
+            "off_fim": int(ultimo["offline"]),
+            "total_fim": int(ultimo["total"]),
+        })
+
+    if not linhas:
+        st.info("Ainda não há dois snapshots por cliente na janela para medir tendência de piora.")
+        return
+
+    resumo = pd.DataFrame(linhas)
+    top_pct = resumo[resumo["delta_pct"] > 0].nlargest(top_n, "delta_pct")
+    top_off = resumo[resumo["delta_off"] > 0].nlargest(top_n, "delta_off")
+
+    def _grafico_trajetoria(top_df: pd.DataFrame, valor_col: str, delta_col: str,
+                            titulo: str, sufixo: str, key: str, faixas: bool) -> None:
+        if top_df.empty:
+            st.success("Nenhum cliente com piora nesse critério na janela. 🎉")
+            return
+        fig = go.Figure()
+        if faixas:
+            fig.add_hrect(y0=0, y1=5, fillcolor="#dff8f3", opacity=0.20, line_width=0, layer="below")
+            fig.add_hrect(y0=5, y1=10, fillcolor="#fef9c3", opacity=0.20, line_width=0, layer="below")
+            fig.add_hrect(y0=10, y1=100, fillcolor="#fee2e2", opacity=0.16, line_width=0, layer="below")
+        for _, r in top_df.iterrows():
+            grupo = df[df["wl_id"] == r["wl_id"]].sort_values("gravado_dt")
+            delta = r[delta_col]
+            if delta_col == "delta_pct":
+                rotulo_delta = f"+{delta:.1f} p.p."
+            else:
+                rotulo_delta = f"+{int(delta)} câm"
+            nome_leg = f"{r['nome']} ({rotulo_delta})"
+            fig.add_trace(go.Scatter(
+                x=grupo["gravado_dt"],
+                y=grupo[valor_col],
+                mode="lines+markers",
+                line=dict(width=2.4, shape="spline", smoothing=0.6),
+                marker=dict(size=6),
+                name=nome_leg[:34],
+                text=[
+                    f"<b>{escape_html(r['nome'])}</b><br>{d.strftime('%d/%m/%Y %H:%M')}<br>"
+                    f"{titulo}: <b>{v:.1f}{sufixo}</b>" if sufixo else
+                    f"<b>{escape_html(r['nome'])}</b><br>{d.strftime('%d/%m/%Y %H:%M')}<br>"
+                    f"{titulo}: <b>{int(v)}</b>"
+                    for d, v in zip(grupo["gravado_dt"], grupo[valor_col])
+                ],
+                hovertemplate="%{text}<extra></extra>",
+            ))
+        layout = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+        fig.update_layout(
+            **layout,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            height=360,
+            margin=dict(l=10, r=20, t=10, b=60),
+            xaxis=dict(tickangle=-35, gridcolor="#F3E8FF", tickformat="%d/%m %H:%M"),
+            yaxis=dict(ticksuffix=sufixo, gridcolor="#F3E8FF", rangemode="tozero"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        )
+        st.plotly_chart(fig, use_container_width=True, key=key)
+
+    st.markdown("**Maior aumento em % offline (p.p.)**")
+    _grafico_trajetoria(top_pct, "pct_offline", "delta_pct", "% Offline", "%", "tend_alerta_pct", faixas=True)
+
+    st.markdown("**Maior aumento em câmeras offline (unidades)**")
+    _grafico_trajetoria(top_off, "offline", "delta_off", "Câmeras offline", "", "tend_alerta_off", faixas=False)
 
 
 def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
