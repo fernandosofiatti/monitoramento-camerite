@@ -5663,17 +5663,16 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
     m4.metric("Melhor momento", f"{pct_min:.1f}%")
     m5.metric("Média", f"{pct_medio:.1f}%")
 
-    labels_x = df_cli["gravado_dt"].dt.strftime("%d/%m %H:%M").tolist()
     fig = go.Figure()
     fig.add_hrect(y0=0, y1=5, fillcolor="#dff8f3", opacity=0.25, line_width=0, layer="below")
     fig.add_hrect(y0=5, y1=10, fillcolor="#fef9c3", opacity=0.25, line_width=0, layer="below")
     fig.add_hrect(y0=10, y1=100, fillcolor="#fee2e2", opacity=0.20, line_width=0, layer="below")
     fig.add_trace(go.Scatter(
-        x=labels_x,
+        x=df_cli["gravado_dt"],
         y=df_cli["pct_offline"].tolist(),
         mode="lines+markers",
-        line=dict(color="#7C3AED", width=2),
-        marker=dict(color=[cor_hex(v) for v in df_cli["pct_offline"]], size=9),
+        line=dict(color="#7C3AED", width=2.4, shape="spline", smoothing=0.6),
+        marker=dict(color=[cor_hex(v) for v in df_cli["pct_offline"]], size=8, line=dict(color="#ffffff", width=1)),
         text=[
             f"<b>{escape_html(r['label'])}</b><br>{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
             f"% Offline: <b>{r['pct_offline']:.1f}%</b><br>Offline: {int(r['offline'])} de {int(r['total'])}"
@@ -5690,7 +5689,7 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
         plot_bgcolor="rgba(0,0,0,0)",
         height=380,
         margin=dict(l=10, r=30, t=20, b=70),
-        xaxis=dict(tickangle=-35, gridcolor="#F3E8FF"),
+        xaxis=dict(tickangle=-35, gridcolor="#F3E8FF", tickformat="%d/%m %H:%M"),
         yaxis=dict(ticksuffix="%", gridcolor="#F3E8FF", range=[0, max(pct_max * 1.25, 12)]),
     )
     st.plotly_chart(fig, use_container_width=True, key=f"tend_line_{wl_sel}")
@@ -5779,7 +5778,7 @@ def _render_tendencia_por_franquia(df_hist: pd.DataFrame, dados: dict) -> None:
             x=grupo["gravado_dt"],
             y=grupo["pct_offline"].tolist(),
             mode="lines+markers",
-            line=dict(width=1.4),
+            line=dict(width=1.8, shape="spline", smoothing=0.6),
             marker=dict(size=5),
             opacity=0.8,
             name=nome_cid[:24],
@@ -5796,8 +5795,8 @@ def _render_tendencia_por_franquia(df_hist: pd.DataFrame, dados: dict) -> None:
         x=agg["gravado_dt"],
         y=agg["pct_offline"].tolist(),
         mode="lines+markers",
-        line=dict(color="#171126", width=3),
-        marker=dict(color=[cor_hex(v) for v in agg["pct_offline"]], size=9),
+        line=dict(color="#171126", width=3, shape="spline", smoothing=0.6),
+        marker=dict(color=[cor_hex(v) for v in agg["pct_offline"]], size=9, line=dict(color="#ffffff", width=1)),
         name="Franquia (total)",
         text=[
             f"<b>Franquia · {escape_html(fr_sel)}</b><br>{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
