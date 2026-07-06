@@ -6092,6 +6092,89 @@ def render_aba_detalhe_cliente_snap(dados: dict) -> None:
     render_dataframe(df_show[cols], height=min(620, (len(df_show) + 1) * 35 + 3))
 
 
+@st.fragment
+def render_top5_criticos(df_clientes_ops: pd.DataFrame) -> None:
+    """Top 5 clientes mais críticos.
+
+    Isolado em st.fragment: trocar o critério de ordenação rerroda apenas este
+    bloco (reordena e redesenha as 5 linhas), sem reprocessar o app inteiro.
+    """
+    st.markdown("**Top 5 clientes mais críticos**")
+
+    ordenar_por = st.radio(
+        "Ordenar por",
+        options=["Criticidade", "% Offline", "Nº offline"],
+        horizontal=True,
+        key="top5_ordenar",
+        label_visibility="collapsed",
+    )
+    col_ordem = {"Criticidade": "_score", "% Offline": "% Offline", "Nº offline": "Offline"}[ordenar_por]
+
+    df_crit = df_clientes_ops[df_clientes_ops["Offline"] > 0].copy() if not df_clientes_ops.empty else pd.DataFrame()
+    df_top = df_crit.sort_values(col_ordem, ascending=False).head(5) if not df_crit.empty else pd.DataFrame()
+
+    if ordenar_por == "Criticidade":
+        st.caption("Score de criticidade: combina nº offline, %, tempo offline e recorrência.")
+
+    if df_top.empty:
+        st.success("🎉 Todos os clientes estão operacionais!")
+        return
+
+    for pos, (_, row) in enumerate(df_top.iterrows(), start=1):
+        pct = float(row["% Offline"])
+        cor = cor_hex(pct)
+        cliente_html = escape_html(str(row["Cliente"]))
+        franqueado_html = escape_html(str(row["Franqueado"]))
+        width_pct = min(pct, 100)
+        off_i, tot_i = int(row["Offline"]), int(row["Total"])
+
+        # Seta de tendência a partir do snapshot anterior.
+        d = row.get("Delta Offline")
+        if d is None or (isinstance(d, float) and pd.isna(d)):
+            trend_html = "<span style='font-size:10px;color:#B8A9CC'>sem histórico</span>"
+        elif d > 0:
+            trend_html = f"<span style='font-size:11px;color:#dc2626;font-weight:700'>▲ +{int(d)}</span>"
+        elif d < 0:
+            trend_html = f"<span style='font-size:11px;color:#059669;font-weight:700'>▼ {int(d)}</span>"
+        else:
+            trend_html = "<span style='font-size:11px;color:#8B7AA3;font-weight:700'>estável</span>"
+
+        # Contexto extra (persistência).
+        extras = []
+        acima24 = int(row.get("Acima 24h", 0) or 0)
+        if acima24 > 0:
+            extras.append(f"{acima24} há +24h")
+        maior = str(row.get("Maior Tempo", "") or "")
+        if maior and maior != "N/D":
+            extras.append(f"máx {maior}")
+        extras_html = (" · " + " · ".join(extras)) if extras else ""
+
+        st.markdown(f"""
+        <div style="display:flex;gap:10px;align-items:flex-start;background:#ffffff;
+                    border:1px solid #EFE7FB;border-left:4px solid {cor};border-radius:12px;
+                    padding:10px 12px;margin-bottom:8px">
+            <div style="flex:0 0 auto;width:24px;height:24px;border-radius:8px;background:{cor}18;
+                        color:{cor};font-family:'DM Mono',monospace;font-weight:800;font-size:12px;
+                        display:flex;align-items:center;justify-content:center;margin-top:1px">{pos}</div>
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                    <span style="font-size:12px;color:#171126;font-weight:700;white-space:nowrap;
+                                 overflow:hidden;text-overflow:ellipsis">{cliente_html}</span>
+                    <span style="font-family:'DM Mono',monospace;font-size:14px;color:{cor};font-weight:800">{pct:.1f}%</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:5px">
+                    <span style="font-size:10px;color:#8B7AA3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{franqueado_html}</span>
+                    {trend_html}
+                </div>
+                <div style="height:5px;background:#F1ECFA;border-radius:99px;overflow:hidden">
+                    <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
+                </div>
+                <div style="font-size:10px;color:#8B7AA3;margin-top:4px">{off_i} de {tot_i} offline{extras_html}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 def main():
     init_db()
 
@@ -6807,79 +6890,7 @@ def main():
             """, unsafe_allow_html=True)
 
         with col_top:
-            st.markdown("**Top 5 clientes mais críticos**")
-
-            ordenar_por = st.radio(
-                "Ordenar por",
-                options=["Criticidade", "% Offline", "Nº offline"],
-                horizontal=True,
-                key="top5_ordenar",
-                label_visibility="collapsed",
-            )
-            col_ordem = {"Criticidade": "_score", "% Offline": "% Offline", "Nº offline": "Offline"}[ordenar_por]
-
-            df_crit = df_clientes_ops[df_clientes_ops["Offline"] > 0].copy() if not df_clientes_ops.empty else pd.DataFrame()
-            df_top = df_crit.sort_values(col_ordem, ascending=False).head(5) if not df_crit.empty else pd.DataFrame()
-
-            if ordenar_por == "Criticidade":
-                st.caption("Score de criticidade: combina nº offline, %, tempo offline e recorrência.")
-
-            if df_top.empty:
-                st.success("🎉 Todos os clientes estão operacionais!")
-            else:
-                for pos, (_, row) in enumerate(df_top.iterrows(), start=1):
-                    pct = float(row["% Offline"])
-                    cor = cor_hex(pct)
-                    cliente_html = escape_html(str(row["Cliente"]))
-                    franqueado_html = escape_html(str(row["Franqueado"]))
-                    width_pct = min(pct, 100)
-                    off_i, tot_i = int(row["Offline"]), int(row["Total"])
-
-                    # Seta de tendência a partir do snapshot anterior.
-                    d = row.get("Delta Offline")
-                    if d is None or (isinstance(d, float) and pd.isna(d)):
-                        trend_html = "<span style='font-size:10px;color:#B8A9CC'>sem histórico</span>"
-                    elif d > 0:
-                        trend_html = f"<span style='font-size:11px;color:#dc2626;font-weight:700'>▲ +{int(d)}</span>"
-                    elif d < 0:
-                        trend_html = f"<span style='font-size:11px;color:#059669;font-weight:700'>▼ {int(d)}</span>"
-                    else:
-                        trend_html = "<span style='font-size:11px;color:#8B7AA3;font-weight:700'>estável</span>"
-
-                    # Contexto extra (persistência).
-                    extras = []
-                    acima24 = int(row.get("Acima 24h", 0) or 0)
-                    if acima24 > 0:
-                        extras.append(f"{acima24} há +24h")
-                    maior = str(row.get("Maior Tempo", "") or "")
-                    if maior and maior != "N/D":
-                        extras.append(f"máx {maior}")
-                    extras_html = (" · " + " · ".join(extras)) if extras else ""
-
-                    st.markdown(f"""
-                    <div style="display:flex;gap:10px;align-items:flex-start;background:#ffffff;
-                                border:1px solid #EFE7FB;border-left:4px solid {cor};border-radius:12px;
-                                padding:10px 12px;margin-bottom:8px">
-                        <div style="flex:0 0 auto;width:24px;height:24px;border-radius:8px;background:{cor}18;
-                                    color:{cor};font-family:'DM Mono',monospace;font-weight:800;font-size:12px;
-                                    display:flex;align-items:center;justify-content:center;margin-top:1px">{pos}</div>
-                        <div style="flex:1;min-width:0">
-                            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
-                                <span style="font-size:12px;color:#171126;font-weight:700;white-space:nowrap;
-                                             overflow:hidden;text-overflow:ellipsis">{cliente_html}</span>
-                                <span style="font-family:'DM Mono',monospace;font-size:14px;color:{cor};font-weight:800">{pct:.1f}%</span>
-                            </div>
-                            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:5px">
-                                <span style="font-size:10px;color:#8B7AA3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{franqueado_html}</span>
-                                {trend_html}
-                            </div>
-                            <div style="height:5px;background:#F1ECFA;border-radius:99px;overflow:hidden">
-                                <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
-                            </div>
-                            <div style="font-size:10px;color:#8B7AA3;margin-top:4px">{off_i} de {tot_i} offline{extras_html}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+            render_top5_criticos(df_clientes_ops)
 
         st.markdown("<hr>", unsafe_allow_html=True)
         st.markdown("**Mapa de calor — % offline por cliente**")
