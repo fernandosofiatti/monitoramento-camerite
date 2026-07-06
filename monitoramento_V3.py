@@ -6740,30 +6740,31 @@ def main():
 
             st.markdown("**Saúde da base de clientes**")
 
-            # Anel de progresso com o % de clientes saudáveis (mesmo padrão do card ONLINE GOV).
-            if n_critico > 0:
-                cor_s, cor_track_s = "#dc2626", "#fbd7d7"
-            elif n_atencao > 0:
-                cor_s, cor_track_s = "#f59e0b", "#fdeccb"
-            else:
-                cor_s, cor_track_s = "#14b8a6", "#d5f5ee"
-
+            # Donut com as 3 faixas e o % de cada uma puxado para fora (leader lines).
             fig_pie = go.Figure(go.Pie(
-                values=[pct_saudavel_card, max(0.0, 100 - pct_saudavel_card)],
-                hole=0.80,
+                labels=["Saudável", "Atenção", "Crítico"],
+                values=[n_saudavel, n_atencao, n_critico],
+                text=[
+                    f"Saudável<br><b>{pct_saudavel_card:.0f}%</b>",
+                    f"Atenção<br><b>{pct_atencao_card:.0f}%</b>",
+                    f"Crítico<br><b>{pct_critico_card:.0f}%</b>",
+                ],
+                textinfo="text",
+                textposition="outside",
+                hole=0.68,
                 sort=False,
                 direction="clockwise",
                 rotation=0,
-                marker=dict(colors=[cor_s, cor_track_s], line=dict(color="#ffffff", width=0)),
-                textinfo="none",
-                hoverinfo="skip",
+                marker=dict(colors=["#14b8a6", "#f59e0b", "#dc2626"], line=dict(color="#ffffff", width=3)),
+                outsidetextfont=dict(color="#4A3D5C", size=12, family="DM Sans"),
+                automargin=True,
+                hovertemplate="<b>%{label}</b><br>%{value} clientes · %{percent}<extra></extra>",
             ))
             fig_pie.add_annotation(
                 text=(
-                    f"<span style='font-size:46px;font-weight:800;color:{cor_s};font-family:DM Mono'>"
-                    f"{pct_saudavel_card:.0f}<span style='font-size:22px'>%</span></span>"
+                    f"<span style='font-size:34px;font-weight:800;color:#171126;font-family:DM Mono'>{total_clientes}</span>"
                     f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans;"
-                    f"letter-spacing:1px;text-transform:uppercase'>clientes saudáveis</span>"
+                    f"letter-spacing:1px;text-transform:uppercase'>clientes</span>"
                 ),
                 x=0.5, y=0.5, showarrow=False,
             )
@@ -6772,9 +6773,9 @@ def main():
                 **layout_defaults,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
-                height=250,
+                height=270,
                 showlegend=False,
-                margin=dict(l=8, r=8, t=8, b=8),
+                margin=dict(l=40, r=40, t=24, b=24),
             )
             st.plotly_chart(fig_pie, use_container_width=True, key="pie_clientes_faixa_saude_moderno")
 
