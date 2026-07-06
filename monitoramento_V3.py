@@ -6740,44 +6740,45 @@ def main():
 
             st.markdown("**Saúde da base de clientes**")
 
-            fig_pie = go.Figure(go.Pie(
-                labels=["Crítico", "Atenção", "Saudável"],
-                values=[n_critico, n_atencao, n_saudavel],
-                hole=0.68,
-                sort=False,
-                direction="clockwise",
-                marker=dict(
-                    colors=["#dc2626", "#f59e0b", "#14b8a6"],
-                    line=dict(color="#ffffff", width=4)
-                ),
-                textinfo="none",
-                hovertemplate="<b>%{label}</b><br>%{value} clientes<br>%{percent}<extra></extra>",
-            ))
-            fig_pie.update_traces(
-                rotation=90,
-                pull=[0.055 if n_critico else 0, 0.035 if n_atencao else 0, 0],
-            )
-            fig_pie.add_annotation(
-                text=(
-                    f"<span style='font-size:26px;font-weight:800;color:#171126;font-family:DM Mono'>{total_clientes}</span>"
-                    f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans'>clientes</span>"
-                    f"<br><span style='font-size:10px;color:#6B5A7A;font-family:DM Sans;font-weight:700'>{pct_saudavel_card:.1f}% saudáveis</span>"
-                ),
-                x=0.5, y=0.5, showarrow=False,
-            )
-            layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-            fig_pie.update_layout(
-                **layout_defaults,
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                height=250,
-                showlegend=False,
-                margin=dict(l=4, r=4, t=8, b=4),
-            )
-            st.plotly_chart(fig_pie, use_container_width=True, key="pie_clientes_faixa_saude_moderno")
+            # Larguras proporcionais de cada faixa (medidor segmentado).
+            _tc = total_clientes or 1
+            w_saud = n_saudavel / _tc * 100
+            w_aten = n_atencao / _tc * 100
+            w_crit = n_critico / _tc * 100
+            segmentos = ""
+            for larg, cor_seg in [(w_saud, "#14b8a6"), (w_aten, "#f59e0b"), (w_crit, "#dc2626")]:
+                if larg > 0:
+                    segmentos += (
+                        f"<div style='flex:0 0 {larg:.4f}%;background:{cor_seg};"
+                        f"border-radius:99px;min-width:6px'></div>"
+                    )
+            if not segmentos:
+                segmentos = "<div style='flex:1;background:#E9D5FF;border-radius:99px'></div>"
 
             st.markdown(f"""
-                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:-8px">
+                <div style="background:#ffffff;border:1px solid #EFE7FB;border-radius:16px;
+                            padding:18px 18px 16px;box-shadow:0 1px 2px rgba(23,17,38,.04)">
+                    <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:14px">
+                        <div>
+                            <div style="font-size:40px;line-height:1;font-weight:800;color:#171126;
+                                        font-family:'DM Mono',monospace">{pct_saudavel_card:.0f}<span style="font-size:20px">%</span></div>
+                            <div style="font-size:11px;color:#8B7AA3;letter-spacing:1px;text-transform:uppercase;margin-top:4px">clientes saudáveis</div>
+                        </div>
+                        <span style="display:inline-flex;align-items:center;gap:6px;background:{status_saude_cor}14;
+                                     border:1px solid {status_saude_cor}40;color:{status_saude_cor};font-size:11px;
+                                     font-weight:800;padding:5px 12px;border-radius:99px;white-space:nowrap">
+                            <span style="width:7px;height:7px;border-radius:99px;background:{status_saude_cor};display:inline-block"></span>{status_saude_titulo}
+                        </span>
+                    </div>
+                    <div style="display:flex;gap:3px;height:14px;background:#F4EEFC;border-radius:99px;padding:0;overflow:hidden">
+                        {segmentos}
+                    </div>
+                    <div style="font-size:10px;color:#8B7AA3;margin-top:8px">{escape_html(status_saude_msg)} · {total_clientes} clientes monitorados</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown(f"""
+                <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px">
                     <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:9px 8px;text-align:center">
                         <div style="font-size:10px;color:#0f766e;font-weight:800;text-transform:uppercase">Saudável</div>
                         <div style="font-size:20px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:800">{n_saudavel}</div>
