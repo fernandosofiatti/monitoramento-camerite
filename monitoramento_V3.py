@@ -6808,39 +6808,76 @@ def main():
 
         with col_top:
             st.markdown("**Top 5 clientes mais críticos**")
-            rows_top = [
-                {"Cliente": v["nome_cliente"],
-                 "Franqueado": v["nome_empresa"],
-                 "Pct": round(len(v["offline"])/v["total"]*100, 1) if v["total"] else 0,
-                 "Off": len(v["offline"]), "Tot": v["total"]}
-                for v in dados.values() if len(v["offline"]) > 0
-            ]
-            df_top = (
-                pd.DataFrame(rows_top).sort_values("Pct", ascending=False).head(5)
-                if rows_top else pd.DataFrame()
+
+            ordenar_por = st.radio(
+                "Ordenar por",
+                options=["Criticidade", "% Offline", "Nº offline"],
+                horizontal=True,
+                key="top5_ordenar",
+                label_visibility="collapsed",
             )
+            col_ordem = {"Criticidade": "_score", "% Offline": "% Offline", "Nº offline": "Offline"}[ordenar_por]
+
+            df_crit = df_clientes_ops[df_clientes_ops["Offline"] > 0].copy() if not df_clientes_ops.empty else pd.DataFrame()
+            df_top = df_crit.sort_values(col_ordem, ascending=False).head(5) if not df_crit.empty else pd.DataFrame()
+
+            if ordenar_por == "Criticidade":
+                st.caption("Score de criticidade: combina nº offline, %, tempo offline e recorrência.")
 
             if df_top.empty:
                 st.success("🎉 Todos os clientes estão operacionais!")
             else:
-                for _, row in df_top.iterrows():
-                    cor = cor_hex(row["Pct"])
-                    cliente_html = escape_html(row["Cliente"])
-                    franqueado_html = escape_html(row["Franqueado"])
-                    pct_html = f"{row['Pct']:.1f}%"
-                    width_pct = min(row["Pct"], 100)
-                    offline_text = f"{int(row['Off'])} offline de {int(row['Tot'])}"
+                for pos, (_, row) in enumerate(df_top.iterrows(), start=1):
+                    pct = float(row["% Offline"])
+                    cor = cor_hex(pct)
+                    cliente_html = escape_html(str(row["Cliente"]))
+                    franqueado_html = escape_html(str(row["Franqueado"]))
+                    width_pct = min(pct, 100)
+                    off_i, tot_i = int(row["Offline"]), int(row["Total"])
+
+                    # Seta de tendência a partir do snapshot anterior.
+                    d = row.get("Delta Offline")
+                    if d is None or (isinstance(d, float) and pd.isna(d)):
+                        trend_html = "<span style='font-size:10px;color:#B8A9CC'>sem histórico</span>"
+                    elif d > 0:
+                        trend_html = f"<span style='font-size:11px;color:#dc2626;font-weight:700'>▲ +{int(d)}</span>"
+                    elif d < 0:
+                        trend_html = f"<span style='font-size:11px;color:#059669;font-weight:700'>▼ {int(d)}</span>"
+                    else:
+                        trend_html = "<span style='font-size:11px;color:#8B7AA3;font-weight:700'>estável</span>"
+
+                    # Contexto extra (persistência).
+                    extras = []
+                    acima24 = int(row.get("Acima 24h", 0) or 0)
+                    if acima24 > 0:
+                        extras.append(f"{acima24} há +24h")
+                    maior = str(row.get("Maior Tempo", "") or "")
+                    if maior and maior != "N/D":
+                        extras.append(f"máx {maior}")
+                    extras_html = (" · " + " · ".join(extras)) if extras else ""
+
                     st.markdown(f"""
-                    <div style="margin-bottom:14px">
-                        <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                            <span style="font-size:12px;color:#171126;font-weight:600">{cliente_html}</span>
-                            <span style="font-family:'DM Mono',monospace;font-size:12px;color:{cor};font-weight:700">{pct_html}</span>
+                    <div style="display:flex;gap:10px;align-items:flex-start;background:#ffffff;
+                                border:1px solid #EFE7FB;border-left:4px solid {cor};border-radius:12px;
+                                padding:10px 12px;margin-bottom:8px">
+                        <div style="flex:0 0 auto;width:24px;height:24px;border-radius:8px;background:{cor}18;
+                                    color:{cor};font-family:'DM Mono',monospace;font-weight:800;font-size:12px;
+                                    display:flex;align-items:center;justify-content:center;margin-top:1px">{pos}</div>
+                        <div style="flex:1;min-width:0">
+                            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+                                <span style="font-size:12px;color:#171126;font-weight:700;white-space:nowrap;
+                                             overflow:hidden;text-overflow:ellipsis">{cliente_html}</span>
+                                <span style="font-family:'DM Mono',monospace;font-size:14px;color:{cor};font-weight:800">{pct:.1f}%</span>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:5px">
+                                <span style="font-size:10px;color:#8B7AA3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{franqueado_html}</span>
+                                {trend_html}
+                            </div>
+                            <div style="height:5px;background:#F1ECFA;border-radius:99px;overflow:hidden">
+                                <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
+                            </div>
+                            <div style="font-size:10px;color:#8B7AA3;margin-top:4px">{off_i} de {tot_i} offline{extras_html}</div>
                         </div>
-                        <div style="font-size:10px;color:#8B7AA3;margin-bottom:4px">{franqueado_html}</div>
-                        <div style="height:5px;background:#E9D5FF;border-radius:99px;overflow:hidden">
-                            <div style="height:100%;width:{width_pct}%;background:{cor};border-radius:99px"></div>
-                        </div>
-                        <div style="font-size:10px;color:#8B7AA3;margin-top:3px">{offline_text}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
