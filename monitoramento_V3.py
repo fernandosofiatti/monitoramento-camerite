@@ -6655,53 +6655,70 @@ def main():
         col_gauge, col_pie, col_top = st.columns([1,1,1], gap="large")
 
         with col_gauge:
-            # Gauge invertido: agora exibe o percentual ONLINE do GOV.
-            # Exemplo: 8% offline = 92% online.
+            # Anel de progresso (radial) com o percentual ONLINE do GOV.
+            # Ex.: 8% offline = 92% online.
             pct_online_global = round(100 - pct_global, 2) if total_cameras else 0
+            total_online = int(total_cameras - total_offline)
+
+            if pct_online_global >= 95:
+                cor_g, cor_track, faixa_txt = "#14b8a6", "#d5f5ee", "Operação saudável"
+            elif pct_online_global >= 90:
+                cor_g, cor_track, faixa_txt = "#f59e0b", "#fdeccb", "Requer atenção"
+            else:
+                cor_g, cor_track, faixa_txt = "#ef4444", "#fbd7d7", "Situação crítica"
 
             st.markdown("**% Total de Câmeras ONLINE GOV**")
 
-            # Para o gauge online, quanto maior o percentual, melhor.
-            if pct_online_global >= 95:
-                cor_g = "#14b8a6"
-            elif pct_online_global >= 90:
-                cor_g = "#f59e0b"
-            else:
-                cor_g = "#ef4444"
-
-            fig_g = go.Figure(go.Indicator(
-                mode="gauge+number",
-                value=pct_online_global,
-                number=dict(suffix="%", font=dict(color=cor_g, size=48, family="DM Mono")),
-                gauge=dict(
-                    shape="angular",
-                    axis=dict(range=[0,100], showticklabels=False, ticks="", visible=False),
-                    bar=dict(color=cor_g, thickness=0.34),
-                    bgcolor="#FAF7FF",
-                    borderwidth=0,
-                    steps=[
-                        dict(range=[0,90],   color="#fecaca"),
-                        dict(range=[90,95],  color="#fde68a"),
-                        dict(range=[95,100], color="#a7f3d0"),
-                    ],
-                    threshold=dict(line=dict(color="#6B5A7A", width=4), thickness=0.75, value=pct_online_global),
-                ),
+            fig_g = go.Figure(go.Pie(
+                values=[pct_online_global, max(0.0, 100 - pct_online_global)],
+                hole=0.80,
+                sort=False,
+                direction="clockwise",
+                rotation=0,
+                marker=dict(colors=[cor_g, cor_track], line=dict(color="#ffffff", width=0)),
+                textinfo="none",
+                hoverinfo="skip",
             ))
+            fig_g.add_annotation(
+                text=(
+                    f"<span style='font-size:46px;font-weight:800;color:{cor_g};font-family:DM Mono'>"
+                    f"{pct_online_global:.1f}<span style='font-size:22px'>%</span></span>"
+                    f"<br><span style='font-size:11px;color:#8B7AA3;font-family:DM Sans;"
+                    f"letter-spacing:1px;text-transform:uppercase'>câmeras online</span>"
+                ),
+                x=0.5, y=0.5, showarrow=False,
+            )
             layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
             fig_g.update_layout(
                 **layout_defaults,
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
-                height=300,
-                margin=dict(l=0,r=0,t=10,b=0),
-                annotations=[
-                    dict(
-                        text=f"<span style='font-size:12px;color:#8B7AA3;font-family:DM Sans'>Câmeras operacionais</span>",
-                        x=0.5, y=0.08, showarrow=False, xanchor="center"
-                    )
-                ],
+                height=250,
+                showlegend=False,
+                margin=dict(l=8, r=8, t=8, b=8),
             )
             st.plotly_chart(fig_g, use_container_width=True, key="gauge_online_gov")
+
+            st.markdown(f"""
+                <div style="display:flex;justify-content:center;margin-top:-8px;margin-bottom:8px">
+                    <span style="display:inline-flex;align-items:center;gap:6px;background:{cor_g}14;
+                                 border:1px solid {cor_g}40;color:{cor_g};font-size:11px;font-weight:800;
+                                 padding:4px 12px;border-radius:99px;letter-spacing:.3px">
+                        <span style="width:7px;height:7px;border-radius:99px;background:{cor_g};display:inline-block"></span>{faixa_txt}
+                    </span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div style="background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:9px 8px;text-align:center">
+                        <div style="font-size:10px;color:#0f766e;font-weight:800;text-transform:uppercase">Online</div>
+                        <div style="font-size:20px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:800">{total_online}</div>
+                    </div>
+                    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:9px 8px;text-align:center">
+                        <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase">Offline</div>
+                        <div style="font-size:20px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:800">{total_offline}</div>
+                    </div>
+                </div>
+                <div style="text-align:center;font-size:10px;color:#8B7AA3;margin-top:6px">de {total_cameras} câmeras monitoradas</div>
+            """, unsafe_allow_html=True)
 
         with col_pie:
             pct_saudavel_card = round(n_saudavel / total_clientes * 100, 1) if total_clientes else 0
@@ -6721,7 +6738,7 @@ def main():
                 status_saude_cor = "#059669"
                 status_saude_msg = "Todos os clientes até 5% offline"
 
-            st.markdown("**% Total de Câmeras ONLINE GOV**")
+            st.markdown("**Saúde da base de clientes**")
 
             fig_pie = go.Figure(go.Pie(
                 labels=["Crítico", "Atenção", "Saudável"],
