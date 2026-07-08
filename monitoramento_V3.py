@@ -3656,6 +3656,18 @@ def carregar_snapshot_clientes(sid: int, wl_ids_validos: set[str] | None = None)
     return out[["wl_id", "nome_cliente", "total", "offline", "pct_offline"]]
 
 
+def _status_label_camera(valor) -> str:
+    """Rótulo amigável de status de câmera (Online/Offline) com sinal visual."""
+    s = str(valor or "").strip().upper()
+    if s == "ONLINE":
+        return "🟢 Online"
+    if s == "OFFLINE":
+        return "🔴 Offline"
+    if s in ("", "NAN", "NONE"):
+        return "N/D"
+    return s.title()
+
+
 def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> pd.DataFrame:
     """Monta a base de câmeras do snapshot atual para identificar novas câmeras futuramente."""
     if df_origem is None or df_origem.empty:
@@ -6528,10 +6540,10 @@ def main():
                 df_novas["Franqueado"] = df_novas["nome_empresa"]
                 df_novas["ID da Câmera"] = df_novas["id_camera"]
                 df_novas["Nome da Câmera"] = df_novas["nome_camera"]
+                df_novas["Status"] = df_novas["status_camera"].map(_status_label_camera)
                 df_novas["Data Cadastro"] = df_novas.apply(lambda r: _fmt_dt(_cadastro_de(r)), axis=1)
-                df_novas["Data da Adição"] = _fmt_dt(data_recente)
                 df_base_cameras_novas = df_novas[[
-                    "Cliente", "Franqueado", "ID da Câmera", "Nome da Câmera", "Data Cadastro", "Data da Adição",
+                    "Cliente", "Franqueado", "ID da Câmera", "Nome da Câmera", "Status", "Data Cadastro",
                 ]].sort_values(["Cliente", "Nome da Câmera", "ID da Câmera"]).reset_index(drop=True)
 
             # ── Câmeras REMOVIDAS: presentes na base, ausentes no recente ──
