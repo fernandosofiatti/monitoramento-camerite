@@ -3686,7 +3686,7 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
             "nome_camera", "ultima_atualizacao", "status_camera"
         ])
 
-    for col in [COL_NOME_CAM, COL_ULT_ATU, COL_STATUS, COL_EMPRESA]:
+    for col in [COL_NOME_CAM, COL_ULT_ATU, COL_STATUS, COL_EMPRESA, COL_DATA_CAD]:
         if col not in df_cam.columns:
             df_cam[col] = ""
 
@@ -3694,6 +3694,11 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
         ultima_fmt = parse_ultima_atualizacao(df_cam[COL_ULT_ATU]).dt.strftime("%Y-%m-%d %H:%M:%S").fillna("")
     except Exception:
         ultima_fmt = df_cam[COL_ULT_ATU].astype(str).fillna("")
+
+    try:
+        cadastro_fmt = parse_ultima_atualizacao(df_cam[COL_DATA_CAD]).dt.strftime("%Y-%m-%d %H:%M:%S").fillna("")
+    except Exception:
+        cadastro_fmt = df_cam[COL_DATA_CAD].astype(str).fillna("")
 
     rows = []
     for idx_row, row in df_cam.iterrows():
@@ -3706,6 +3711,7 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
             "id_camera": str(row.get(COL_ID_CAM, "")).strip(),
             "nome_camera": str(row.get(COL_NOME_CAM, "") or ""),
             "ultima_atualizacao": str(ultima_fmt.loc[idx_row] if idx_row in ultima_fmt.index else ""),
+            "data_cadastro": str(cadastro_fmt.loc[idx_row] if idx_row in cadastro_fmt.index else ""),
             "status_camera": str(row.get(COL_STATUS, "") or "").upper(),
         })
 
@@ -3739,6 +3745,9 @@ def carregar_snapshot_cameras(sid: int, wl_ids_validos: set[str] | None = None) 
     out["nome_camera"] = df.get("nome_camera", "").astype(str).replace({"nan": ""}).str.strip()
     out["ultima_atualizacao"] = df.get("ultima_atualizacao", "").astype(str).replace({"nan": ""}).str.strip()
     out["status_camera"] = df.get("status_camera", "").astype(str).str.strip().str.upper()
+    # Campos opcionais (podem não existir em snapshots antigos): lidos de forma defensiva.
+    out["data_cadastro"] = df.get("data_cadastro", "").astype(str).replace({"nan": ""}).str.strip() if "data_cadastro" in df.columns else ""
+    out["data_snapshot"] = df.get("data_snapshot", "").astype(str).replace({"nan": ""}).str.strip() if "data_snapshot" in df.columns else ""
 
     # Mantém o mesmo universo de clientes do painel/nome_clientes.xlsx.
     if wl_ids_validos:
@@ -3833,18 +3842,36 @@ def salvar_snapshot(label: str, notas: str, dados: dict, df_origem: pd.DataFrame
             "nome_camera": limpar_valor_json(r.get("nome_camera")),
             "status_camera": limpar_valor_json(str(r.get("status_camera", "")).upper()),
             "ultima_atualizacao": limpar_valor_json(r.get("ultima_atualizacao")),
+            "data_cadastro": limpar_valor_json(r.get("data_cadastro")),
         })
 
-    for i in range(0, len(registros), 500):
-        lote = registros[i:i + 500]
-        resp = requests.post(
-            supabase_table_url(SNAPSHOT_TABLE),
-            headers=supabase_headers("return=minimal"),
-            json=lote,
-            timeout=60,
-        )
-        if resp.status_code not in (200, 201, 204):
-            raise RuntimeError(f"Erro ao salvar câmeras do snapshot no Supabase: {resp.status_code} - {resp.text[:500]}")
+    def _postar_cameras(regs: list) -> "requests.Response | None":
+        for i in range(0, len(regs), 500):
+            lote = regs[i:i + 500]
+            if not lote:
+                continue
+            resp = requests.post(
+                supabase_table_url(SNAPSHOT_TABLE),
+                headers=supabase_headers("return=minimal"),
+                json=lote,
+                timeout=60,
+            )
+            if resp.status_code not in (200, 201, 204):
+                return resp
+        return None
+
+    resp_err = _postar_cameras(registros)
+    if resp_err is not None:
+        # Se a tabela ainda não tem a coluna opcional 'data_cadastro', regrava sem ela
+        # em vez de falhar o snapshot inteiro. (Adicione a coluna no Supabase para
+        # preservar a Data de Cadastro das câmeras removidas em comparativos futuros.)
+        if "data_cadastro" in (resp_err.text or "").lower():
+            registros_sem = [{k: v for k, v in reg.items() if k != "data_cadastro"} for reg in registros]
+            resp_err2 = _postar_cameras(registros_sem)
+            if resp_err2 is not None:
+                raise RuntimeError(f"Erro ao salvar câmeras do snapshot no Supabase: {resp_err2.status_code} - {resp_err2.text[:500]}")
+        else:
+            raise RuntimeError(f"Erro ao salvar câmeras do snapshot no Supabase: {resp_err.status_code} - {resp_err.text[:500]}")
 
     try:
         st.cache_data.clear()
@@ -6351,6 +6378,7 @@ def main():
     # Se ainda não houver seleção, usa os dois últimos snapshots manuais.
     df_base_delta = pd.DataFrame()
     df_base_cameras_novas = pd.DataFrame()
+    df_base_cameras_removidas = pd.DataFrame()
     total_cameras_anterior = 0
     total_cameras_recente_comparativo = total_cameras
     total_offline_recente_comparativo = total_offline
@@ -6456,24 +6484,67 @@ def main():
                 df_cams_old["id_camera"].astype(str).str.strip()
             )
 
-            chaves_antigas = set(df_cams_old["chave_camera"])
-            df_novas = df_cams_new[~df_cams_new["chave_camera"].isin(chaves_antigas)].copy()
+            # Data da importação/remoção = data do snapshot RECENTE (snapshot_ids[0]).
+            ref_recente = _snapshot_ref_por_id(snapshot_ids[0]) or {}
+            data_recente = str(ref_recente.get("gravado_em", "") or "")
 
+            # Mapa de Data de Cadastro a partir da base atual (df_origem), por câmera.
+            mapa_cadastro = {}
+            try:
+                if df_origem is not None and not df_origem.empty:
+                    dfo = df_origem.copy()
+                    dfo.columns = [str(c).strip() for c in dfo.columns]
+                    if COL_WL in dfo.columns and COL_ID_CAM in dfo.columns and COL_DATA_CAD in dfo.columns:
+                        cad_fmt = parse_ultima_atualizacao(dfo[COL_DATA_CAD]).dt.strftime("%Y-%m-%d %H:%M:%S")
+                        for wlv, idv, cadv in zip(
+                            dfo[COL_WL].astype(str).str.strip(),
+                            dfo[COL_ID_CAM].astype(str).str.strip().str.replace(r"\.0$", "", regex=True),
+                            cad_fmt,
+                        ):
+                            if wlv and idv:
+                                mapa_cadastro[f"{wlv}||{idv}"] = "" if pd.isna(cadv) else str(cadv)
+            except Exception:
+                mapa_cadastro = {}
+
+            def _cadastro_de(row) -> str:
+                # 1) base atual; 2) o que estiver salvo no snapshot; senão N/D.
+                chave = f"{str(row.get('wl_id','')).strip()}||{str(row.get('id_camera','')).strip()}"
+                val = mapa_cadastro.get(chave) or str(row.get("data_cadastro", "") or "")
+                return val if val else "N/D"
+
+            def _fmt_dt(valor: str) -> str:
+                if not valor:
+                    return "N/D"
+                dt = pd.to_datetime(valor, errors="coerce")
+                return dt.strftime("%d/%m/%Y %H:%M") if pd.notna(dt) else str(valor)
+
+            chaves_antigas = set(df_cams_old["chave_camera"])
+            chaves_novas = set(df_cams_new["chave_camera"])
+
+            # ── Câmeras NOVAS: presentes no recente, ausentes na base ──
+            df_novas = df_cams_new[~df_cams_new["chave_camera"].isin(chaves_antigas)].copy()
             if not df_novas.empty:
-                df_base_cameras_novas = df_novas.rename(columns={
-                    "nome_cliente": "Cliente",
-                    "nome_empresa": "Franqueado",
-                    "id_camera": "ID da Câmera",
-                    "nome_camera": "Nome da Câmera",
-                    "ultima_atualizacao": "Última Vez Online",
-                    "status_camera": "Status",
-                })[[
-                    "Cliente",
-                    "Franqueado",
-                    "ID da Câmera",
-                    "Nome da Câmera",
-                    "Última Vez Online",
-                    "Status",
+                df_novas["Cliente"] = df_novas["nome_cliente"]
+                df_novas["Franqueado"] = df_novas["nome_empresa"]
+                df_novas["ID da Câmera"] = df_novas["id_camera"]
+                df_novas["Nome da Câmera"] = df_novas["nome_camera"]
+                df_novas["Data Cadastro"] = df_novas.apply(lambda r: _fmt_dt(_cadastro_de(r)), axis=1)
+                df_novas["Data da Adição"] = _fmt_dt(data_recente)
+                df_base_cameras_novas = df_novas[[
+                    "Cliente", "Franqueado", "ID da Câmera", "Nome da Câmera", "Data Cadastro", "Data da Adição",
+                ]].sort_values(["Cliente", "Nome da Câmera", "ID da Câmera"]).reset_index(drop=True)
+
+            # ── Câmeras REMOVIDAS: presentes na base, ausentes no recente ──
+            df_removidas = df_cams_old[~df_cams_old["chave_camera"].isin(chaves_novas)].copy()
+            if not df_removidas.empty:
+                df_removidas["Cliente"] = df_removidas["nome_cliente"]
+                df_removidas["Franqueado"] = df_removidas["nome_empresa"]
+                df_removidas["ID da Câmera"] = df_removidas["id_camera"]
+                df_removidas["Nome da Câmera"] = df_removidas["nome_camera"]
+                df_removidas["Data Cadastro"] = df_removidas.apply(lambda r: _fmt_dt(_cadastro_de(r)), axis=1)
+                df_removidas["Data da Remoção"] = _fmt_dt(data_recente)
+                df_base_cameras_removidas = df_removidas[[
+                    "Cliente", "Franqueado", "ID da Câmera", "Nome da Câmera", "Data Cadastro", "Data da Remoção",
                 ]].sort_values(["Cliente", "Nome da Câmera", "ID da Câmera"]).reset_index(drop=True)
     else:
         tendencias = {wl: None for wl in dados}
@@ -6695,31 +6766,46 @@ def main():
             col_base_b.metric("Clientes com redução de base", int(clientes_base_reduzida))
             col_base_c.metric("Variação total", f"{delta_total_cameras:+d}")
 
-            if not df_base_cameras_novas.empty:
-                st.markdown("#### Câmeras novas identificadas")
+            tem_novas = not df_base_cameras_novas.empty
+            tem_removidas = not df_base_cameras_removidas.empty
+
+            if tem_novas:
+                st.markdown(f"#### 🟢 Câmeras adicionadas ({len(df_base_cameras_novas)})")
                 render_dataframe(
                     df_base_cameras_novas,
                     height=min(700, (len(df_base_cameras_novas) + 1) * 35 + 3)
                 )
 
+            if tem_removidas:
+                st.markdown(f"#### 🔴 Câmeras removidas ({len(df_base_cameras_removidas)})")
+                st.caption("Câmeras que existiam no snapshot base e não estão no snapshot recente. Data da Remoção = data da importação/snapshot recente.")
+                render_dataframe(
+                    df_base_cameras_removidas,
+                    height=min(700, (len(df_base_cameras_removidas) + 1) * 35 + 3)
+                )
+
+            if tem_novas or tem_removidas:
                 buffer_cams = io.BytesIO()
                 with pd.ExcelWriter(buffer_cams, engine="openpyxl") as writer:
-                    df_base_cameras_novas.to_excel(writer, index=False, sheet_name="Cameras Novas")
+                    if tem_novas:
+                        df_base_cameras_novas.to_excel(writer, index=False, sheet_name="Cameras Adicionadas")
+                    if tem_removidas:
+                        df_base_cameras_removidas.to_excel(writer, index=False, sheet_name="Cameras Removidas")
                 st.download_button(
-                    "⬇ Baixar câmeras novas em Excel",
-                    key="dl_cameras_novas_excel_v1",
+                    "⬇ Baixar alterações da base em Excel",
+                    key="dl_cameras_alteracoes_excel_v1",
                     data=buffer_cams.getvalue(),
-                    file_name=f"cameras_novas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                    file_name=f"alteracoes_base_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                 )
             elif len(snapshot_ids) == 2 and detalhe_cameras_disponivel:
-                st.info("Nenhuma câmera nova foi identificada entre o snapshot atual e o anterior.")
+                st.info("Nenhuma câmera foi adicionada ou removida entre o snapshot base e o recente (a variação veio apenas de alteração no total por cliente).")
             elif len(snapshot_ids) == 2:
                 st.warning(
                     "O resumo de crescimento existe, mas o detalhamento por ID de câmera ainda não está disponível "
                     "para esses snapshots antigos. Salve um novo snapshot com esta versão e, na próxima comparação, "
-                    "o sistema exibirá Cliente, Franqueado, ID da Câmera, Nome da Câmera e Última Vez Online."
+                    "o sistema exibirá Cliente, ID da Câmera, Nome da Câmera, Data de Cadastro e Data da Remoção."
                 )
 
                 if not df_base_delta.empty:
