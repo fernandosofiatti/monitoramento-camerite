@@ -6095,6 +6095,141 @@ def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
         )
 
 
+def render_aba_padrao_quedas(dados: dict) -> None:
+    """Heatmap de dia da semana × hora mostrando quando as câmeras caem.
+
+    Usa a série de snapshots salvos. Duas métricas:
+    - Quedas: soma dos aumentos de câmeras offline entre snapshots consecutivos.
+    - % offline médio: média do percentual offline dos snapshots de cada faixa.
+    """
+    st.markdown("### 🗓️ Padrão de Quedas")
+    st.caption("Cruzamento de dia da semana × hora, a partir dos snapshots salvos, para revelar quando as câmeras costumam cair.")
+
+    col_p, col_m = st.columns([1, 2])
+    with col_p:
+        dias = st.selectbox(
+            "Período",
+            options=[14, 30, 60, 90, 180],
+            index=1,
+            format_func=lambda d: f"Últimos {d} dias",
+            key="quedas_periodo",
+        )
+    with col_m:
+        metrica = st.radio(
+            "Métrica",
+            options=["Quedas (câmeras que caíram)", "% offline médio"],
+            horizontal=True,
+            key="quedas_metrica",
+        )
+
+    with st.spinner("Analisando padrão de quedas..."):
+        df_hist = carregar_historico_clientes(dias)
+
+    if df_hist is None or df_hist.empty:
+        st.info(f"Nenhum snapshot encontrado nos últimos {dias} dias.")
+        return
+
+    df = df_hist.copy()
+    df["gravado_dt"] = pd.to_datetime(df["gravado_em"], errors="coerce")
+    df = df[df["gravado_dt"].notna()].copy()
+    for c in ["offline", "total"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    if df.empty:
+        st.info("Os snapshots encontrados não têm data válida para montar o padrão.")
+        return
+
+    # Agrega por snapshot (soma de todos os clientes).
+    agg = (
+        df.groupby(["snapshot_id", "gravado_dt"], as_index=False)
+        .agg(offline=("offline", "sum"), total=("total", "sum"))
+        .sort_values("gravado_dt")
+        .reset_index(drop=True)
+    )
+    if len(agg) < 2 and metrica.startswith("Quedas"):
+        st.info("São necessários pelo menos dois snapshots no período para medir quedas. Tente um período maior ou use a métrica de % offline médio.")
+        return
+
+    agg["pct"] = agg.apply(lambda r: (r["offline"] / r["total"] * 100) if r["total"] else 0.0, axis=1)
+    agg["weekday"] = agg["gravado_dt"].dt.dayofweek  # 0 = segunda
+    agg["hour"] = agg["gravado_dt"].dt.hour
+    # Quedas = aumento de câmeras offline em relação ao snapshot anterior.
+    agg["quedas"] = agg["offline"].diff().clip(lower=0).fillna(0)
+
+    dias_semana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
+    horas = list(range(24))
+
+    if metrica.startswith("Quedas"):
+        valor_col, agrego, sufixo, titulo_metric = "quedas", "sum", "", "câmeras que caíram"
+        colorscale = [[0.0, "#f8fafc"], [0.35, "#fca5a5"], [0.7, "#ef4444"], [1.0, "#b91c1c"]]
+        fmt = lambda v: f"{int(round(v))}"
+    else:
+        valor_col, agrego, sufixo, titulo_metric = "pct", "mean", "%", "% offline médio"
+        colorscale = [[0.0, "#dff8f3"], [0.5, "#fde68a"], [1.0, "#dc2626"]]
+        fmt = lambda v: f"{v:.1f}%"
+
+    # Matriz 7 x 24 (valor) e matriz de contagem de snapshots por faixa.
+    piv = df_grid = agg.pivot_table(index="weekday", columns="hour", values=valor_col, aggfunc=agrego)
+    cont = agg.pivot_table(index="weekday", columns="hour", values="snapshot_id", aggfunc="count")
+    piv = piv.reindex(index=range(7), columns=horas)
+    cont = cont.reindex(index=range(7), columns=horas)
+
+    z = piv.values.astype(float)
+    n = cont.values
+    # Para "% médio" deixamos faixas sem amostra em branco (NaN); para "quedas", 0.
+    if metrica.startswith("Quedas"):
+        z = pd.DataFrame(z).fillna(0).values
+
+    # Texto do hover com dia, hora, valor e nº de snapshots.
+    customdata = []
+    for i in range(7):
+        linha = []
+        for j in range(24):
+            n_ij = 0 if (n is None or pd.isna(n[i][j])) else int(n[i][j])
+            linha.append(n_ij)
+        customdata.append(linha)
+
+    fig = go.Figure(go.Heatmap(
+        z=z,
+        x=[f"{h:02d}h" for h in horas],
+        y=dias_semana,
+        customdata=customdata,
+        colorscale=colorscale,
+        hoverongaps=False,
+        xgap=2, ygap=2,
+        colorbar=dict(title=titulo_metric, thickness=12, outlinewidth=0),
+        hovertemplate=(
+            "<b>%{y} · %{x}</b><br>"
+            + titulo_metric + ": <b>%{z}</b><br>"
+            + "snapshots na faixa: %{customdata}<extra></extra>"
+        ),
+    ))
+    layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
+    fig.update_layout(
+        **layout_defaults,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        height=420,
+        margin=dict(l=10, r=10, t=10, b=40),
+        xaxis=dict(title="", tickfont=dict(size=10, color="#8B7AA3"), showgrid=False),
+        yaxis=dict(title="", autorange="reversed", tickfont=dict(size=11, color="#6B5A7A"), showgrid=False),
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"heatmap_quedas_{valor_col}_{dias}")
+
+    # Destaque da pior faixa.
+    try:
+        piv_para_pico = piv.copy()
+        if piv_para_pico.notna().any().any():
+            pos = piv_para_pico.stack().idxmax()
+            wd, hr = int(pos[0]), int(pos[1])
+            val = piv_para_pico.loc[wd, hr]
+            st.caption(
+                f"Pior faixa: **{dias_semana[wd]} às {hr:02d}h** ({titulo_metric}: {fmt(val)}) · "
+                f"{len(agg)} snapshots no período. Passe o mouse para ver a amostra de cada célula."
+            )
+    except Exception:
+        st.caption(f"{len(agg)} snapshots no período. Passe o mouse sobre as células para ver a amostra.")
+
+
 def render_aba_detalhe_cliente_snap(dados: dict) -> None:
     """Aba Detalhe Cliente Snap: consulta de cliente dentro de um snapshot salvo."""
     st.markdown("### 📈 Detalhe Cliente Snap")
@@ -7087,7 +7222,7 @@ def main():
     with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🏆 Total por Franquia"])
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🏆 Total por Franquia", "🗓️ Padrão de Quedas"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -7456,6 +7591,9 @@ def main():
 
     with clientes_subtabs[3]:
         render_aba_total_por_franquia(df_clientes_ops)
+
+    with clientes_subtabs[4]:
+        render_aba_padrao_quedas(dados)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
