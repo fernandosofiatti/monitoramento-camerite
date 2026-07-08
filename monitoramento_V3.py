@@ -6138,7 +6138,7 @@ def render_aba_padrao_quedas(dados: dict) -> None:
         st.info("Os snapshots encontrados não têm data válida para montar o padrão.")
         return
 
-    # Agrega por snapshot (soma de todos os clientes).
+    # Agrega por snapshot (soma de todos os clientes) — usado no % médio.
     agg = (
         df.groupby(["snapshot_id", "gravado_dt"], as_index=False)
         .agg(offline=("offline", "sum"), total=("total", "sum"))
@@ -6152,23 +6152,29 @@ def render_aba_padrao_quedas(dados: dict) -> None:
     agg["pct"] = agg.apply(lambda r: (r["offline"] / r["total"] * 100) if r["total"] else 0.0, axis=1)
     agg["weekday"] = agg["gravado_dt"].dt.dayofweek  # 0 = segunda
     agg["hour"] = agg["gravado_dt"].dt.hour
-    # Quedas = aumento de câmeras offline em relação ao snapshot anterior.
-    agg["quedas"] = agg["offline"].diff().clip(lower=0).fillna(0)
+
+    # Quedas contadas POR CLIENTE (evita que a rotatividade se cancele no agregado):
+    # para cada cliente, o aumento de câmeras offline entre snapshots consecutivos.
+    dfc = df.sort_values(["wl_id", "gravado_dt"]).copy()
+    dfc["delta_cli"] = dfc.groupby("wl_id")["offline"].diff().clip(lower=0)
+    dfc["weekday"] = dfc["gravado_dt"].dt.dayofweek
+    dfc["hour"] = dfc["gravado_dt"].dt.hour
 
     dias_semana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
     horas = list(range(24))
 
     if metrica.startswith("Quedas"):
-        valor_col, agrego, sufixo, titulo_metric = "quedas", "sum", "", "câmeras que caíram"
+        sufixo, titulo_metric = "", "câmeras que caíram"
         colorscale = [[0.0, "#f8fafc"], [0.35, "#fca5a5"], [0.7, "#ef4444"], [1.0, "#b91c1c"]]
         fmt = lambda v: f"{int(round(v))}"
+        piv = dfc.pivot_table(index="weekday", columns="hour", values="delta_cli", aggfunc="sum")
     else:
-        valor_col, agrego, sufixo, titulo_metric = "pct", "mean", "%", "% offline médio"
+        sufixo, titulo_metric = "%", "% offline médio"
         colorscale = [[0.0, "#dff8f3"], [0.5, "#fde68a"], [1.0, "#dc2626"]]
         fmt = lambda v: f"{v:.1f}%"
+        piv = agg.pivot_table(index="weekday", columns="hour", values="pct", aggfunc="mean")
 
-    # Matriz 7 x 24 (valor) e matriz de contagem de snapshots por faixa.
-    piv = df_grid = agg.pivot_table(index="weekday", columns="hour", values=valor_col, aggfunc=agrego)
+    # Contagem de snapshots por faixa (para o hover).
     cont = agg.pivot_table(index="weekday", columns="hour", values="snapshot_id", aggfunc="count")
     piv = piv.reindex(index=range(7), columns=horas)
     cont = cont.reindex(index=range(7), columns=horas)
@@ -6188,6 +6194,10 @@ def render_aba_padrao_quedas(dados: dict) -> None:
             linha.append(n_ij)
         customdata.append(linha)
 
+    # O rótulo pode conter "%" (ex.: "% offline médio"); em hovertemplate isso precisa
+    # ser escapado como "%%", senão o Plotly não renderiza o gráfico (fica em branco).
+    titulo_hover = titulo_metric.replace("%", "%%")
+
     fig = go.Figure(go.Heatmap(
         z=z,
         x=[f"{h:02d}h" for h in horas],
@@ -6199,7 +6209,7 @@ def render_aba_padrao_quedas(dados: dict) -> None:
         colorbar=dict(title=titulo_metric, thickness=12, outlinewidth=0),
         hovertemplate=(
             "<b>%{y} · %{x}</b><br>"
-            + titulo_metric + ": <b>%{z}</b><br>"
+            + titulo_hover + ": <b>%{z}</b><br>"
             + "snapshots na faixa: %{customdata}<extra></extra>"
         ),
     ))
@@ -6213,12 +6223,20 @@ def render_aba_padrao_quedas(dados: dict) -> None:
         xaxis=dict(title="", tickfont=dict(size=10, color="#8B7AA3"), showgrid=False),
         yaxis=dict(title="", autorange="reversed", tickfont=dict(size=11, color="#6B5A7A"), showgrid=False),
     )
-    st.plotly_chart(fig, use_container_width=True, key=f"heatmap_quedas_{valor_col}_{dias}")
+    modo_key = "quedas" if metrica.startswith("Quedas") else "pct"
+    st.plotly_chart(fig, use_container_width=True, key=f"heatmap_quedas_{modo_key}_{dias}")
 
     # Destaque da pior faixa.
     try:
         piv_para_pico = piv.copy()
-        if piv_para_pico.notna().any().any():
+        tem_dado = piv_para_pico.notna().any().any()
+        max_val = piv_para_pico.max().max() if tem_dado else 0
+        if metrica.startswith("Quedas") and (not tem_dado or max_val <= 0):
+            st.caption(
+                f"Nenhuma queda registrada no período (as câmeras offline não aumentaram entre os snapshots). "
+                f"{len(agg)} snapshots analisados."
+            )
+        elif tem_dado:
             pos = piv_para_pico.stack().idxmax()
             wd, hr = int(pos[0]), int(pos[1])
             val = piv_para_pico.loc[wd, hr]
