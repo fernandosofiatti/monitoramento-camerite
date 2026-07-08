@@ -5463,7 +5463,7 @@ def render_aba_tendencia(dados: dict) -> None:
     _render_tendencia_alertas(dados)
     st.divider()
 
-    col_periodo, col_modo = st.columns([1, 2])
+    col_periodo, col_modo, col_refresh = st.columns([1, 1.7, 0.7])
     with col_periodo:
         dias = st.selectbox(
             "Período",
@@ -5479,6 +5479,16 @@ def render_aba_tendencia(dados: dict) -> None:
             horizontal=True,
             key="tend_modo",
         )
+    with col_refresh:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Atualizar", key="tend_refresh", use_container_width=True,
+                     help="Recarrega os snapshots do Supabase (ignora o cache), trazendo a importação mais recente."):
+            for _fn in (carregar_historico_clientes, _snapshot_datas_df):
+                try:
+                    _fn.clear()
+                except Exception:
+                    pass
+            st.rerun()
 
     with st.spinner("Carregando histórico de snapshots..."):
         df_hist = carregar_historico_clientes(dias)
@@ -5492,6 +5502,15 @@ def render_aba_tendencia(dados: dict) -> None:
     if df_hist.empty:
         st.info("Os snapshots encontrados não possuem data válida para montar a tendência.")
         return
+
+    # Diagnóstico de atualização: mostra o snapshot mais recente efetivamente carregado.
+    _ult_dt = df_hist["gravado_dt"].max()
+    _n_snaps = df_hist["snapshot_id"].nunique()
+    if pd.notna(_ult_dt):
+        st.caption(
+            f"Snapshot mais recente carregado: **{_ult_dt.strftime('%d/%m/%Y %H:%M')}** "
+            f"· {_n_snaps} snapshots no período. Se a última importação não aparece aqui, clique em **Atualizar**."
+        )
 
     if modo == "Franquia":
         _render_tendencia_por_franquia(df_hist, dados)
