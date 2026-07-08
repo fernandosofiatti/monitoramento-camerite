@@ -3518,9 +3518,17 @@ def _supabase_select_all(tabela: str, params: dict | None = None, page_size: int
 
     todos = []
     offset = 0
+    total_conhecido = None
+    # Avança pelo nº real de linhas retornadas e só encerra num lote vazio (ou ao
+    # atingir o total do Content-Range). Assim continua correto mesmo quando o
+    # servidor aplica um teto (db-max-rows) menor que o page_size pedido — antes,
+    # um lote menor que page_size encerrava o laço cedo e cortava os snapshots
+    # mais recentes (ordem asc), fazendo a última importação sumir da tendência.
+    max_iter = 100000  # trava de segurança contra laço infinito
     try:
-        while True:
+        for _ in range(max_iter):
             headers = supabase_headers()
+            headers["Range-Unit"] = "items"
             headers["Range"] = f"{offset}-{offset + page_size - 1}"
             resp = requests.get(
                 supabase_table_url(tabela),
@@ -3534,9 +3542,19 @@ def _supabase_select_all(tabela: str, params: dict | None = None, page_size: int
             if not lote:
                 break
             todos.extend(lote)
-            if len(lote) < page_size:
+            got = len(lote)
+            offset += got
+
+            # Content-Range: "inicio-fim/total" (total pode ser "*", ou seja, desconhecido).
+            cr = resp.headers.get("Content-Range") or resp.headers.get("content-range")
+            if cr and "/" in cr:
+                tail = cr.rsplit("/", 1)[-1].strip()
+                if tail.isdigit():
+                    total_conhecido = int(tail)
+
+            if total_conhecido is not None and offset >= total_conhecido:
                 break
-            offset += page_size
+            # Sem total conhecido: segue paginando até vir um lote vazio.
     except Exception as e:
         return pd.DataFrame(), f"Erro ao consultar {tabela}: {e}"
 
