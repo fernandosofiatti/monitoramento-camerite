@@ -5708,18 +5708,43 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
         clientes_hist.setdefault(str(wl_id), v.get("cidade_estado") or v.get("nome_cliente", f"ID {wl_id}"))
 
     opcoes_ids = sorted(clientes_hist.keys(), key=lambda wl: clientes_hist.get(wl, wl))
-    wl_sel = st.selectbox(
-        "Cliente",
-        options=opcoes_ids,
-        format_func=lambda wl: clientes_hist.get(wl, wl),
-        key="tend_cliente",
-    )
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        wl_sel = st.selectbox(
+            "Cliente",
+            options=opcoes_ids,
+            format_func=lambda wl: clientes_hist.get(wl, wl),
+            key="tend_cliente",
+        )
+    with col_c2:
+        opcoes_comp = ["—"] + [w for w in opcoes_ids if str(w) != str(wl_sel)]
+        wl_comp = st.selectbox(
+            "Comparar com (opcional)",
+            options=opcoes_comp,
+            format_func=lambda wl: "—" if wl == "—" else clientes_hist.get(wl, wl),
+            key="tend_cliente_comp",
+        )
 
-    df_cli = (
-        df_hist[df_hist["wl_id"].astype(str) == str(wl_sel)]
-        .sort_values("gravado_dt")
-        .copy()
-    )
+    agrupar_dia = st.toggle("Agrupar por dia (média diária)", value=False, key="tend_agrupar_dia")
+
+    def _serie_cliente(wl) -> pd.DataFrame:
+        s = df_hist[df_hist["wl_id"].astype(str) == str(wl)].sort_values("gravado_dt").copy()
+        if s.empty:
+            return s
+        for c in ["offline", "total", "pct_offline"]:
+            s[c] = pd.to_numeric(s[c], errors="coerce").fillna(0)
+        if agrupar_dia:
+            s["dia"] = s["gravado_dt"].dt.floor("D")
+            g = s.groupby("dia", as_index=False).agg(
+                offline=("offline", "sum"), total=("total", "sum"),
+                gravado_dt=("gravado_dt", "last"),
+            )
+            g["pct_offline"] = g.apply(lambda r: (r["offline"] / r["total"] * 100) if r["total"] else 0.0, axis=1)
+            g["label"] = g["dia"].dt.strftime("%d/%m")
+            return g.sort_values("gravado_dt").reset_index(drop=True)
+        return s.reset_index(drop=True)
+
+    df_cli = _serie_cliente(wl_sel)
     if df_cli.empty:
         st.warning(f"Nenhum snapshot encontrado para **{clientes_hist.get(wl_sel, wl_sel)}** no período.")
         return
@@ -5761,7 +5786,7 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
     m6.metric("Tendência", tend_txt)
 
     # Controles de sobreposição.
-    c1, c2, c3, c4 = st.columns([1, 1, 1, 1.4])
+    c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1.3, 1.1])
     show_mm = c1.toggle("Média móvel", value=True, key="tend_mm")
     show_trend = c2.toggle("Linha de tendência", value=True, key="tend_reg")
     show_meta = c3.toggle("Meta (SLA)", value=False, key="tend_meta")
@@ -5769,6 +5794,11 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
         meta_disp = st.number_input(
             "Disponibilidade alvo (%)", min_value=80.0, max_value=100.0, value=98.0, step=0.5,
             key="tend_meta_val", disabled=not show_meta,
+        )
+    with c5:
+        projecao_dias = st.number_input(
+            "Projetar (dias)", min_value=0, max_value=30, value=0, step=1,
+            key="tend_proj", help="Estende a linha de tendência N dias à frente (0 = desligado).",
         )
     meta_offline = max(0.0, 100.0 - float(meta_disp))
 
@@ -5793,6 +5823,22 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
         name="% Offline",
     ))
 
+    # Série de comparação (outro cliente).
+    if wl_comp and wl_comp != "—":
+        df_comp = _serie_cliente(wl_comp)
+        if not df_comp.empty:
+            nome_comp = clientes_hist.get(wl_comp, wl_comp)
+            fig.add_trace(go.Scatter(
+                x=df_comp["gravado_dt"],
+                y=df_comp["pct_offline"].tolist(),
+                mode="lines+markers",
+                line=dict(color="#f59e0b", width=2, dash="solid", shape="spline", smoothing=0.6),
+                marker=dict(size=5, color="#f59e0b"),
+                opacity=0.85,
+                name=f"{nome_comp[:20]} (comparação)",
+                hovertemplate=f"<b>{escape_html(nome_comp)}</b><br>%{{x|%d/%m/%Y %H:%M}}<br>% Offline: %{{y:.1f}}%<extra></extra>",
+            ))
+
     # Média móvel.
     if show_mm and n >= 3:
         janela = max(2, min(7, n // 3))
@@ -5815,6 +5861,25 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
             hovertemplate="Tendência<extra></extra>",
         ))
 
+        # Projeção N dias à frente (continuação pontilhada + valor projetado).
+        if projecao_dias and projecao_dias > 0:
+            x_fim_days = float(x_days.iloc[-1]) + float(projecao_dias)
+            y_proj = intercept + slope * x_fim_days
+            y_proj_clip = min(100.0, max(0.0, y_proj))
+            x_proj_dt = x_dt.iloc[-1] + pd.Timedelta(days=int(projecao_dias))
+            fig.add_trace(go.Scatter(
+                x=[x_dt.iloc[-1], x_proj_dt],
+                y=[max(0, y1), y_proj_clip],
+                mode="lines+markers+text",
+                line=dict(color=tend_cor, width=2, dash="dot"),
+                marker=dict(size=[0, 9], color=tend_cor, symbol="diamond"),
+                text=["", f"  ~{y_proj_clip:.1f}%"],
+                textposition="top center",
+                textfont=dict(color=tend_cor, size=11),
+                name=f"Projeção +{int(projecao_dias)}d",
+                hovertemplate=f"Projeção em +{int(projecao_dias)} dias: <b>{y_proj_clip:.1f}%</b><extra></extra>",
+            ))
+
     # Meta / SLA.
     if show_meta:
         fig.add_hline(
@@ -5826,7 +5891,16 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
 
     fig.add_hline(y=5, line_dash="dot", line_color="#14b8a6", line_width=1)
     fig.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1)
-    y_top = max(pct_max * 1.25, 12, meta_offline * 1.3 if show_meta else 0)
+    candidatos_top = [pct_max * 1.25, 12.0]
+    if show_meta:
+        candidatos_top.append(meta_offline * 1.3)
+    if wl_comp and wl_comp != "—":
+        _dc = _serie_cliente(wl_comp)
+        if not _dc.empty:
+            candidatos_top.append(float(_dc["pct_offline"].max()) * 1.15)
+    if show_trend and projecao_dias and projecao_dias > 0 and n >= 2 and float(x_days.iloc[-1]) > 0:
+        candidatos_top.append(min(100.0, max(0.0, intercept + slope * (float(x_days.iloc[-1]) + float(projecao_dias)))) * 1.15)
+    y_top = min(100.0, max(candidatos_top))
     fig.update_layout(
         **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
         paper_bgcolor="rgba(0,0,0,0)",
