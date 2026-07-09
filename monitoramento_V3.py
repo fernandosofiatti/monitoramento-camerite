@@ -6759,13 +6759,12 @@ def main():
 
     # ── ABAS ──
     _injetar_css_abas_visiveis()
-    abas_principais = [
-        "Auditoria",
-        "Clientes",
-        "Central de Ações",
-        "Evidências",
-        "Atualizar Base",
-    ]
+    # Central de Ações desativada (não utilizada). Para reativar, defina como True.
+    MOSTRAR_CENTRAL_ACOES = False
+    abas_principais = ["Auditoria", "Clientes"]
+    if MOSTRAR_CENTRAL_ACOES:
+        abas_principais.append("Central de Ações")
+    abas_principais += ["Evidências", "Atualizar Base"]
     tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
     with tabs["Auditoria"]:
@@ -7601,8 +7600,9 @@ def main():
     # ════════════════════════════════════════════
     # ABA 2 — CENTRAL DE AÇÕES
     # ════════════════════════════════════════════
-    with tabs["Central de Ações"]:
-        render_central_acoes(dados)
+    if MOSTRAR_CENTRAL_ACOES and "Central de Ações" in tabs:
+        with tabs["Central de Ações"]:
+            render_central_acoes(dados)
 
     with clientes_subtabs[2]:
         render_aba_tendencia(dados)
