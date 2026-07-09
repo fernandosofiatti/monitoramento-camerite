@@ -3731,6 +3731,7 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
     return df_out.drop_duplicates(subset=["wl_id", "id_camera"], keep="last").reset_index(drop=True)
 
 
+@st.cache_data(ttl=120)
 def carregar_snapshot_cameras(sid: int, wl_ids_validos: set[str] | None = None) -> pd.DataFrame:
     params = {
         "select": "*",
@@ -3897,6 +3898,7 @@ def listar_snapshots() -> pd.DataFrame:
     return _snapshot_datas_df()
 
 
+@st.cache_data(ttl=120)
 def carregar_snapshot(sid: int, wl_ids_validos: set[str] | None = None) -> pd.DataFrame:
     # Fonte oficial do comparativo: resumo por cliente salvo junto com o snapshot.
     # Assim o total offline do snapshot bate com o total que estava na tela no momento do salvamento.
@@ -4061,6 +4063,7 @@ def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+@st.cache_data(ttl=120)
 def obter_datas_snapshots(snapshot_ids: list[int]) -> pd.DataFrame:
     df = listar_snapshots()
     if df.empty:
@@ -4068,6 +4071,7 @@ def obter_datas_snapshots(snapshot_ids: list[int]) -> pd.DataFrame:
     ids = [int(x) for x in snapshot_ids]
     return df[df["id"].astype(int).isin(ids)][["id", "gravado_em"]].copy()
 
+@st.cache_data(ttl=120)
 def calcular_recorrencia(dias: int = 30) -> dict:
     df_hist = carregar_historico_clientes(dias)
     if df_hist.empty:
