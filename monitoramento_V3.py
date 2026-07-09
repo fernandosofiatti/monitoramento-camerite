@@ -5725,48 +5725,117 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
         return
 
     nome_cliente = clientes_hist.get(wl_sel, wl_sel)
-    pct_atual = float(df_cli["pct_offline"].iloc[-1])
-    pct_inicio = float(df_cli["pct_offline"].iloc[0])
-    pct_max = float(df_cli["pct_offline"].max())
-    pct_min = float(df_cli["pct_offline"].min())
-    pct_medio = float(df_cli["pct_offline"].mean())
+    y = df_cli["pct_offline"].astype(float).reset_index(drop=True)
+    x_dt = df_cli["gravado_dt"].reset_index(drop=True)
+    n = len(y)
+    pct_atual = float(y.iloc[-1])
+    pct_inicio = float(y.iloc[0])
+    pct_max = float(y.max())
+    pct_min = float(y.min())
+    pct_medio = float(y.mean())
     variacao = pct_atual - pct_inicio
 
-    m1, m2, m3, m4, m5 = st.columns(5)
+    # Regressão linear (mínimos quadrados) sobre o tempo em dias → inclinação em p.p./dia.
+    x_days = (x_dt - x_dt.iloc[0]).dt.total_seconds() / 86400.0
+    slope = 0.0
+    intercept = pct_medio
+    if n >= 2:
+        xbar, ybar = x_days.mean(), y.mean()
+        denom = float(((x_days - xbar) ** 2).sum())
+        if denom > 0:
+            slope = float(((x_days - xbar) * (y - ybar)).sum() / denom)
+            intercept = float(ybar - slope * xbar)
+    if slope > 0.05:
+        tend_txt, tend_cor = "▲ Piorando", "#dc2626"
+    elif slope < -0.05:
+        tend_txt, tend_cor = "▼ Melhorando", "#059669"
+    else:
+        tend_txt, tend_cor = "= Estável", "#8B7AA3"
+
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("% Offline atual", f"{pct_atual:.1f}%")
     m2.metric("Variação", f"{variacao:+.1f} p.p.")
     m3.metric("Pior momento", f"{pct_max:.1f}%")
     m4.metric("Melhor momento", f"{pct_min:.1f}%")
     m5.metric("Média", f"{pct_medio:.1f}%")
+    m6.metric("Tendência", tend_txt)
+
+    # Controles de sobreposição.
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 1.4])
+    show_mm = c1.toggle("Média móvel", value=True, key="tend_mm")
+    show_trend = c2.toggle("Linha de tendência", value=True, key="tend_reg")
+    show_meta = c3.toggle("Meta (SLA)", value=False, key="tend_meta")
+    with c4:
+        meta_disp = st.number_input(
+            "Disponibilidade alvo (%)", min_value=80.0, max_value=100.0, value=98.0, step=0.5,
+            key="tend_meta_val", disabled=not show_meta,
+        )
+    meta_offline = max(0.0, 100.0 - float(meta_disp))
 
     fig = go.Figure()
     fig.add_hrect(y0=0, y1=5, fillcolor="#dff8f3", opacity=0.25, line_width=0, layer="below")
     fig.add_hrect(y0=5, y1=10, fillcolor="#fef9c3", opacity=0.25, line_width=0, layer="below")
     fig.add_hrect(y0=10, y1=100, fillcolor="#fee2e2", opacity=0.20, line_width=0, layer="below")
+
+    # Série principal.
     fig.add_trace(go.Scatter(
-        x=df_cli["gravado_dt"],
-        y=df_cli["pct_offline"].tolist(),
+        x=x_dt,
+        y=y.tolist(),
         mode="lines+markers",
         line=dict(color="#7C3AED", width=2.4, shape="spline", smoothing=0.6),
-        marker=dict(color=[cor_hex(v) for v in df_cli["pct_offline"]], size=8, line=dict(color="#ffffff", width=1)),
+        marker=dict(color=[cor_hex(v) for v in y], size=8, line=dict(color="#ffffff", width=1)),
         text=[
             f"<b>{escape_html(r['label'])}</b><br>{r['gravado_dt'].strftime('%d/%m/%Y %H:%M')}<br>"
             f"% Offline: <b>{r['pct_offline']:.1f}%</b><br>Offline: {int(r['offline'])} de {int(r['total'])}"
             for _, r in df_cli.iterrows()
         ],
         hovertemplate="%{text}<extra></extra>",
-        name=nome_cliente[:28],
+        name="% Offline",
     ))
+
+    # Média móvel.
+    if show_mm and n >= 3:
+        janela = max(2, min(7, n // 3))
+        mm = y.rolling(janela, min_periods=1).mean()
+        fig.add_trace(go.Scatter(
+            x=x_dt, y=mm.tolist(), mode="lines",
+            line=dict(color="#0ea5e9", width=2, dash="solid"),
+            opacity=0.9, name=f"Média móvel ({janela})",
+            hovertemplate="Média móvel: %{y:.1f}%<extra></extra>",
+        ))
+
+    # Linha de tendência (regressão).
+    if show_trend and n >= 2 and float(x_days.iloc[-1]) > 0:
+        y0 = intercept + slope * float(x_days.iloc[0])
+        y1 = intercept + slope * float(x_days.iloc[-1])
+        fig.add_trace(go.Scatter(
+            x=[x_dt.iloc[0], x_dt.iloc[-1]], y=[max(0, y0), max(0, y1)], mode="lines",
+            line=dict(color=tend_cor, width=2, dash="dash"),
+            name=f"Tendência ({slope:+.2f} p.p./dia)",
+            hovertemplate="Tendência<extra></extra>",
+        ))
+
+    # Meta / SLA.
+    if show_meta:
+        fig.add_hline(
+            y=meta_offline, line_dash="dashdot", line_color="#059669", line_width=1.6,
+            annotation_text=f"Meta ≤ {meta_offline:.1f}% offline ({meta_disp:.1f}% disp.)",
+            annotation_position="top left",
+            annotation_font=dict(color="#059669", size=11),
+        )
+
     fig.add_hline(y=5, line_dash="dot", line_color="#14b8a6", line_width=1)
     fig.add_hline(y=10, line_dash="dot", line_color="#f59e0b", line_width=1)
+    y_top = max(pct_max * 1.25, 12, meta_offline * 1.3 if show_meta else 0)
     fig.update_layout(
         **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        height=380,
+        height=400,
         margin=dict(l=10, r=30, t=20, b=70),
         xaxis=dict(tickangle=-35, gridcolor="#F3E8FF", tickformat="%d/%m %H:%M"),
-        yaxis=dict(ticksuffix="%", gridcolor="#F3E8FF", range=[0, max(pct_max * 1.25, 12)]),
+        yaxis=dict(ticksuffix="%", gridcolor="#F3E8FF", range=[0, y_top]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     )
     st.plotly_chart(fig, use_container_width=True, key=f"tend_line_{wl_sel}")
 
