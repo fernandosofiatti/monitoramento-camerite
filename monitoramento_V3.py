@@ -587,6 +587,107 @@ hr,
 """, unsafe_allow_html=True)
 
 
+# ── Camada de refinamento visual (rumo 1: mesmo roxo, mais moderno) ──
+st.markdown("""
+<style>
+/* Mais respiro na página */
+[data-testid="block-container"] { padding: 2.2rem 2.8rem !important; }
+
+/* ── Abas em formato "pill" / segmented control ── */
+[data-testid="stTabs"] [role="tablist"] {
+    border-bottom: none !important;
+    gap: 6px !important;
+    background: #F1E9FC !important;
+    padding: 5px !important;
+    border-radius: 14px !important;
+    display: inline-flex !important;
+    flex-wrap: wrap !important;
+    box-shadow: inset 0 1px 2px rgba(23,17,38,.04) !important;
+}
+[data-testid="stTabs"] [role="tab"] {
+    border: none !important;
+    border-radius: 10px !important;
+    padding: 8px 18px !important;
+    color: #6B5A7A !important;
+    font-weight: 500 !important;
+    transition: all .18s ease !important;
+}
+[data-testid="stTabs"] [role="tab"]:hover { color: #6D28D9 !important; background: rgba(255,255,255,.55) !important; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    background: #ffffff !important;
+    color: #6D28D9 !important;
+    font-weight: 700 !important;
+    box-shadow: 0 2px 10px rgba(23,17,38,.10) !important;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] * { color: #6D28D9 !important; -webkit-text-fill-color: #6D28D9 !important; }
+/* remove o sublinhado/indicador padrão das abas */
+[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+[data-testid="stTabs"] [data-baseweb="tab-border"] { background: transparent !important; height: 0 !important; }
+
+/* ── Cantos mais arredondados + sombras mais suaves nos cards ── */
+.kpi-card, .unit-card, .audit-hero, .audit-card, .audit-riskbar,
+[data-testid="stExpander"], [data-testid="stAlert"] {
+    border-radius: 16px !important;
+    border-color: #EFE7FB !important;
+}
+.kpi-card, .unit-card, .audit-hero {
+    box-shadow: 0 6px 24px rgba(23,17,38,.06) !important;
+}
+.audit-card { box-shadow: 0 4px 16px rgba(23,17,38,.05) !important; }
+.kpi-card::after { border-radius: 16px 16px 0 0 !important; height: 4px !important; }
+.unit-card::before, .card-red::before, .card-yellow::before { border-radius: 16px 16px 0 0 !important; }
+
+/* ── st.metric com aparência de card (unifica com os KPIs custom) ── */
+[data-testid="stMetric"] {
+    background: #ffffff !important;
+    border: 1px solid #EFE7FB !important;
+    border-radius: 14px !important;
+    padding: 14px 16px !important;
+    box-shadow: 0 4px 16px rgba(23,17,38,.05) !important;
+}
+[data-testid="stMetricLabel"] p {
+    font-size: 11px !important; font-weight: 700 !important;
+    text-transform: uppercase !important; letter-spacing: .5px !important; color: #8B7AA3 !important;
+}
+[data-testid="stMetricValue"] {
+    font-family: 'DM Mono', monospace !important; font-weight: 700 !important; color: #171126 !important;
+}
+
+/* ── Botões com hover mais vivo ── */
+.stButton > button, .stDownloadButton > button {
+    border-radius: 11px !important;
+    box-shadow: 0 2px 8px rgba(124,58,237,.08) !important;
+    transition: transform .15s ease, box-shadow .15s ease, filter .15s ease !important;
+}
+.stButton > button:hover:not(:disabled),
+.stDownloadButton > button:hover:not(:disabled) {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 8px 20px rgba(124,58,237,.18) !important;
+    filter: brightness(1.02) !important;
+}
+
+/* ── Inputs / selects mais arredondados ── */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stTextInput"] [data-baseweb="input"] > div,
+[data-testid="stDateInput"] [data-baseweb="input"] > div,
+[data-testid="stNumberInput"] [data-baseweb="input"] > div {
+    border-radius: 11px !important;
+}
+
+/* ── Expander/alert: sombra suave ── */
+[data-testid="stExpander"] { box-shadow: 0 3px 12px rgba(23,17,38,.04) !important; }
+[data-testid="stAlert"] { box-shadow: 0 3px 12px rgba(23,17,38,.04) !important; }
+
+/* ── Títulos de seção com mais respiro ── */
+h3 { margin-top: .4rem !important; letter-spacing: -.3px !important; }
+[data-testid="stCaptionContainer"] p { color: #8B7AA3 !important; }
+
+/* ── Divisor mais sutil ── */
+hr { border-color: #EFE7FB !important; opacity: .8 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
 # ─────────────────────────────────────────────
 # CONSTANTES
 # ─────────────────────────────────────────────
