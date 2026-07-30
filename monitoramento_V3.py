@@ -6174,10 +6174,8 @@ def _area_horizontal_franquia(
     sufixo: str = "",
     formato_texto=None,
 ) -> None:
-    """Gráfico lollipop horizontal (haste + bolinha) por franquia.
+    """Gráfico de área horizontal por franquia — versão mais moderna e arejada.
 
-    Substitui a área conectada (que amontoava rótulos): cada franquia é uma linha
-    independente, com o valor rotulado à direita do seu ponto — sem sobreposição.
     formato_texto recebe a linha (pd.Series) e devolve o rótulo exibido no ponto.
     """
     dfp = df_plot.sort_values(valor_col, ascending=True).copy()
@@ -6187,27 +6185,20 @@ def _area_horizontal_franquia(
     dfp["_texto"] = dfp.apply(formato_texto, axis=1)
 
     max_x = float(dfp[valor_col].max()) if not dfp.empty else 0.0
-    max_x = max(max_x * 1.30, 1.0)
-    altura = max(320, min(820, 46 * len(dfp) + 120))
+    max_x = max(max_x * 1.32, 1.0)
+    # Mais altura por linha => rótulos não se amontoam.
+    altura = max(340, min(900, 54 * len(dfp) + 120))
 
     fig = go.Figure()
-
-    # Hastes (track) — linha fina do zero até o valor, mesma cor em baixa opacidade.
-    stem_x, stem_y = [], []
-    for _, r in dfp.iterrows():
-        stem_x += [0, r[valor_col], None]
-        stem_y += [r["Franquia eixo"], r["Franquia eixo"], None]
-    fig.add_trace(go.Scatter(
-        x=stem_x, y=stem_y, mode="lines",
-        line=dict(color=cor, width=2.4), opacity=0.28,
-        hoverinfo="skip", showlegend=False,
-    ))
-
-    # Bolinhas + rótulo à direita de cada ponto.
-    fig.add_trace(go.Scatter(
-        x=dfp[valor_col], y=dfp["Franquia eixo"],
-        mode="markers+text",
-        marker=dict(color=cor, size=13, line=dict(color="#ffffff", width=1.6)),
+    trace = go.Scatter(
+        name=titulo_eixo,
+        x=dfp[valor_col],
+        y=dfp["Franquia eixo"],
+        mode="lines+markers+text",
+        fill="tozerox",
+        fillcolor=cor_fill,
+        line=dict(color=cor, width=2.6, shape="spline", smoothing=0.6),
+        marker=dict(color=cor, size=10, line=dict(color="#ffffff", width=1.8)),
         text=dfp["_texto"],
         textposition="middle right",
         textfont=dict(color="#4A3D5C", size=11, family="DM Sans"),
@@ -6222,13 +6213,22 @@ def _area_horizontal_franquia(
             "Perc. Offline: %{customdata[4]:.1f}%<extra></extra>"
         ),
         showlegend=False,
-    ))
+    )
+    fig.add_trace(trace)
+    # Preenchimento em gradiente (fade) quando a versão do Plotly suportar.
+    try:
+        fig.update_traces(fillgradient=dict(
+            type="horizontal",
+            colorscale=[[0.0, "rgba(255,255,255,0)"], [1.0, cor_fill]],
+        ))
+    except Exception:
+        pass
 
     fig.update_layout(
         **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         height=altura,
-        margin=dict(l=10, r=120, t=10, b=38),
+        margin=dict(l=10, r=124, t=12, b=38),
         xaxis=dict(
             title=titulo_eixo,
             range=[0, max_x],
@@ -6243,7 +6243,7 @@ def _area_horizontal_franquia(
             categoryorder="array",
             categoryarray=dfp["Franquia eixo"].tolist(),
             tickfont=dict(color="#4A3D5C", size=11, family="DM Sans"),
-            showgrid=True, gridcolor="#F6F1FC",
+            showgrid=False,
             automargin=True,
         ),
         showlegend=False,
