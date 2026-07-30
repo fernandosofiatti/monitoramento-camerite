@@ -6174,8 +6174,10 @@ def _area_horizontal_franquia(
     sufixo: str = "",
     formato_texto=None,
 ) -> None:
-    """Renderiza um gráfico de área horizontal (padrão 'LPRs Offline') para franquias.
+    """Gráfico lollipop horizontal (haste + bolinha) por franquia.
 
+    Substitui a área conectada (que amontoava rótulos): cada franquia é uma linha
+    independente, com o valor rotulado à direita do seu ponto — sem sobreposição.
     formato_texto recebe a linha (pd.Series) e devolve o rótulo exibido no ponto.
     """
     dfp = df_plot.sort_values(valor_col, ascending=True).copy()
@@ -6185,22 +6187,31 @@ def _area_horizontal_franquia(
     dfp["_texto"] = dfp.apply(formato_texto, axis=1)
 
     max_x = float(dfp[valor_col].max()) if not dfp.empty else 0.0
-    max_x = max(max_x * 1.28, 1.0)
-    altura = max(320, min(760, 44 * len(dfp) + 130))
+    max_x = max(max_x * 1.30, 1.0)
+    altura = max(320, min(820, 46 * len(dfp) + 120))
 
     fig = go.Figure()
+
+    # Hastes (track) — linha fina do zero até o valor, mesma cor em baixa opacidade.
+    stem_x, stem_y = [], []
+    for _, r in dfp.iterrows():
+        stem_x += [0, r[valor_col], None]
+        stem_y += [r["Franquia eixo"], r["Franquia eixo"], None]
     fig.add_trace(go.Scatter(
-        name=titulo_eixo,
-        x=dfp[valor_col],
-        y=dfp["Franquia eixo"],
-        mode="lines+markers+text",
-        fill="tozerox",
-        line=dict(color=cor, width=3.0, shape="spline", smoothing=0.65),
-        marker=dict(color=cor, size=9, line=dict(color="#ffffff", width=1)),
-        fillcolor=cor_fill,
+        x=stem_x, y=stem_y, mode="lines",
+        line=dict(color=cor, width=2.4), opacity=0.28,
+        hoverinfo="skip", showlegend=False,
+    ))
+
+    # Bolinhas + rótulo à direita de cada ponto.
+    fig.add_trace(go.Scatter(
+        x=dfp[valor_col], y=dfp["Franquia eixo"],
+        mode="markers+text",
+        marker=dict(color=cor, size=13, line=dict(color="#ffffff", width=1.6)),
         text=dfp["_texto"],
         textposition="middle right",
-        textfont=dict(color="#6B5A7A", size=11),
+        textfont=dict(color="#4A3D5C", size=11, family="DM Sans"),
+        cliponaxis=False,
         customdata=dfp[["Cidades", "Total", "Offline", "Online", "Pct"]],
         hovertemplate=(
             "<b>%{y}</b><br>"
@@ -6210,25 +6221,29 @@ def _area_horizontal_franquia(
             "Online: %{customdata[3]}<br>"
             "Perc. Offline: %{customdata[4]:.1f}%<extra></extra>"
         ),
+        showlegend=False,
     ))
+
     fig.update_layout(
-        **pdefaults(),
+        **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         height=altura,
-        margin=dict(l=10, r=110, t=10, b=35),
+        margin=dict(l=10, r=120, t=10, b=38),
         xaxis=dict(
             title=titulo_eixo,
             range=[0, max_x],
             ticksuffix=sufixo,
-            gridcolor="#E9D5FF",
-            tickfont=dict(color="#8B7AA3", size=10),
-            zeroline=False,
+            showgrid=True, gridcolor="#F1E9FC", griddash="dot",
+            tickfont=dict(color="#B8A9CC", size=10),
+            zeroline=False, showline=False,
         ),
         yaxis=dict(
             title="",
             type="category",
             categoryorder="array",
             categoryarray=dfp["Franquia eixo"].tolist(),
-            tickfont=dict(color="#6B5A7A", size=11),
+            tickfont=dict(color="#4A3D5C", size=11, family="DM Sans"),
+            showgrid=True, gridcolor="#F6F1FC",
             automargin=True,
         ),
         showlegend=False,
