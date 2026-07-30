@@ -6174,7 +6174,7 @@ def _area_horizontal_franquia(
     sufixo: str = "",
     formato_texto=None,
 ) -> None:
-    """Gráfico de área horizontal por franquia — versão mais moderna e arejada.
+    """Renderiza um gráfico de área horizontal (padrão 'LPRs Offline') para franquias.
 
     formato_texto recebe a linha (pd.Series) e devolve o rótulo exibido no ponto.
     """
@@ -6182,27 +6182,26 @@ def _area_horizontal_franquia(
     dfp["Franquia eixo"] = dfp["Franqueado"].astype(str)
     if formato_texto is None:
         formato_texto = lambda r: f"{r[valor_col]:g}{sufixo}"
-    dfp["_texto"] = dfp.apply(formato_texto, axis=1)
+    # Valores em negrito.
+    dfp["_texto"] = dfp.apply(formato_texto, axis=1).map(lambda t: f"<b>{t}</b>")
 
     max_x = float(dfp[valor_col].max()) if not dfp.empty else 0.0
-    max_x = max(max_x * 1.32, 1.0)
-    # Mais altura por linha => rótulos não se amontoam.
-    altura = max(340, min(900, 54 * len(dfp) + 120))
+    max_x = max(max_x * 1.28, 1.0)
+    altura = max(320, min(760, 44 * len(dfp) + 130))
 
     fig = go.Figure()
-    trace = go.Scatter(
+    fig.add_trace(go.Scatter(
         name=titulo_eixo,
         x=dfp[valor_col],
         y=dfp["Franquia eixo"],
         mode="lines+markers+text",
         fill="tozerox",
+        line=dict(color=cor, width=3.0, shape="spline", smoothing=0.65),
+        marker=dict(color=cor, size=9, line=dict(color="#ffffff", width=1)),
         fillcolor=cor_fill,
-        line=dict(color=cor, width=2.6, shape="spline", smoothing=0.6),
-        marker=dict(color=cor, size=10, line=dict(color="#ffffff", width=1.8)),
         text=dfp["_texto"],
         textposition="middle right",
-        textfont=dict(color="#4A3D5C", size=11, family="DM Sans"),
-        cliponaxis=False,
+        textfont=dict(color="#6B5A7A", size=11),
         customdata=dfp[["Cidades", "Total", "Offline", "Online", "Pct"]],
         hovertemplate=(
             "<b>%{y}</b><br>"
@@ -6212,38 +6211,25 @@ def _area_horizontal_franquia(
             "Online: %{customdata[3]}<br>"
             "Perc. Offline: %{customdata[4]:.1f}%<extra></extra>"
         ),
-        showlegend=False,
-    )
-    fig.add_trace(trace)
-    # Preenchimento em gradiente (fade) quando a versão do Plotly suportar.
-    try:
-        fig.update_traces(fillgradient=dict(
-            type="horizontal",
-            colorscale=[[0.0, "rgba(255,255,255,0)"], [1.0, cor_fill]],
-        ))
-    except Exception:
-        pass
-
+    ))
     fig.update_layout(
-        **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        **pdefaults(),
         height=altura,
-        margin=dict(l=10, r=124, t=12, b=38),
+        margin=dict(l=10, r=110, t=10, b=35),
         xaxis=dict(
             title=titulo_eixo,
             range=[0, max_x],
             ticksuffix=sufixo,
-            showgrid=True, gridcolor="#F1E9FC", griddash="dot",
-            tickfont=dict(color="#B8A9CC", size=10),
-            zeroline=False, showline=False,
+            gridcolor="#E9D5FF",
+            tickfont=dict(color="#8B7AA3", size=10),
+            zeroline=False,
         ),
         yaxis=dict(
             title="",
             type="category",
             categoryorder="array",
             categoryarray=dfp["Franquia eixo"].tolist(),
-            tickfont=dict(color="#4A3D5C", size=11, family="DM Sans"),
-            showgrid=False,
+            tickfont=dict(color="#6B5A7A", size=11),
             automargin=True,
         ),
         showlegend=False,
