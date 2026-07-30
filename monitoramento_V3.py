@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import os
 import sqlite3
 import io
@@ -5865,16 +5866,16 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
     pct_medio = float(y.mean())
     variacao = pct_atual - pct_inicio
 
-    # Regressão linear (mínimos quadrados) sobre o tempo em dias → inclinação em p.p./dia.
+    # Regressão linear via NumPy (mínimos quadrados) → inclinação em p.p./dia.
     x_days = (x_dt - x_dt.iloc[0]).dt.total_seconds() / 86400.0
     slope = 0.0
     intercept = pct_medio
-    if n >= 2:
-        xbar, ybar = x_days.mean(), y.mean()
-        denom = float(((x_days - xbar) ** 2).sum())
-        if denom > 0:
-            slope = float(((x_days - xbar) * (y - ybar)).sum() / denom)
-            intercept = float(ybar - slope * xbar)
+    if n >= 2 and float(x_days.iloc[-1]) > float(x_days.iloc[0]):
+        try:
+            slope, intercept = np.polyfit(x_days.to_numpy(dtype=float), y.to_numpy(dtype=float), 1)
+            slope, intercept = float(slope), float(intercept)
+        except Exception:
+            slope, intercept = 0.0, pct_medio
     if slope > 0.05:
         tend_txt, tend_cor = "▲ Piorando", "#dc2626"
     elif slope < -0.05:
