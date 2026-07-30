@@ -587,6 +587,107 @@ hr,
 """, unsafe_allow_html=True)
 
 
+# ── Camada visual "Bento claro moderno" (Opção 2 aprovada) ──
+st.markdown("""
+<style>
+/* Fundo lavanda-cinza + respiro */
+html, body, [data-testid="stAppViewContainer"] { background-color: #F4F2F8 !important; }
+[data-testid="block-container"] { padding: 2.2rem 2.8rem !important; }
+[data-testid="stSidebar"] { border-right: 1px solid #ECE8F5 !important; }
+
+/* ── Abas em pill branca; ativa preta (#171126) ── */
+[data-testid="stTabs"] [role="tablist"] { border-bottom: none !important; gap: 8px !important; flex-wrap: wrap !important; }
+[data-testid="stTabs"] [role="tab"] {
+    background: #ffffff !important;
+    border: 1px solid #E6E2F0 !important;
+    border-radius: 12px !important;
+    color: #7A7488 !important;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    padding: 9px 18px !important;
+    transition: all .16s ease !important;
+}
+[data-testid="stTabs"] [role="tab"]:hover { border-color: #C9BEEC !important; color: #6D28D9 !important; }
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    background: #171126 !important;
+    border-color: #171126 !important;
+    color: #ffffff !important;
+    box-shadow: 0 6px 16px rgba(23,17,38,.18) !important;
+}
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] * {
+    color: #ffffff !important; -webkit-text-fill-color: #ffffff !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+[data-testid="stTabs"] [data-baseweb="tab-border"] { background: transparent !important; height: 0 !important; }
+
+/* ── Cards mais arredondados (20px), borda lilás clara, sombra suave ── */
+.kpi-card, .unit-card, .audit-hero, .audit-card, .audit-riskbar,
+.sidebar-stat-card {
+    border-radius: 20px !important;
+    border-color: #ECE8F5 !important;
+    box-shadow: 0 6px 20px rgba(23,17,38,.05) !important;
+}
+.audit-card { box-shadow: 0 4px 16px rgba(23,17,38,.05) !important; }
+.kpi-card::after { border-radius: 20px 20px 0 0 !important; height: 4px !important; }
+.unit-card::before, .card-red::before, .card-yellow::before { border-radius: 20px 20px 0 0 !important; }
+
+/* Valor grande dos KPIs em DM Sans (como na Opção 2) */
+.kpi-value, .val-alert, .val-warn, .val-ok, .val-purple {
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 800 !important;
+    letter-spacing: -.5px !important;
+}
+
+/* ── st.metric com aparência de card ── */
+[data-testid="stMetric"] {
+    background: #ffffff !important;
+    border: 1px solid #ECE8F5 !important;
+    border-radius: 16px !important;
+    padding: 14px 16px !important;
+    box-shadow: 0 6px 20px rgba(23,17,38,.05) !important;
+}
+[data-testid="stMetricLabel"] p {
+    font-size: 11px !important; font-weight: 700 !important;
+    text-transform: uppercase !important; letter-spacing: .5px !important; color: #9A92AD !important;
+}
+[data-testid="stMetricValue"] {
+    font-family: 'DM Sans', sans-serif !important; font-weight: 800 !important;
+    letter-spacing: -.5px !important; color: #171126 !important;
+}
+
+/* ── Botões: cantos 12, hover vivo ── */
+.stButton > button, .stDownloadButton > button {
+    border-radius: 12px !important;
+    box-shadow: 0 2px 8px rgba(124,58,237,.08) !important;
+    transition: transform .15s ease, box-shadow .15s ease, filter .15s ease !important;
+}
+.stButton > button:hover:not(:disabled),
+.stDownloadButton > button:hover:not(:disabled) {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 8px 20px rgba(124,58,237,.18) !important;
+    filter: brightness(1.02) !important;
+}
+
+/* ── Inputs / selects / expander / alert: mais arredondados ── */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stTextInput"] [data-baseweb="input"] > div,
+[data-testid="stDateInput"] [data-baseweb="input"] > div,
+[data-testid="stNumberInput"] [data-baseweb="input"] > div { border-radius: 12px !important; }
+[data-testid="stExpander"] {
+    border-radius: 16px !important; border-color: #ECE8F5 !important;
+    box-shadow: 0 3px 12px rgba(23,17,38,.04) !important;
+}
+[data-testid="stAlert"] {
+    border-radius: 16px !important; border-color: #ECE8F5 !important;
+    box-shadow: 0 3px 12px rgba(23,17,38,.04) !important;
+}
+
+/* ── Títulos e divisores mais suaves ── */
+h3 { letter-spacing: -.3px !important; }
+hr { border-color: #ECE8F5 !important; opacity: .9 !important; }
+[data-testid="stCaptionContainer"] p { color: #9A92AD !important; }
+</style>
+""", unsafe_allow_html=True)
 # ─────────────────────────────────────────────
 # CONSTANTES
 # ─────────────────────────────────────────────
@@ -6551,6 +6652,45 @@ def render_top5_criticos(df_clientes_ops: pd.DataFrame) -> None:
         """, unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _png_variacao_liquida(barras: tuple, titulo: str = "Variação líquida de offline") -> bytes | None:
+    """Gera um PNG em alta resolução (4x, fundo branco) do gráfico de variação líquida.
+
+    Retorna None se o kaleido não estiver disponível (aí o app orienta usar o ícone 📷).
+    Cacheado pela assinatura das barras para não regerar a cada rerun.
+    """
+    try:
+        import plotly.io as pio
+    except Exception:
+        return None
+    clientes = [b[0] for b in barras]
+    deltas = [float(b[1]) for b in barras]
+    if not clientes:
+        return None
+    cores = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in deltas]
+    fig = go.Figure(go.Bar(
+        y=clientes, x=deltas, orientation="h",
+        marker=dict(color=cores, line=dict(width=0)),
+        text=[f"{'+' if d > 0 else ''}{int(d)}" for d in deltas],
+        textposition="outside", textfont=dict(color="#4A3D5C", size=13, family="DM Mono"),
+        cliponaxis=False,
+    ))
+    fig.add_vline(x=0, line_color="#C4B5FD", line_width=1.5)
+    fig.update_layout(
+        title=dict(text=titulo, font=dict(size=22, color="#171126", family="DM Sans"), x=0.01, y=0.985),
+        paper_bgcolor="white", plot_bgcolor="white", showlegend=False,
+        font=dict(family="DM Sans", size=13),
+        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#6B5A7A", size=12), zeroline=False),
+        yaxis=dict(tickfont=dict(color="#3A3550", size=12)),
+        margin=dict(l=10, r=100, t=64, b=34),
+    )
+    altura = max(560, len(clientes) * 36)
+    try:
+        return pio.to_image(fig, format="png", scale=4, width=1500, height=altura, engine="kaleido")
+    except Exception:
+        return None
+
+
 def main():
     init_db()
 
@@ -8564,7 +8704,38 @@ def main():
                     yaxis=dict(tickfont=dict(color="#6B5A7A",size=10)),
                     margin=dict(l=10, r=70, t=20, b=10),
                 )
-                st.plotly_chart(fig_d, use_container_width=True, key="hist_delta_off_cliente")
+                altura_d = int(max(420, len(df_delta) * 32))
+                st.plotly_chart(
+                    fig_d, use_container_width=True, key="hist_delta_off_cliente",
+                    config={
+                        "displaylogo": False,
+                        "toImageButtonOptions": {
+                            "format": "png",
+                            "filename": "variacao_liquida_offline",
+                            "scale": 3,
+                            "width": 1400,
+                            "height": altura_d,
+                        },
+                    },
+                )
+
+                # Exportação em alta resolução.
+                barras_exp = tuple((str(c), float(d)) for c, d in zip(df_delta["cliente"], df_delta["delta_off"]))
+                png_hd = _png_variacao_liquida(barras_exp)
+                if png_hd:
+                    st.download_button(
+                        "⬇ Baixar gráfico em alta resolução (PNG)",
+                        data=png_hd,
+                        file_name="variacao_liquida_offline.png",
+                        mime="image/png",
+                        use_container_width=True,
+                        key="dl_delta_off_png",
+                    )
+                else:
+                    st.caption(
+                        "Para exportar em alta qualidade, passe o mouse sobre o gráfico e clique no ícone 📷 "
+                        "(canto superior direito) — agora ele salva em resolução 3×."
+                    )
 
                 st.markdown("---")
                 st.markdown("#### Tabela comparativa detalhada")
