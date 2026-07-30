@@ -6667,15 +6667,19 @@ def _png_variacao_liquida(barras: tuple, titulo: str = "Variação líquida de o
     deltas = [float(b[1]) for b in barras]
     if not clientes:
         return None
-    cores = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in deltas]
+    cores = ["#f43f5e" if d > 0 else ("#14b8a6" if d < 0 else "#cbb9e6") for d in deltas]
     fig = go.Figure(go.Bar(
         y=clientes, x=deltas, orientation="h",
         marker=dict(color=cores, line=dict(width=0)),
         text=[f"{'+' if d > 0 else ''}{int(d)}" for d in deltas],
         textposition="outside", textfont=dict(color="#4A3D5C", size=13, family="DM Mono"),
-        cliponaxis=False,
+        cliponaxis=False, width=0.62,
     ))
-    fig.add_vline(x=0, line_color="#C4B5FD", line_width=1.5)
+    try:
+        fig.update_traces(marker_cornerradius=8)
+    except Exception:
+        pass
+    fig.add_vline(x=0, line_color="#D9CDEF", line_width=1.5)
     fig.update_layout(
         title=dict(text=titulo, font=dict(size=22, color="#171126", family="DM Sans"), x=0.01, y=0.985),
         paper_bgcolor="white", plot_bgcolor="white", showlegend=False,
@@ -8689,20 +8693,40 @@ def main():
                 st.markdown("#### Variação líquida de offline")
                 st.caption("Valores positivos indicam piora; valores negativos indicam melhora.")
                 df_delta = df_comp.copy().sort_values("delta_off", ascending=True)
-                cores_d  = ["#dc2626" if d > 0 else ("#059669" if d < 0 else "#8B7AA3") for d in df_delta["delta_off"]]
+                cores_d = ["#f43f5e" if d > 0 else ("#14b8a6" if d < 0 else "#cbb9e6") for d in df_delta["delta_off"]]
+                _dmax = float(df_delta["delta_off"].abs().max()) or 1.0
                 fig_d = go.Figure(go.Bar(
                     y=df_delta["cliente"], x=df_delta["delta_off"], orientation="h",
                     marker=dict(color=cores_d, line=dict(width=0)),
-                    text=[f"{'+' if d>0 else ''}{int(d)}" for d in df_delta["delta_off"]],
-                    textposition="outside", textfont=dict(color="#8B7AA3",size=10,family="DM Mono"),
-                    hovertemplate="%{y}<br>Δ %{x:+.0f} câmeras<extra></extra>",
+                    text=[f"{'+' if d > 0 else ''}{int(d)}" for d in df_delta["delta_off"]],
+                    textposition="outside",
+                    textfont=dict(color="#4A3D5C", size=11, family="DM Mono"),
+                    cliponaxis=False,
+                    width=0.62,
+                    hovertemplate="<b>%{y}</b><br>Δ %{x:+.0f} câmeras<extra></extra>",
                 ))
-                fig_d.add_vline(x=0, line_color="#C4B5FD", line_width=1)
+                # Cantos arredondados (seguro em versões antigas do Plotly).
+                try:
+                    fig_d.update_traces(marker_cornerradius=7)
+                except Exception:
+                    pass
+                fig_d.add_vline(x=0, line_color="#D9CDEF", line_width=1.5)
                 fig_d.update_layout(
-                    **pdefaults(), height=max(420, len(df_delta)*32), showlegend=False,
-                    xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
-                    yaxis=dict(tickfont=dict(color="#6B5A7A",size=10)),
-                    margin=dict(l=10, r=70, t=20, b=10),
+                    **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    height=max(440, len(df_delta) * 34),
+                    showlegend=False, bargap=0.34,
+                    xaxis=dict(
+                        showgrid=False, zeroline=False, showline=False,
+                        tickfont=dict(color="#B8A9CC", size=10),
+                        range=[-_dmax * 1.18, _dmax * 1.18],
+                    ),
+                    yaxis=dict(
+                        tickfont=dict(color="#4A3D5C", size=11, family="DM Sans"),
+                        showgrid=False,
+                    ),
+                    margin=dict(l=10, r=60, t=10, b=20),
+                    uniformtext=dict(mode="show", minsize=9),
                 )
                 altura_d = int(max(420, len(df_delta) * 32))
                 st.plotly_chart(
