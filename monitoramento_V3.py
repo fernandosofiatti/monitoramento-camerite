@@ -7011,6 +7011,11 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
     s_disp, d_disp = _serie("disp")
     s_crit, d_crit = _serie("criticos")
 
+    # Série do SLA (cacheada) — para chip + sparkline, no mesmo padrão dos demais.
+    sla_hist = sla_historico_30d(30)
+    s_sla = pd.to_numeric(sla_hist["sla"], errors="coerce").dropna().tolist() if (sla_hist is not None and not sla_hist.empty) else []
+    d_sla = (s_sla[-1] - s_sla[-2]) if len(s_sla) >= 2 else None
+
     # (chave, rótulo, valor, cor, ícone, subtexto, série, delta, good_is_up, sufixo)
     metrics = [
         ("sla", "SLA da Operação", f"{sla['sla']:.1f}%", "#7C3AED", "🎯", None, None, None, None, ""),
@@ -7032,14 +7037,18 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
                 w_reg = (sla["reg_online"] / denom * 100) if denom else 0
                 dentro = sla["sla"] >= SLA_META
                 meta_cor = "#0f766e" if dentro else "#e11d48"
+                chip_sla = _chip_delta(d_sla, True, "%")   # SLA subir = bom
+                spark_sla = _sparkline_svg(s_sla, "#7C3AED")
                 corpo = (
                     f"<div style='font-size:10px;margin-top:8px;color:{meta_cor};font-weight:700'>"
                     f"meta {SLA_META:.0f}% · {'dentro' if dentro else 'abaixo'}</div>"
                     f"<div style='display:flex;height:7px;background:#F1ECFA;border-radius:99px;margin-top:8px;overflow:hidden'>"
                     f"<div style='width:{w_lpr:.2f}%;background:linear-gradient(90deg,#7c3aed,#22d3ee)'></div>"
                     f"<div style='width:{w_reg:.2f}%;background:#c9bcea'></div></div>"
-                    f"<div style='font-size:9px;color:#9A92AD;margin-top:auto;padding-top:8px'>"
-                    f"LPR {sla['lpr_online']}/{sla['lpr_total']} (peso {sla['peso']:.0f}×) · comuns {sla['reg_online']}/{sla['reg_total']}</div>"
+                    f"{chip_sla}"
+                    f"<div style='margin-top:auto'>{spark_sla}"
+                    f"<div style='font-size:9px;color:#9A92AD;margin-top:4px'>"
+                    f"LPR {sla['lpr_online']}/{sla['lpr_total']} (peso {sla['peso']:.0f}×) · comuns {sla['reg_online']}/{sla['reg_total']}</div></div>"
                 )
             else:
                 chip = _chip_delta(delta, good_up, suf)
