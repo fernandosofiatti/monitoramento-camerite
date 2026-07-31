@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import sys
 import sqlite3
 import io
 import json
@@ -833,10 +834,172 @@ STATUS_CLIENTE = [
 # ─────────────────────────────────────────────
 # HELPERS DE COR
 # ─────────────────────────────────────────────
+def _pct_offline_vec(offline, total, casas: int | None = None):
+    """% offline vetorizado (NumPy), seguro contra divisão por zero.
+
+    Substitui os vários `.apply(lambda r: r.offline/r.total*100 ..., axis=1)` —
+    resultado idêntico, porém sem loop linha a linha.
+    """
+    off = np.asarray(offline, dtype=float)
+    tot = np.asarray(total, dtype=float)
+    pct = np.where(tot > 0, off / np.where(tot > 0, tot, 1.0) * 100.0, 0.0)
+    return np.round(pct, casas) if casas is not None else pct
+
+
+# ── Parâmetros configuráveis (editáveis na aba Configuração) ──
+SLA_META = 90.0        # meta de SLA da operação (%)
+PESO_LPR = 3.0         # peso das câmeras LPR no SLA (LPR parada = dinheiro parado)
+LPR_KEYWORD = "LPR"    # como identificar uma câmera LPR (texto no nome)
+CFG_ATENCAO_PCT = 5.0  # limite superior de "Saudável" / início de "Atenção" (%)
+CFG_CRITICO_PCT = 10.0 # início de "Crítico" (%)
+CFG_ACIMA_HORAS = 24   # horas para contar como câmera offline "há muito tempo"
+# Pesos do score de criticidade (usado no Top 5 e ordenações)
+CFG_W_OFFLINE = 6.0
+CFG_W_PCT = 2.0
+CFG_W_HORAS_DIV = 12.0
+CFG_W_ACIMA = 8.0
+CFG_W_DIASCRIT = 5.0
+
+CONFIG_DEFAULTS = {
+    "SLA_META": 90.0, "PESO_LPR": 3.0, "LPR_KEYWORD": "LPR",
+    "CFG_ATENCAO_PCT": 5.0, "CFG_CRITICO_PCT": 10.0, "CFG_ACIMA_HORAS": 24,
+    "CFG_W_OFFLINE": 6.0, "CFG_W_PCT": 2.0, "CFG_W_HORAS_DIV": 12.0,
+    "CFG_W_ACIMA": 8.0, "CFG_W_DIASCRIT": 5.0,
+}
+CONFIG_PATH = os.path.join(BASE_DIR, "config_painel.json")
+
+
+def _config_atual() -> dict:
+    """Config vigente lida dos globais do módulo."""
+    g = globals()
+    return {k: g.get(k, v) for k, v in CONFIG_DEFAULTS.items()}
+
+
+def aplicar_config(cfg: dict) -> None:
+    """Aplica um dicionário de config aos globais do módulo (usado a cada rerun)."""
+    g = globals()
+    for k, default in CONFIG_DEFAULTS.items():
+        val = cfg.get(k, default)
+        try:
+            val = str(val) if isinstance(default, str) else type(default)(val)
+        except Exception:
+            val = default
+        g[k] = val
+
+
+def carregar_config() -> dict:
+    """Lê a config do arquivo JSON (se existir), completando com os padrões."""
+    cfg = dict(CONFIG_DEFAULTS)
+    try:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg.update({k: v for k, v in json.load(f).items() if k in CONFIG_DEFAULTS})
+    except Exception:
+        pass
+    return cfg
+
+
+def salvar_config(cfg: dict) -> bool:
+    """Persiste a config em JSON. Retorna True se gravou."""
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({k: cfg.get(k, d) for k, d in CONFIG_DEFAULTS.items()}, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def calcular_sla_operacao(df_origem, peso: float | None = None) -> dict:
+    """SLA ponderado: câmeras LPR (nome contém a palavra-chave) pesam `peso`× as comuns.
+
+    SLA = (LPR_no_ar*peso + comuns_no_ar) / (LPR_total*peso + comuns_total) * 100
+    """
+    peso = float(PESO_LPR if peso is None else peso)
+    base = {"sla": 0.0, "peso": peso, "lpr_total": 0, "lpr_online": 0, "lpr_off": 0,
+            "reg_total": 0, "reg_online": 0, "reg_off": 0}
+    if df_origem is None or getattr(df_origem, "empty", True):
+        return base
+    df = df_origem.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    if COL_NOME_CAM not in df.columns or COL_STATUS not in df.columns:
+        return base
+    nome = df[COL_NOME_CAM].astype(str)
+    status = df[COL_STATUS].astype(str).str.strip().str.upper()
+    is_lpr = nome.str.contains(LPR_KEYWORD, case=False, na=False).to_numpy()
+    is_off = status.eq("OFFLINE").to_numpy()
+    lpr_total = int(is_lpr.sum())
+    lpr_off = int((is_lpr & is_off).sum())
+    reg_total = int((~is_lpr).sum())
+    reg_off = int((~is_lpr & is_off).sum())
+    lpr_on = lpr_total - lpr_off
+    reg_on = reg_total - reg_off
+    denom = lpr_total * peso + reg_total
+    sla = ((lpr_on * peso + reg_on) / denom * 100.0) if denom else 0.0
+    return {"sla": round(float(sla), 1), "peso": peso,
+            "lpr_total": lpr_total, "lpr_online": lpr_on, "lpr_off": lpr_off,
+            "reg_total": reg_total, "reg_online": reg_on, "reg_off": reg_off}
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def kpi_historico_30d(dias: int = 30) -> pd.DataFrame:
+    """Série por snapshot dos KPIs simples (dos resumos por cliente): offline, disponibilidade, críticos."""
+    df = carregar_historico_clientes(dias)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = df.copy()
+    df["gravado_dt"] = pd.to_datetime(df["gravado_em"], errors="coerce")
+    df = df[df["gravado_dt"].notna()]
+    for c in ["offline", "total", "pct_offline"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    if df.empty:
+        return pd.DataFrame()
+    g = (df.groupby(["snapshot_id", "gravado_dt"], as_index=False)
+           .agg(offline=("offline", "sum"), total=("total", "sum")))
+    g["online"] = g["total"] - g["offline"]
+    g["disp"] = _pct_offline_vec(g["online"], g["total"])
+    g["pct_off"] = _pct_offline_vec(g["offline"], g["total"])
+    crit = (df.assign(_c=(df["pct_offline"] > CFG_CRITICO_PCT).astype(int))
+              .groupby("snapshot_id", as_index=False)["_c"].sum()
+              .rename(columns={"_c": "criticos"}))
+    g = g.merge(crit, on="snapshot_id", how="left")
+    return g.sort_values("gravado_dt").reset_index(drop=True)
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def sla_historico_30d(dias: int = 30, peso: float | None = None) -> pd.DataFrame:
+    """Série do SLA ponderado por snapshot (usa câmeras salvas do snapshot). On-demand."""
+    peso = float(PESO_LPR if peso is None else peso)
+    hist = carregar_historico_clientes(dias)
+    if hist is None or hist.empty:
+        return pd.DataFrame()
+    hist = hist.copy()
+    hist["gravado_dt"] = pd.to_datetime(hist["gravado_em"], errors="coerce")
+    hist = hist[hist["gravado_dt"].notna()]
+    datas = (hist.groupby("snapshot_id", as_index=False)["gravado_dt"].first())
+    linhas = []
+    for _, r in datas.iterrows():
+        sid = int(r["snapshot_id"])
+        cams = carregar_snapshot_cameras(sid)
+        if cams is None or cams.empty:
+            continue
+        nome = cams["nome_camera"].astype(str)
+        status = cams["status_camera"].astype(str).str.upper()
+        is_lpr = nome.str.contains(LPR_KEYWORD, case=False, na=False).to_numpy()
+        is_off = status.eq("OFFLINE").to_numpy()
+        lpr_t = int(is_lpr.sum()); lpr_o = int((is_lpr & is_off).sum())
+        reg_t = int((~is_lpr).sum()); reg_o = int((~is_lpr & is_off).sum())
+        denom = lpr_t * peso + reg_t
+        sla = (((lpr_t - lpr_o) * peso + (reg_t - reg_o)) / denom * 100.0) if denom else 0.0
+        linhas.append({"gravado_dt": r["gravado_dt"], "sla": round(float(sla), 1)})
+    if not linhas:
+        return pd.DataFrame()
+    return pd.DataFrame(linhas).sort_values("gravado_dt").reset_index(drop=True)
+
+
 def cor_hex(pct: float) -> str:
-    if pct <= 5:     return "#14b8a6"
-    elif pct <= 10: return "#f59e0b"
-    else:           return "#ef4444"
+    if pct <= CFG_ATENCAO_PCT:  return "#14b8a6"
+    elif pct <= CFG_CRITICO_PCT: return "#f59e0b"
+    else:                        return "#ef4444"
 
 def classe_card(pct: float):
     if pct <= 5:     return ("card-ok",    "count-ok",    "label-ok")
@@ -910,9 +1073,9 @@ def faixa_tempo_dias(horas: float) -> str:
 
 def status_cliente(pct: float, offline: int) -> str:
     if offline == 0: return "Sem offline"
-    if pct > 10:    return "Crítico (>10%)"
-    if pct > 5:     return "Atenção (5-10%)"
-    return "Saudável (0-5%)"
+    if pct > CFG_CRITICO_PCT:  return f"Crítico (>{CFG_CRITICO_PCT:g}%)"
+    if pct > CFG_ATENCAO_PCT:  return f"Atenção ({CFG_ATENCAO_PCT:g}-{CFG_CRITICO_PCT:g}%)"
+    return f"Saudável (0-{CFG_ATENCAO_PCT:g}%)"
 
 
 def escape_html(valor) -> str:
@@ -3245,7 +3408,7 @@ def montar_mapa_cidades(df: pd.DataFrame) -> tuple[go.Figure | None, str]:
         df_group["offline"] = df_group["offline"].fillna(0).astype(int)
         df_group["nome_empresa"] = df_group["nome_empresa"].fillna(df_group["nome_cliente"]) 
         # Recalcula Pct com segurança (0 quando total==0)
-        df_group["Pct"] = df_group.apply(lambda r: (r["offline"]/r["total"]*100) if r["total"] else 0.0, axis=1)
+        df_group["Pct"] = _pct_offline_vec(df_group["offline"], df_group["total"])
     
     # 3. DICIONÁRIO DE COORDENADAS FIXAS (Garante o carregamento mesmo se o Excel individual falhar)
     COORDENADAS_FIXAS = {
@@ -3814,22 +3977,33 @@ def montar_df_cameras_snapshot(df_origem: pd.DataFrame | None, dados: dict) -> p
     except Exception:
         cadastro_fmt = df_cam[COL_DATA_CAD].astype(str).fillna("")
 
-    rows = []
-    for idx_row, row in df_cam.iterrows():
-        wl = str(row.get(COL_WL, "")).strip()
-        info_cliente = dados.get(wl, {}) if isinstance(dados, dict) else {}
-        rows.append({
-            "wl_id": wl,
-            "nome_cliente": info_cliente.get("cidade_estado") or info_cliente.get("nome_cliente", f"ID {wl}"),
-            "nome_empresa": str(row.get(COL_EMPRESA, "") or info_cliente.get("nome_empresa", "")),
-            "id_camera": str(row.get(COL_ID_CAM, "")).strip(),
-            "nome_camera": str(row.get(COL_NOME_CAM, "") or ""),
-            "ultima_atualizacao": str(ultima_fmt.loc[idx_row] if idx_row in ultima_fmt.index else ""),
-            "data_cadastro": str(cadastro_fmt.loc[idx_row] if idx_row in cadastro_fmt.index else ""),
-            "status_camera": str(row.get(COL_STATUS, "") or "").upper(),
-        })
+    wl = df_cam[COL_WL].astype(str).str.strip()
 
-    df_out = pd.DataFrame(rows)
+    # Mapeamentos a partir de `dados` (evita lookup por linha).
+    d = dados or {}
+    mapa_cidade = {str(k): (v.get("cidade_estado") or v.get("nome_cliente", f"ID {k}")) for k, v in d.items()}
+    mapa_empresa = {str(k): str(v.get("nome_empresa", "") or "") for k, v in d.items()}
+
+    nome_cliente = wl.map(mapa_cidade)
+    nome_cliente = nome_cliente.where(nome_cliente.notna(), "ID " + wl)
+
+    empresa_col = df_cam[COL_EMPRESA].astype(str).replace({"nan": ""}).fillna("").str.strip()
+    empresa_fallback = wl.map(mapa_empresa).fillna("")
+    nome_empresa = empresa_col.where(empresa_col != "", empresa_fallback)
+
+    def _limpa(serie) -> pd.Series:
+        return serie.astype(str).replace({"nan": ""}).fillna("")
+
+    df_out = pd.DataFrame({
+        "wl_id": wl.to_numpy(),
+        "nome_cliente": nome_cliente.astype(str).to_numpy(),
+        "nome_empresa": nome_empresa.astype(str).to_numpy(),
+        "id_camera": df_cam[COL_ID_CAM].astype(str).str.strip().to_numpy(),
+        "nome_camera": _limpa(df_cam[COL_NOME_CAM]).to_numpy(),
+        "ultima_atualizacao": pd.Series(ultima_fmt).astype(str).replace({"nan": ""}).fillna("").to_numpy(),
+        "data_cadastro": pd.Series(cadastro_fmt).astype(str).replace({"nan": ""}).fillna("").to_numpy(),
+        "status_camera": _limpa(df_cam[COL_STATUS]).str.upper().to_numpy(),
+    })
     return df_out.drop_duplicates(subset=["wl_id", "id_camera"], keep="last").reset_index(drop=True)
 
 
@@ -4183,7 +4357,7 @@ def calcular_recorrencia(dias: int = 30) -> dict:
     rows = []
     for wl_id, grupo in df_hist.groupby("wl_id"):
         dias_off = grupo.loc[grupo["offline"] > 0, "dia"].nunique()
-        dias_crit = grupo.loc[grupo["pct_offline"] > 10, "dia"].nunique()
+        dias_crit = grupo.loc[grupo["pct_offline"] > CFG_CRITICO_PCT, "dia"].nunique()
         rows.append({
             "wl_id": wl_id,
             "dias_offline": int(dias_off),
@@ -4650,9 +4824,9 @@ def montar_df_clientes(dados: dict, tendencias: dict | None = None, delta_offs: 
             validos = v["offline"]["_tempo_off"][v["offline"]["_tempo_off"].dt.total_seconds() >= 0]
         max_h = validos.max().total_seconds() / 3600 if not validos.empty else -1
         media_h = validos.mean().total_seconds() / 3600 if not validos.empty else -1
-        acima_24h = int((validos.dt.total_seconds() >= 86400).sum()) if not validos.empty else 0
+        acima_24h = int((validos.dt.total_seconds() >= CFG_ACIMA_HORAS * 3600).sum()) if not validos.empty else 0
         rec = recorrencia.get(wl_id, {})
-        score = (offline * 6) + (pct * 2) + max(max_h, 0) / 12 + (acima_24h * 8) + (rec.get("dias_criticos", 0) * 5)
+        score = (offline * CFG_W_OFFLINE) + (pct * CFG_W_PCT) + max(max_h, 0) / CFG_W_HORAS_DIV + (acima_24h * CFG_W_ACIMA) + (rec.get("dias_criticos", 0) * CFG_W_DIASCRIT)
         rows.append({
             "ID": wl_id,
             "Cliente": v["nome_cliente"],
@@ -5845,7 +6019,7 @@ def _render_tendencia_por_cliente(df_hist: pd.DataFrame, dados: dict) -> None:
                 offline=("offline", "sum"), total=("total", "sum"),
                 gravado_dt=("gravado_dt", "last"),
             )
-            g["pct_offline"] = g.apply(lambda r: (r["offline"] / r["total"] * 100) if r["total"] else 0.0, axis=1)
+            g["pct_offline"] = _pct_offline_vec(g["offline"], g["total"])
             g["label"] = g["dia"].dt.strftime("%d/%m")
             return g.sort_values("gravado_dt").reset_index(drop=True)
         return s.reset_index(drop=True)
@@ -6072,10 +6246,7 @@ def _render_tendencia_por_franquia(df_hist: pd.DataFrame, dados: dict) -> None:
         .sort_values("gravado_dt")
         .reset_index(drop=True)
     )
-    agg["pct_offline"] = agg.apply(
-        lambda r: (float(r["offline"]) / float(r["total"]) * 100.0) if r["total"] else 0.0,
-        axis=1,
-    )
+    agg["pct_offline"] = _pct_offline_vec(agg["offline"], agg["total"])
 
     pct_atual = float(agg["pct_offline"].iloc[-1])
     pct_inicio = float(agg["pct_offline"].iloc[0])
@@ -6263,10 +6434,7 @@ def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
         .agg(Total=("Total", "sum"), Offline=("Offline", "sum"), Cidades=("ID", "nunique"))
     )
     grp["Online"] = grp["Total"] - grp["Offline"]
-    grp["Pct"] = grp.apply(
-        lambda r: round(r["Offline"] / r["Total"] * 100, 1) if r["Total"] else 0.0,
-        axis=1,
-    )
+    grp["Pct"] = _pct_offline_vec(grp["Offline"], grp["Total"], casas=1)
 
     # Só as franquias que têm ao menos uma câmera offline.
     grp_off = grp[grp["Offline"] > 0].copy()
@@ -6399,7 +6567,7 @@ def render_aba_padrao_quedas(dados: dict) -> None:
         st.info("São necessários pelo menos dois snapshots no período para medir quedas. Tente um período maior ou use a métrica de % offline médio.")
         return
 
-    agg["pct"] = agg.apply(lambda r: (r["offline"] / r["total"] * 100) if r["total"] else 0.0, axis=1)
+    agg["pct"] = _pct_offline_vec(agg["offline"], agg["total"])
     agg["weekday"] = agg["gravado_dt"].dt.dayofweek  # 0 = segunda
     agg["hour"] = agg["gravado_dt"].dt.hour
 
@@ -6697,8 +6865,223 @@ def _png_variacao_liquida(barras: tuple, titulo: str = "Variação líquida de o
         return None
 
 
+def _rgba(hexcor: str, a: float) -> str:
+    h = hexcor.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{a})"
+
+
+def _area_kpi_fig(x_dt, y, cor: str, sufixo: str = "", nome: str = "") -> "go.Figure":
+    y = list(y)
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=list(x_dt), y=y, mode="lines",
+        line=dict(color=cor, width=2.6, shape="spline", smoothing=0.6),
+        fill="tozeroy", fillcolor=_rgba(cor, 0.14),
+        hovertemplate="%{x|%d/%m %H:%M}<br><b>%{y}" + sufixo + "</b><extra></extra>",
+        name=nome,
+    ))
+    try:
+        fig.update_traces(fillgradient=dict(type="vertical",
+            colorscale=[[0.0, _rgba(cor, 0.02)], [1.0, _rgba(cor, 0.22)]]))
+    except Exception:
+        pass
+    if x_dt is not None and len(list(x_dt)):
+        fig.add_trace(go.Scatter(
+            x=[list(x_dt)[-1]], y=[y[-1]], mode="markers",
+            marker=dict(color=cor, size=9, line=dict(color="#ffffff", width=2)),
+            showlegend=False, hoverinfo="skip",
+        ))
+    fig.update_layout(
+        **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=260, margin=dict(l=10, r=16, t=10, b=30), showlegend=False,
+        xaxis=dict(tickformat="%d/%m", gridcolor="#F1E9FC", tickfont=dict(color="#B8A9CC", size=10), showline=False, zeroline=False),
+        yaxis=dict(ticksuffix=sufixo, gridcolor="#F1E9FC", tickfont=dict(color="#B8A9CC", size=10), rangemode="tozero"),
+    )
+    return fig
+
+
+def _kpi_stats_row(s, suf: str = "") -> None:
+    s = pd.to_numeric(pd.Series(s), errors="coerce").dropna()
+    if s.empty:
+        return
+    atual, media, pico, melhor = s.iloc[-1], s.mean(), s.max(), s.min()
+    slope = float(np.polyfit(np.arange(len(s)), s.to_numpy(dtype=float), 1)[0]) if len(s) >= 2 else 0.0
+    tend = "▲ subindo" if slope > 0.01 else ("▼ caindo" if slope < -0.01 else "estável")
+    fmt = (lambda v: f"{v:.1f}{suf}") if suf == "%" else (lambda v: f"{v:.0f}")
+    c = st.columns(5)
+    c[0].metric("Atual", fmt(atual))
+    c[1].metric("Média 30d", fmt(media))
+    c[2].metric("Pico", fmt(pico))
+    c[3].metric("Melhor", fmt(melhor))
+    c[4].metric("Tendência", tend)
+
+
+def _render_kpi_hist(sel: str) -> None:
+    cfg = {
+        "offline": ("offline", "Câmeras offline", "#e11d48", ""),
+        "disp": ("disp", "Disponibilidade GOV", "#0f766e", "%"),
+        "criticos": ("criticos", "Clientes críticos", "#f59e0b", ""),
+    }
+    st.markdown("---")
+    if sel == "sla":
+        with st.spinner("Calculando SLA dos últimos 30 dias..."):
+            g = sla_historico_30d(30)
+        if g is None or g.empty:
+            st.info("Sem histórico suficiente para o SLA de 30 dias (é preciso ter snapshots com câmeras salvas).")
+            return
+        st.markdown("#### 📈 SLA da Operação — últimos 30 dias")
+        fig = _area_kpi_fig(g["gravado_dt"], g["sla"], "#7C3AED", "%", "SLA")
+        fig.add_hline(y=SLA_META, line_dash="dash", line_color="#0f766e", line_width=1.4,
+                      annotation_text=f"Meta {SLA_META:.0f}%", annotation_position="top left",
+                      annotation_font=dict(color="#0f766e", size=11))
+        st.plotly_chart(fig, use_container_width=True, key="kpihist_sla")
+        _kpi_stats_row(g["sla"], "%")
+    elif sel in cfg:
+        col, label, cor, suf = cfg[sel]
+        g = kpi_historico_30d(30)
+        if g is None or g.empty:
+            st.info("Sem histórico suficiente nos últimos 30 dias.")
+            return
+        st.markdown(f"#### 📈 {label} — últimos 30 dias")
+        fig = _area_kpi_fig(g["gravado_dt"], g[col], cor, suf, label)
+        st.plotly_chart(fig, use_container_width=True, key=f"kpihist_{sel}")
+        _kpi_stats_row(g[col], suf)
+
+
+def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cameras: int, total_offline: int) -> None:
+    """Bloco de KPIs clicáveis (SLA ponderado + offline + disponibilidade + críticos) com histórico de 30 dias."""
+    sla = calcular_sla_operacao(df_origem)
+    total_online = int(total_cameras - total_offline)
+    disp = round(total_online / total_cameras * 100, 1) if total_cameras else 0.0
+    criticos = 0
+    if df_clientes_ops is not None and not df_clientes_ops.empty and "% Offline" in df_clientes_ops.columns:
+        criticos = int((pd.to_numeric(df_clientes_ops["% Offline"], errors="coerce") > CFG_CRITICO_PCT).sum())
+
+    metrics = [
+        ("sla", "SLA da Operação", f"{sla['sla']:.1f}%", "#7C3AED"),
+        ("offline", "Câmeras offline", f"{total_offline}", "#e11d48"),
+        ("disp", "Disponibilidade GOV", f"{disp:.1f}%", "#0f766e"),
+        ("criticos", "Clientes críticos", f"{criticos}", "#f59e0b"),
+    ]
+    cols = st.columns(4)
+    for (mkey, label, val, cor), c in zip(metrics, cols):
+        with c:
+            extra = ""
+            if mkey == "sla":
+                denom = sla["lpr_total"] * sla["peso"] + sla["reg_total"]
+                w_lpr = (sla["lpr_online"] * sla["peso"] / denom * 100) if denom else 0
+                w_reg = (sla["reg_online"] / denom * 100) if denom else 0
+                dentro = sla["sla"] >= SLA_META
+                meta_cor = "#0f766e" if dentro else "#e11d48"
+                extra = (
+                    f"<div style='font-size:10px;margin-top:4px;color:{meta_cor};font-weight:700'>"
+                    f"meta {SLA_META:.0f}% · {'dentro' if dentro else 'abaixo'}</div>"
+                    f"<div style='display:flex;height:6px;background:#F1ECFA;border-radius:99px;margin-top:8px;overflow:hidden'>"
+                    f"<div style='width:{w_lpr:.2f}%;background:linear-gradient(90deg,#7c3aed,#22d3ee)'></div>"
+                    f"<div style='width:{w_reg:.2f}%;background:#c9bcea'></div></div>"
+                    f"<div style='font-size:9px;color:#9A92AD;margin-top:5px'>"
+                    f"LPR {sla['lpr_online']}/{sla['lpr_total']} (peso {sla['peso']:.0f}×) · comuns {sla['reg_online']}/{sla['reg_total']}</div>"
+                )
+            st.markdown(
+                f"<div style=\"background:#fff;border:1px solid #ECE8F5;border-radius:16px;padding:14px 16px;"
+                f"box-shadow:0 6px 20px rgba(23,17,38,.05)\">"
+                f"<div style=\"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9A92AD\">{label}</div>"
+                f"<div style=\"font-family:'DM Mono',monospace;font-size:30px;font-weight:600;color:{cor};letter-spacing:-1px;margin-top:6px\">{val}</div>"
+                f"{extra}</div>",
+                unsafe_allow_html=True,
+            )
+            if st.button("📈 Últimos 30 dias", key=f"kpi30_{mkey}", use_container_width=True):
+                atual = st.session_state.get("kpi_hist_sel")
+                st.session_state["kpi_hist_sel"] = None if atual == mkey else mkey
+
+    sel = st.session_state.get("kpi_hist_sel")
+    if sel:
+        _render_kpi_hist(sel)
+
+
+def render_aba_configuracao() -> None:
+    st.markdown("### ⚙️ Configuração")
+    st.caption("Parâmetros do painel. As alterações são salvas em arquivo e aplicadas a todos os cálculos (SLA, faixas de status, score de criticidade).")
+
+    cfg = _config_atual()
+
+    st.markdown("#### 🎯 SLA da Operação")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        v_meta = st.number_input("Meta de SLA (%)", min_value=50.0, max_value=100.0,
+                                 value=float(cfg["SLA_META"]), step=0.5, key="cfg_sla_meta")
+    with c2:
+        v_peso = st.number_input("Peso da câmera LPR (×)", min_value=1.0, max_value=20.0,
+                                 value=float(cfg["PESO_LPR"]), step=0.5, key="cfg_peso_lpr",
+                                 help="Quanto uma LPR pesa em relação a uma câmera comum no SLA.")
+    with c3:
+        v_kw = st.text_input("Palavra-chave da LPR (no nome)", value=str(cfg["LPR_KEYWORD"]), key="cfg_lpr_kw")
+
+    st.markdown("#### 🚦 Faixas de status (% offline)")
+    c4, c5 = st.columns(2)
+    with c4:
+        v_at = st.number_input("Limite Saudável → Atenção (%)", min_value=0.0, max_value=100.0,
+                               value=float(cfg["CFG_ATENCAO_PCT"]), step=0.5, key="cfg_atencao")
+    with c5:
+        v_cr = st.number_input("Limite Atenção → Crítico (%)", min_value=0.0, max_value=100.0,
+                               value=float(cfg["CFG_CRITICO_PCT"]), step=0.5, key="cfg_critico")
+    if v_cr <= v_at:
+        st.warning("O limite de Crítico deve ser maior que o de Atenção.")
+
+    st.markdown("#### ⏱️ Operacional")
+    v_horas = st.number_input("Horas para considerar offline 'há muito tempo'", min_value=1, max_value=240,
+                              value=int(cfg["CFG_ACIMA_HORAS"]), step=1, key="cfg_horas",
+                              help="Usado na contagem 'Acima 24h' e no score de criticidade.")
+
+    with st.expander("🧮 Pesos do score de criticidade (avançado)"):
+        st.caption("Score = offline×A + %offline×B + horas_offline/C + acima_limite×D + dias_críticos×E")
+        w1, w2, w3, w4, w5 = st.columns(5)
+        v_wo = w1.number_input("A · nº offline", 0.0, 50.0, float(cfg["CFG_W_OFFLINE"]), 0.5, key="cfg_wo")
+        v_wp = w2.number_input("B · % offline", 0.0, 50.0, float(cfg["CFG_W_PCT"]), 0.5, key="cfg_wp")
+        v_wh = w3.number_input("C · divisor horas", 1.0, 100.0, float(cfg["CFG_W_HORAS_DIV"]), 1.0, key="cfg_wh")
+        v_wa = w4.number_input("D · acima do limite", 0.0, 50.0, float(cfg["CFG_W_ACIMA"]), 0.5, key="cfg_wa")
+        v_wd = w5.number_input("E · dias críticos", 0.0, 50.0, float(cfg["CFG_W_DIASCRIT"]), 0.5, key="cfg_wd")
+
+    nova = {
+        "SLA_META": v_meta, "PESO_LPR": v_peso, "LPR_KEYWORD": (v_kw or "LPR").strip() or "LPR",
+        "CFG_ATENCAO_PCT": v_at, "CFG_CRITICO_PCT": v_cr, "CFG_ACIMA_HORAS": int(v_horas),
+        "CFG_W_OFFLINE": v_wo, "CFG_W_PCT": v_wp, "CFG_W_HORAS_DIV": v_wh,
+        "CFG_W_ACIMA": v_wa, "CFG_W_DIASCRIT": v_wd,
+    }
+
+    st.markdown("")
+    b1, b2 = st.columns([1, 1])
+    with b1:
+        if st.button("💾 Salvar configurações", type="primary", use_container_width=True, key="cfg_salvar"):
+            ok = salvar_config(nova)
+            st.session_state["config"] = nova
+            aplicar_config(nova)
+            st.cache_data.clear()
+            if ok:
+                st.success("Configurações salvas e aplicadas.")
+            else:
+                st.warning("Aplicado nesta sessão, mas não foi possível gravar o arquivo (ambiente somente leitura). Os valores voltam ao padrão ao reiniciar.")
+            st.rerun()
+    with b2:
+        if st.button("↩️ Restaurar padrões", use_container_width=True, key="cfg_reset"):
+            salvar_config(dict(CONFIG_DEFAULTS))
+            st.session_state["config"] = dict(CONFIG_DEFAULTS)
+            aplicar_config(dict(CONFIG_DEFAULTS))
+            st.cache_data.clear()
+            st.rerun()
+
+    st.caption(f"Arquivo de configuração: `{CONFIG_PATH}`")
+
+
 def main():
     init_db()
+
+    # Aplica a configuração persistida (uma vez por sessão) aos parâmetros do painel.
+    if "config" not in st.session_state:
+        st.session_state["config"] = carregar_config()
+    aplicar_config(st.session_state["config"])
 
     # ── Carregar dados: tenta pasta, fallback para upload ──
     dados, erro, df_origem = carregar_dados(PASTA)
@@ -7057,7 +7440,7 @@ def main():
     abas_principais = ["Auditoria", "Clientes"]
     if MOSTRAR_CENTRAL_ACOES:
         abas_principais.append("Central de Ações")
-    abas_principais += ["Evidências", "Atualizar Base"]
+    abas_principais += ["Evidências", "Atualizar Base", "Configuração"]
     tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
     with tabs["Auditoria"]:
@@ -7537,6 +7920,9 @@ def main():
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
             if "detalhe" not in st.session_state:
+                # Resumo operacional: KPIs clicáveis (SLA ponderado + histórico 30 dias).
+                render_resumo_operacional(dados, df_origem, df_clientes_ops, total_cameras, total_offline)
+                st.markdown("")
                 # Filtros vetorizados.
                 # Agora a aba renderiza todos os clientes do recorte na mesma tela, sem paginação.
                 df_clientes_view = df_clientes_ops.copy()
@@ -8957,6 +9343,9 @@ def main():
     # ════════════════════════════════════════════
     with tabs["Atualizar Base"]:
         render_aba_atualizar_base(df_origem)
+
+    with tabs["Configuração"]:
+        render_aba_configuracao()
 
 if __name__ == "__main__":
     main()
