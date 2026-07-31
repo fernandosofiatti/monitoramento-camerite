@@ -909,10 +909,12 @@ def salvar_config(cfg: dict) -> bool:
         return False
 
 
-def calcular_sla_operacao(df_origem, peso: float | None = None) -> dict:
+def calcular_sla_operacao(df_origem, peso: float | None = None, wl_validos=None) -> dict:
     """SLA ponderado: câmeras LPR (nome contém a palavra-chave) pesam `peso`× as comuns.
 
     SLA = (LPR_no_ar*peso + comuns_no_ar) / (LPR_total*peso + comuns_total) * 100
+    Se `wl_validos` for informado, considera só as câmeras desses clientes (mesmo
+    universo do painel), evitando contar câmeras fora do recorte.
     """
     peso = float(PESO_LPR if peso is None else peso)
     base = {"sla": 0.0, "peso": peso, "lpr_total": 0, "lpr_online": 0, "lpr_off": 0,
@@ -923,6 +925,12 @@ def calcular_sla_operacao(df_origem, peso: float | None = None) -> dict:
     df.columns = [str(c).strip() for c in df.columns]
     if COL_NOME_CAM not in df.columns or COL_STATUS not in df.columns:
         return base
+    # Restringe ao universo de clientes do painel (se informado).
+    if wl_validos and COL_WL in df.columns:
+        validos = {str(x).strip() for x in wl_validos if str(x).strip()}
+        df = df[df[COL_WL].astype(str).str.strip().isin(validos)]
+        if df.empty:
+            return base
     nome = df[COL_NOME_CAM].astype(str)
     status = df[COL_STATUS].astype(str).str.strip().str.upper()
     is_lpr = nome.str.contains(LPR_KEYWORD, case=False, na=False).to_numpy()
@@ -940,7 +948,7 @@ def calcular_sla_operacao(df_origem, peso: float | None = None) -> dict:
             "reg_total": reg_total, "reg_online": reg_on, "reg_off": reg_off}
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def kpi_historico_30d(dias: int = 30) -> pd.DataFrame:
     """Série por snapshot dos KPIs simples (dos resumos por cliente): offline, disponibilidade, críticos."""
     df = carregar_historico_clientes(dias)
@@ -965,9 +973,13 @@ def kpi_historico_30d(dias: int = 30) -> pd.DataFrame:
     return g.sort_values("gravado_dt").reset_index(drop=True)
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def sla_historico_30d(dias: int = 30, peso: float | None = None) -> pd.DataFrame:
-    """Série do SLA ponderado por snapshot (usa câmeras salvas do snapshot). On-demand."""
+    """Série do SLA ponderado por snapshot.
+
+    Faz UMA consulta trazendo só (snapshot_id, nome_camera, status_camera) de todos
+    os snapshots do período e agrega vetorizado — bem mais rápido que 1 consulta por snapshot.
+    """
     peso = float(PESO_LPR if peso is None else peso)
     hist = carregar_historico_clientes(dias)
     if hist is None or hist.empty:
@@ -975,25 +987,46 @@ def sla_historico_30d(dias: int = 30, peso: float | None = None) -> pd.DataFrame
     hist = hist.copy()
     hist["gravado_dt"] = pd.to_datetime(hist["gravado_em"], errors="coerce")
     hist = hist[hist["gravado_dt"].notna()]
-    datas = (hist.groupby("snapshot_id", as_index=False)["gravado_dt"].first())
-    linhas = []
-    for _, r in datas.iterrows():
-        sid = int(r["snapshot_id"])
-        cams = carregar_snapshot_cameras(sid)
-        if cams is None or cams.empty:
-            continue
-        nome = cams["nome_camera"].astype(str)
-        status = cams["status_camera"].astype(str).str.upper()
-        is_lpr = nome.str.contains(LPR_KEYWORD, case=False, na=False).to_numpy()
-        is_off = status.eq("OFFLINE").to_numpy()
-        lpr_t = int(is_lpr.sum()); lpr_o = int((is_lpr & is_off).sum())
-        reg_t = int((~is_lpr).sum()); reg_o = int((~is_lpr & is_off).sum())
-        denom = lpr_t * peso + reg_t
-        sla = (((lpr_t - lpr_o) * peso + (reg_t - reg_o)) / denom * 100.0) if denom else 0.0
-        linhas.append({"gravado_dt": r["gravado_dt"], "sla": round(float(sla), 1)})
-    if not linhas:
+    if hist.empty:
         return pd.DataFrame()
-    return pd.DataFrame(linhas).sort_values("gravado_dt").reset_index(drop=True)
+    datas = hist.groupby("snapshot_id", as_index=False)["gravado_dt"].first()
+    ids = [int(s) for s in datas["snapshot_id"].tolist()]
+    if not ids:
+        return pd.DataFrame()
+
+    # Uma única consulta (só as colunas necessárias) para todos os snapshots do período.
+    ids_str = ",".join(str(i) for i in ids)
+    df, erro = _supabase_select_all(
+        SNAPSHOT_TABLE,
+        params={"select": "snapshot_id,nome_camera,status_camera", "snapshot_id": f"in.({ids_str})"},
+        page_size=5000,
+    )
+    if erro or df is None or df.empty:
+        return pd.DataFrame()
+
+    nome = df["nome_camera"].astype(str)
+    status = df["status_camera"].astype(str).str.upper()
+    df["_lpr"] = nome.str.contains(LPR_KEYWORD, case=False, na=False)
+    df["_off"] = status.eq("OFFLINE")
+    # Agregação vetorizada por snapshot.
+    df["_lpr_off"] = df["_lpr"] & df["_off"]
+    df["_reg"] = ~df["_lpr"]
+    df["_reg_off"] = df["_reg"] & df["_off"]
+    ga = df.groupby("snapshot_id").agg(
+        lpr_t=("_lpr", "sum"), lpr_off=("_lpr_off", "sum"),
+        reg_t=("_reg", "sum"), reg_off=("_reg_off", "sum"),
+    )
+    lpr_on = ga["lpr_t"] - ga["lpr_off"]
+    reg_on = ga["reg_t"] - ga["reg_off"]
+    denom = ga["lpr_t"] * peso + ga["reg_t"]
+    ga["sla"] = np.where(denom > 0, (lpr_on * peso + reg_on) / np.where(denom > 0, denom, 1) * 100.0, 0.0).round(1)
+
+    mapa_data = dict(zip(datas["snapshot_id"].astype(int), datas["gravado_dt"]))
+    ga = ga.reset_index()
+    ga["snapshot_id"] = ga["snapshot_id"].astype(int)
+    ga["gravado_dt"] = ga["snapshot_id"].map(mapa_data)
+    out = ga[["gravado_dt", "sla"]].dropna(subset=["gravado_dt"]).sort_values("gravado_dt").reset_index(drop=True)
+    return out
 
 
 def cor_hex(pct: float) -> str:
@@ -4280,7 +4313,7 @@ def salvar_snapshot_automatico(
     return salvar_snapshot(label, notas, dados, df_origem)
 
 
-@st.cache_data(ttl=120)
+@st.cache_data(ttl=600)
 def carregar_historico_clientes(dias: int = 30) -> pd.DataFrame:
     limite = agora_sao_paulo() - timedelta(days=dias)
     df_snaps = listar_snapshots()
@@ -6988,7 +7021,7 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
 
     Em st.fragment: clicar em "Últimos 30 dias" rerroda só este bloco (rápido), não o app inteiro.
     """
-    sla = calcular_sla_operacao(df_origem)
+    sla = calcular_sla_operacao(df_origem, wl_validos=set(dados.keys()) if dados else None)
     total_online = int(total_cameras - total_offline)
     disp = round(total_online / total_cameras * 100, 1) if total_cameras else 0.0
     n_clientes = int(len(df_clientes_ops)) if df_clientes_ops is not None else 0
