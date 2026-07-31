@@ -598,7 +598,13 @@ html, body, [data-testid="stAppViewContainer"] { background-color: #F4F2F8 !impo
 [data-testid="stSidebar"] { border-right: 1px solid #ECE8F5 !important; }
 
 /* ── Abas em pill branca; ativa preta (#171126) ── */
-[data-testid="stTabs"] [role="tablist"] { border-bottom: none !important; gap: 8px !important; flex-wrap: wrap !important; }
+[data-testid="stTabs"] [role="tablist"] {
+    border-bottom: none !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+    margin-bottom: 16px !important;
+    padding-bottom: 4px !important;
+}
 [data-testid="stTabs"] [role="tab"] {
     background: #ffffff !important;
     border: 1px solid #E6E2F0 !important;
