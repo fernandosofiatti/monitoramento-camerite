@@ -611,10 +611,10 @@ html, body, [data-testid="stAppViewContainer"] { background-color: #F4F2F8 !impo
 }
 [data-testid="stTabs"] [role="tab"]:hover { border-color: #C9BEEC !important; color: #6D28D9 !important; }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    background: #171126 !important;
-    border-color: #171126 !important;
+    background: #7C3AED !important;
+    border-color: #7C3AED !important;
     color: #ffffff !important;
-    box-shadow: 0 6px 16px rgba(23,17,38,.18) !important;
+    box-shadow: 0 6px 16px rgba(124,58,237,.30) !important;
 }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"] * {
     color: #ffffff !important; -webkit-text-fill-color: #ffffff !important;
@@ -6950,8 +6950,12 @@ def _render_kpi_hist(sel: str) -> None:
         _kpi_stats_row(g[col], suf)
 
 
+@st.fragment
 def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cameras: int, total_offline: int) -> None:
-    """Bloco de KPIs clicáveis (SLA ponderado + offline + disponibilidade + críticos) com histórico de 30 dias."""
+    """Bloco de KPIs clicáveis (SLA ponderado + offline + disponibilidade + críticos) com histórico de 30 dias.
+
+    Em st.fragment: clicar em "Últimos 30 dias" rerroda só este bloco (rápido), não o app inteiro.
+    """
     sla = calcular_sla_operacao(df_origem)
     total_online = int(total_cameras - total_offline)
     disp = round(total_online / total_cameras * 100, 1) if total_cameras else 0.0
@@ -6986,7 +6990,7 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
                 )
             st.markdown(
                 f"<div style=\"background:#fff;border:1px solid #ECE8F5;border-radius:16px;padding:14px 16px;"
-                f"box-shadow:0 6px 20px rgba(23,17,38,.05)\">"
+                f"box-shadow:0 6px 20px rgba(23,17,38,.05);min-height:158px;display:flex;flex-direction:column\">"
                 f"<div style=\"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9A92AD\">{label}</div>"
                 f"<div style=\"font-family:'DM Mono',monospace;font-size:30px;font-weight:600;color:{cor};letter-spacing:-1px;margin-top:6px\">{val}</div>"
                 f"{extra}</div>",
