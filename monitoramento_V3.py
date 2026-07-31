@@ -6950,6 +6950,38 @@ def _render_kpi_hist(sel: str) -> None:
         _kpi_stats_row(g[col], suf)
 
 
+def _sparkline_svg(vals, cor: str, w: int = 118, h: int = 32) -> str:
+    v = [float(x) for x in vals if x is not None and not pd.isna(x)]
+    if len(v) < 2:
+        return ""
+    lo, hi = min(v), max(v)
+    rng = (hi - lo) or 1.0
+    n = len(v)
+    pts = [f"{i/(n-1)*w:.1f},{h-3-((val-lo)/rng)*(h-6):.1f}" for i, val in enumerate(v)]
+    lastx, lasty = pts[-1].split(",")
+    return (f"<svg width='{w}' height='{h}' viewBox='0 0 {w} {h}' style='display:block;margin-top:6px'>"
+            f"<polyline fill='none' stroke='{cor}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' points='{' '.join(pts)}'/>"
+            f"<circle cx='{lastx}' cy='{lasty}' r='2.8' fill='{cor}'/></svg>")
+
+
+def _chip_delta(delta, good_is_up: bool, suf: str = "") -> str:
+    if delta is None or pd.isna(delta):
+        return ""
+    lim = 0.05 if suf == "%" else 0.5
+    if abs(delta) < lim:
+        return ("<span style='display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;"
+                "padding:3px 9px;border-radius:99px;background:#F1ECFA;color:#7c6a91;margin-top:8px'>estável</span>")
+    up = delta > 0
+    good = (up == good_is_up)
+    cor = "#0f766e" if good else "#e11d48"
+    bg = "#EAFBF6" if good else "#FDECEF"
+    arrow = "▲" if up else "▼"
+    txt = (f"{'+' if up else ''}{delta:.1f}{suf}") if suf == "%" else (f"{'+' if up else ''}{int(delta)}")
+    return (f"<span style='display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;"
+            f"padding:3px 9px;border-radius:99px;background:{bg};color:{cor};margin-top:8px'>{arrow} {txt} "
+            f"<span style='color:#B8A9CC;font-weight:600'>vs ant.</span></span>")
+
+
 @st.fragment
 def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cameras: int, total_offline: int) -> None:
     """Bloco de KPIs clicáveis (SLA ponderado + offline + disponibilidade + críticos) com histórico de 30 dias.
@@ -6959,41 +6991,73 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
     sla = calcular_sla_operacao(df_origem)
     total_online = int(total_cameras - total_offline)
     disp = round(total_online / total_cameras * 100, 1) if total_cameras else 0.0
+    n_clientes = int(len(df_clientes_ops)) if df_clientes_ops is not None else 0
     criticos = 0
     if df_clientes_ops is not None and not df_clientes_ops.empty and "% Offline" in df_clientes_ops.columns:
         criticos = int((pd.to_numeric(df_clientes_ops["% Offline"], errors="coerce") > CFG_CRITICO_PCT).sum())
+    pct_frota = round(total_offline / total_cameras * 100, 1) if total_cameras else 0.0
 
+    # Histórico (cacheado, barato) para sparkline + variação dos 3 KPIs simples.
+    hist = kpi_historico_30d(30)
+
+    def _serie(col):
+        if hist is None or hist.empty or col not in hist.columns:
+            return [], None
+        s = pd.to_numeric(hist[col], errors="coerce").dropna().tolist()
+        delta = (s[-1] - s[-2]) if len(s) >= 2 else None
+        return s, delta
+
+    s_off, d_off = _serie("offline")
+    s_disp, d_disp = _serie("disp")
+    s_crit, d_crit = _serie("criticos")
+
+    # (chave, rótulo, valor, cor, ícone, subtexto, série, delta, good_is_up, sufixo)
     metrics = [
-        ("sla", "SLA da Operação", f"{sla['sla']:.1f}%", "#7C3AED"),
-        ("offline", "Câmeras offline", f"{total_offline}", "#e11d48"),
-        ("disp", "Disponibilidade GOV", f"{disp:.1f}%", "#0f766e"),
-        ("criticos", "Clientes críticos", f"{criticos}", "#f59e0b"),
+        ("sla", "SLA da Operação", f"{sla['sla']:.1f}%", "#7C3AED", "🎯", None, None, None, None, ""),
+        ("offline", "Câmeras offline", f"{total_offline}", "#e11d48", "📴",
+         f"{pct_frota:.1f}% da frota", s_off, d_off, False, ""),
+        ("disp", "Disponibilidade GOV", f"{disp:.1f}%", "#0f766e", "📶",
+         f"{total_online} de {total_cameras} online", s_disp, d_disp, True, "%"),
+        ("criticos", "Clientes críticos", f"{criticos}", "#f59e0b", "🔥",
+         f"de {n_clientes} clientes monitorados", s_crit, d_crit, False, ""),
     ]
+
     cols = st.columns(4)
-    for (mkey, label, val, cor), c in zip(metrics, cols):
+    for m, c in zip(metrics, cols):
+        mkey, label, val, cor, icone, sub, serie, delta, good_up, suf = m
         with c:
-            extra = ""
             if mkey == "sla":
                 denom = sla["lpr_total"] * sla["peso"] + sla["reg_total"]
                 w_lpr = (sla["lpr_online"] * sla["peso"] / denom * 100) if denom else 0
                 w_reg = (sla["reg_online"] / denom * 100) if denom else 0
                 dentro = sla["sla"] >= SLA_META
                 meta_cor = "#0f766e" if dentro else "#e11d48"
-                extra = (
-                    f"<div style='font-size:10px;margin-top:4px;color:{meta_cor};font-weight:700'>"
+                corpo = (
+                    f"<div style='font-size:10px;margin-top:8px;color:{meta_cor};font-weight:700'>"
                     f"meta {SLA_META:.0f}% · {'dentro' if dentro else 'abaixo'}</div>"
-                    f"<div style='display:flex;height:6px;background:#F1ECFA;border-radius:99px;margin-top:8px;overflow:hidden'>"
+                    f"<div style='display:flex;height:7px;background:#F1ECFA;border-radius:99px;margin-top:8px;overflow:hidden'>"
                     f"<div style='width:{w_lpr:.2f}%;background:linear-gradient(90deg,#7c3aed,#22d3ee)'></div>"
                     f"<div style='width:{w_reg:.2f}%;background:#c9bcea'></div></div>"
-                    f"<div style='font-size:9px;color:#9A92AD;margin-top:5px'>"
+                    f"<div style='font-size:9px;color:#9A92AD;margin-top:auto;padding-top:8px'>"
                     f"LPR {sla['lpr_online']}/{sla['lpr_total']} (peso {sla['peso']:.0f}×) · comuns {sla['reg_online']}/{sla['reg_total']}</div>"
                 )
+            else:
+                chip = _chip_delta(delta, good_up, suf)
+                spark = _sparkline_svg(serie, cor)
+                corpo = (
+                    f"{chip}"
+                    f"<div style='margin-top:auto'>{spark}"
+                    f"<div style='font-size:10px;color:#9A92AD;margin-top:4px'>{sub}</div></div>"
+                )
             st.markdown(
-                f"<div style=\"background:#fff;border:1px solid #ECE8F5;border-radius:16px;padding:14px 16px;"
-                f"box-shadow:0 6px 20px rgba(23,17,38,.05);min-height:158px;display:flex;flex-direction:column\">"
-                f"<div style=\"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9A92AD\">{label}</div>"
+                f"<div style=\"background:#fff;border:1px solid #ECE8F5;border-top:3px solid {cor};"
+                f"border-radius:16px;padding:14px 16px;box-shadow:0 6px 20px rgba(23,17,38,.05);"
+                f"min-height:172px;display:flex;flex-direction:column\">"
+                f"<div style=\"display:flex;align-items:center;justify-content:space-between\">"
+                f"<span style=\"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9A92AD\">{label}</span>"
+                f"<span style=\"font-size:15px;opacity:.9\">{icone}</span></div>"
                 f"<div style=\"font-family:'DM Mono',monospace;font-size:30px;font-weight:600;color:{cor};letter-spacing:-1px;margin-top:6px\">{val}</div>"
-                f"{extra}</div>",
+                f"{corpo}</div>",
                 unsafe_allow_html=True,
             )
             if st.button("📈 Últimos 30 dias", key=f"kpi30_{mkey}", use_container_width=True):
