@@ -7061,7 +7061,7 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
             st.markdown(
                 f"<div style=\"background:#fff;border:1px solid #ECE8F5;border-top:3px solid {cor};"
                 f"border-radius:16px;padding:14px 16px;box-shadow:0 6px 20px rgba(23,17,38,.05);"
-                f"min-height:172px;display:flex;flex-direction:column\">"
+                f"height:210px;display:flex;flex-direction:column;overflow:hidden\">"
                 f"<div style=\"display:flex;align-items:center;justify-content:space-between\">"
                 f"<span style=\"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9A92AD\">{label}</span>"
                 f"<span style=\"font-size:15px;opacity:.9\">{icone}</span></div>"
