@@ -511,11 +511,3 @@ def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) ->
     return calcular_saude_dataframe(None, clientes_map, "Arquivo local")
 
 
-# ─────────────────────────────────────────────
-# SNAPSHOTS ONLINE - SUPABASE
-# ─────────────────────────────────────────────
-SNAPSHOT_TABLE = os.getenv("SUPABASE_SNAPSHOT_TABLE", "snapshot_cameras")
-SNAPSHOT_MASTER_TABLE = os.getenv("SUPABASE_SNAPSHOT_MASTER_TABLE", "snapshots")
-SNAPSHOT_CLIENTES_TABLE = os.getenv("SUPABASE_SNAPSHOT_CLIENTES_TABLE", "snapshot_clientes")
-
-

@@ -113,6 +113,11 @@ COL_DATA_INAT  = "Data_de_Inativacao"
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "cameras_origem")
 SUPABASE_PAGE_SIZE = 1000
 
+# Snapshots online (Supabase)
+SNAPSHOT_TABLE = os.getenv("SUPABASE_SNAPSHOT_TABLE", "snapshot_cameras")
+SNAPSHOT_MASTER_TABLE = os.getenv("SUPABASE_SNAPSHOT_MASTER_TABLE", "snapshots")
+SNAPSHOT_CLIENTES_TABLE = os.getenv("SUPABASE_SNAPSHOT_CLIENTES_TABLE", "snapshot_clientes")
+
 FAIXAS_TEMPO = [
     "Todas",
     "Menos de 1h",
