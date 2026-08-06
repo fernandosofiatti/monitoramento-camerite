@@ -1,0 +1,35 @@
+# === Backups de código e config (não versionar) ===
+backups/
+.streamlit/config_backup_*.toml
+*_backup_*.py
+*_BKP*.py
+
+# === Dados de importação / staging (mantidos apenas localmente) ===
+_BKPS_importacao_individual/
+csv_clientes/
+GOV_extracao_cameras.csv
+GOV_extracao_cameras*.csv
+
+# === Banco e caches gerados em runtime ===
+historico.db
+*.db
+geocode_cache.json
+
+# Observação: nome_clientes.xlsx e brazil_states.geojson
+# permanecem versionados por serem dependências de runtime.
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# === Ferramentas / SO ===
+.streamlit/secrets.toml
+.env
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
