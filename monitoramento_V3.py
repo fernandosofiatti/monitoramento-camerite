@@ -313,10 +313,6 @@ def status_cliente(pct: float, offline: int) -> str:
     return f"Saudável (0-{CFG_ATENCAO_PCT:g}%)"
 
 
-def escape_html(valor) -> str:
-    return html.escape(str(valor or ""), quote=True)
-
-
 def classificar_auditoria(pct_global: float, n_critico: int, n_atencao: int, saude: dict) -> tuple[str, str, str]:
     if saude.get("colunas_faltando"):
         return "Bloqueado", "#dc2626", "Colunas obrigatórias ausentes"
@@ -359,6 +355,7 @@ def recomendacao_auditoria(n_critico: int, n_atencao: int, saude: dict) -> tuple
 # ─────────────────────────────────────────────
 # HELPERS SUPABASE / BD ONLINE  → movidos para src/db/supabase.py
 # ─────────────────────────────────────────────
+from src.ui.helpers import escape_html, _rgba, tabela_clara, render_dataframe
 from src.db.supabase import (
     get_secret_value,
     supabase_configurado,
@@ -3150,46 +3147,7 @@ def pdefaults() -> dict:
 # ─────────────────────────────────────────────
 # RENDER CARD DE CLIENTE
 # ─────────────────────────────────────────────
-def tabela_clara(df: pd.DataFrame):
-    return (
-        df.style
-        .set_properties(**{
-            "background-color": "#ffffff",
-            "color": "#171126",
-            "border-color": "#F5F3FF",
-        })
-        .set_table_styles([
-            {
-                "selector": "thead th",
-                "props": [
-                    ("background-color", "#F3E8FF"),
-                    ("color", "#6D28D9"),
-                    ("border-color", "#E9D5FF"),
-                    ("font-weight", "700"),
-                ],
-            },
-            {
-                "selector": "tbody th",
-                "props": [
-                    ("background-color", "#FAF7FF"),
-                    ("color", "#6B5A7A"),
-                    ("border-color", "#F5F3FF"),
-                ],
-            },
-            {
-                "selector": "td",
-                "props": [
-                    ("background-color", "#ffffff"),
-                    ("color", "#171126"),
-                    ("border-color", "#F5F3FF"),
-                ],
-            },
-        ])
-    )
-
-
-def render_dataframe(df: pd.DataFrame, height: int):
-    st.dataframe(tabela_clara(df), use_container_width=True, height=height, key=f"df_{uuid.uuid4().hex}")
+# escape_html / _rgba / tabela_clara / render_dataframe movidos para src/ui/helpers.py
 
 
 def render_card(col, wl_id, v, tendencia, delta_off):
@@ -5118,10 +5076,7 @@ def _png_variacao_liquida(barras: tuple, titulo: str = "Variação líquida de o
         return None
 
 
-def _rgba(hexcor: str, a: float) -> str:
-    h = hexcor.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{a})"
+# _rgba movido para src/ui/helpers.py
 
 
 def _area_kpi_fig(x_dt, y, cor: str, sufixo: str = "", nome: str = "") -> "go.Figure":
