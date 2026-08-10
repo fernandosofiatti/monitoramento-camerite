@@ -380,14 +380,7 @@ from src.db.supabase import (
 )
 
 
-# Central de Ações → movida para src/ui/acoes.py
-from src.ui.acoes import (
-    carregar_acoes_cliente,
-    salvar_acao_cliente,
-    atualizar_status_acao,
-    criar_tabela_acoes_se_nao_existir,
-    render_central_acoes,
-)
+# Central de Ações descontinuada (feature removida a pedido).
 
 def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
     st.markdown("### Atualizar base online")
@@ -3807,159 +3800,7 @@ def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
         )
 
 
-def render_aba_padrao_quedas(dados: dict) -> None:
-    """Heatmap de dia da semana × hora mostrando quando as câmeras caem.
-
-    Usa a série de snapshots salvos. Duas métricas:
-    - Quedas: soma dos aumentos de câmeras offline entre snapshots consecutivos.
-    - % offline médio: média do percentual offline dos snapshots de cada faixa.
-    """
-    st.markdown("### 🗓️ Padrão de Quedas")
-    st.caption("Cruzamento de dia da semana × hora, a partir dos snapshots salvos, para revelar quando as câmeras costumam cair.")
-
-    col_p, col_m = st.columns([1, 2])
-    with col_p:
-        dias = st.selectbox(
-            "Período",
-            options=[14, 30, 60, 90, 180],
-            index=1,
-            format_func=lambda d: f"Últimos {d} dias",
-            key="quedas_periodo",
-        )
-    with col_m:
-        metrica = st.radio(
-            "Métrica",
-            options=["Quedas (câmeras que caíram)", "% offline médio"],
-            horizontal=True,
-            key="quedas_metrica",
-        )
-
-    with st.spinner("Analisando padrão de quedas..."):
-        df_hist = carregar_historico_clientes(dias)
-
-    if df_hist is None or df_hist.empty:
-        st.info(f"Nenhum snapshot encontrado nos últimos {dias} dias.")
-        return
-
-    df = df_hist.copy()
-    df["gravado_dt"] = pd.to_datetime(df["gravado_em"], errors="coerce")
-    df = df[df["gravado_dt"].notna()].copy()
-    for c in ["offline", "total"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
-    if df.empty:
-        st.info("Os snapshots encontrados não têm data válida para montar o padrão.")
-        return
-
-    # Agrega por snapshot (soma de todos os clientes) — usado no % médio.
-    agg = (
-        df.groupby(["snapshot_id", "gravado_dt"], as_index=False)
-        .agg(offline=("offline", "sum"), total=("total", "sum"))
-        .sort_values("gravado_dt")
-        .reset_index(drop=True)
-    )
-    if len(agg) < 2 and metrica.startswith("Quedas"):
-        st.info("São necessários pelo menos dois snapshots no período para medir quedas. Tente um período maior ou use a métrica de % offline médio.")
-        return
-
-    agg["pct"] = _pct_offline_vec(agg["offline"], agg["total"])
-    agg["weekday"] = agg["gravado_dt"].dt.dayofweek  # 0 = segunda
-    agg["hour"] = agg["gravado_dt"].dt.hour
-
-    # Quedas contadas POR CLIENTE (evita que a rotatividade se cancele no agregado):
-    # para cada cliente, o aumento de câmeras offline entre snapshots consecutivos.
-    dfc = df.sort_values(["wl_id", "gravado_dt"]).copy()
-    dfc["delta_cli"] = dfc.groupby("wl_id")["offline"].diff().clip(lower=0)
-    dfc["weekday"] = dfc["gravado_dt"].dt.dayofweek
-    dfc["hour"] = dfc["gravado_dt"].dt.hour
-
-    dias_semana = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
-    horas = list(range(24))
-
-    if metrica.startswith("Quedas"):
-        sufixo, titulo_metric = "", "câmeras que caíram"
-        colorscale = [[0.0, "#f8fafc"], [0.35, "#fca5a5"], [0.7, "#ef4444"], [1.0, "#b91c1c"]]
-        fmt = lambda v: f"{int(round(v))}"
-        piv = dfc.pivot_table(index="weekday", columns="hour", values="delta_cli", aggfunc="sum")
-    else:
-        sufixo, titulo_metric = "%", "% offline médio"
-        colorscale = [[0.0, "#dff8f3"], [0.5, "#fde68a"], [1.0, "#dc2626"]]
-        fmt = lambda v: f"{v:.1f}%"
-        piv = agg.pivot_table(index="weekday", columns="hour", values="pct", aggfunc="mean")
-
-    # Contagem de snapshots por faixa (para o hover).
-    cont = agg.pivot_table(index="weekday", columns="hour", values="snapshot_id", aggfunc="count")
-    piv = piv.reindex(index=range(7), columns=horas)
-    cont = cont.reindex(index=range(7), columns=horas)
-
-    z = piv.values.astype(float)
-    n = cont.values
-    # Para "% médio" deixamos faixas sem amostra em branco (NaN); para "quedas", 0.
-    if metrica.startswith("Quedas"):
-        z = pd.DataFrame(z).fillna(0).values
-
-    # Texto do hover com dia, hora, valor e nº de snapshots.
-    customdata = []
-    for i in range(7):
-        linha = []
-        for j in range(24):
-            n_ij = 0 if (n is None or pd.isna(n[i][j])) else int(n[i][j])
-            linha.append(n_ij)
-        customdata.append(linha)
-
-    # O rótulo pode conter "%" (ex.: "% offline médio"); em hovertemplate isso precisa
-    # ser escapado como "%%", senão o Plotly não renderiza o gráfico (fica em branco).
-    titulo_hover = titulo_metric.replace("%", "%%")
-
-    fig = go.Figure(go.Heatmap(
-        z=z,
-        x=[f"{h:02d}h" for h in horas],
-        y=dias_semana,
-        customdata=customdata,
-        colorscale=colorscale,
-        hoverongaps=False,
-        xgap=2, ygap=2,
-        colorbar=dict(title=titulo_metric, thickness=12, outlinewidth=0),
-        hovertemplate=(
-            "<b>%{y} · %{x}</b><br>"
-            + titulo_hover + ": <b>%{z}</b><br>"
-            + "snapshots na faixa: %{customdata}<extra></extra>"
-        ),
-    ))
-    layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-    fig.update_layout(
-        **layout_defaults,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        height=420,
-        margin=dict(l=10, r=10, t=10, b=40),
-        xaxis=dict(title="", tickfont=dict(size=10, color="#8B7AA3"), showgrid=False),
-        yaxis=dict(title="", autorange="reversed", tickfont=dict(size=11, color="#6B5A7A"), showgrid=False),
-    )
-    modo_key = "quedas" if metrica.startswith("Quedas") else "pct"
-    st.plotly_chart(fig, use_container_width=True, key=f"heatmap_quedas_{modo_key}_{dias}")
-
-    # Destaque da pior faixa.
-    try:
-        piv_para_pico = piv.copy()
-        tem_dado = piv_para_pico.notna().any().any()
-        max_val = piv_para_pico.max().max() if tem_dado else 0
-        if metrica.startswith("Quedas") and (not tem_dado or max_val <= 0):
-            st.caption(
-                f"Nenhuma queda registrada no período (as câmeras offline não aumentaram entre os snapshots). "
-                f"{len(agg)} snapshots analisados."
-            )
-        elif tem_dado:
-            pos = piv_para_pico.stack().idxmax()
-            wd, hr = int(pos[0]), int(pos[1])
-            val = piv_para_pico.loc[wd, hr]
-            st.caption(
-                f"Pior faixa: **{dias_semana[wd]} às {hr:02d}h** ({titulo_metric}: {fmt(val)}) · "
-                f"{len(agg)} snapshots no período. Passe o mouse para ver a amostra de cada célula."
-            )
-    except Exception:
-        st.caption(f"{len(agg)} snapshots no período. Passe o mouse sobre as células para ver a amostra.")
-
-
+# render_aba_padrao_quedas removida (feature Padrão de Quedas descontinuada)
 def render_aba_detalhe_cliente_snap(dados: dict) -> None:
     """Aba Detalhe Cliente Snap: consulta de cliente dentro de um snapshot salvo."""
     st.markdown("### 📈 Detalhe Cliente Snap")
@@ -4858,11 +4699,7 @@ def main():
 
     # ── ABAS ──
     _injetar_css_abas_visiveis()
-    # Central de Ações desativada (não utilizada). Para reativar, defina como True.
-    MOSTRAR_CENTRAL_ACOES = False
     abas_principais = ["Auditoria", "Clientes"]
-    if MOSTRAR_CENTRAL_ACOES:
-        abas_principais.append("Central de Ações")
     abas_principais += ["Evidências", "Atualizar Base", "Configuração"]
     tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
@@ -5338,7 +5175,7 @@ def main():
     with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🏆 Total por Franquia", "🗓️ Padrão de Quedas"])
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🏆 Total por Franquia"])
         with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
@@ -5589,131 +5426,17 @@ def main():
                             col_t2.metric("📊 Tempo médio offline", fmt_tempo(media_td))
                             col_t3.metric("🔴 Acima de 24h", f"{acima_24h} câmeras")
 
-                # ─────────────────────────────────────────────
-                # SEÇÃO DE AÇÕES DO CLIENTE
-                # ─────────────────────────────────────────────
-                st.markdown("<hr>", unsafe_allow_html=True)
-                st.markdown("### 📋 Ações a realizar")
-            
-                # Verificar configuração
-                if not supabase_configurado():
-                    st.warning("⚠️ Supabase não configurado. As ações não podem ser salvas.")
-                else:
-                    tabela_existe, msg_tabela = criar_tabela_acoes_se_nao_existir()
-                    if not tabela_existe:
-                        st.error("🚨 Não foi possível acessar a tabela acoes_clientes")
-                        st.info(msg_tabela)
-            
-                with st.expander("✏️ Gerenciar ações", expanded=False):
-                    # Carregar ações existentes
-                    df_acoes = carregar_acoes_cliente(wl_id)
-                
-                    if df_acoes is not None and not df_acoes.empty:
-                        st.subheader("Ações registradas")
-                        for idx_acao, (_, acao) in enumerate(df_acoes.iterrows()):
-                            col_acao_data, col_acao_status, col_acao_del = st.columns([3, 1.5, 1])
-                        
-                            data_criacao = acao.get("data_criacao", "N/D")
-                            if isinstance(data_criacao, str) and "T" in data_criacao:
-                                data_criacao = data_criacao.split("T")[0]
-                        
-                            status_atual = acao.get("status_acao", "Pendente")
-                        
-                            with col_acao_data:
-                                st.markdown(f"""
-                                <div style="padding:12px 14px;background:#f8fafc;border:1px solid #E9D5FF;border-radius:8px">
-                                    <div style="font-size:11px;color:#8B7AA3;font-weight:700;text-transform:uppercase;margin-bottom:4px">Ação</div>
-                                    <div style="font-size:13px;color:#171126;margin-bottom:8px"><strong>{acao.get('o_que_foi_feito', 'N/D')}</strong></div>
-                                    <div style="font-size:10px;color:#8B7AA3">📅 {data_criacao}</div>
-                                    {f"<div style='font-size:10px;color:#8B7AA3'>⏰ Prazo: {acao.get('prazo_ajustes', 'Sem prazo')}</div>" if acao.get('prazo_ajustes') else ""}
-                                </div>
-                                """, unsafe_allow_html=True)
-                        
-                            with col_acao_status:
-                                novo_status = st.selectbox(
-                                    "Status",
-                                    ["Pendente", "Concluído"],
-                                    index=0 if status_atual == "Pendente" else 1,
-                                    key=f"status_{acao.get('id', idx_acao)}_{idx_acao}"
-                                )
-                                if novo_status != status_atual:
-                                    sucesso, msg = atualizar_status_acao(acao.get("id", ""), novo_status)
-                                    if sucesso:
-                                        st.success("Atualizado!", icon="✅")
-                                        st.rerun()
-                                    else:
-                                        st.error(msg)
-                        
-                            with col_acao_del:
-                                st.write("")  # spacing
-                    else:
-                        st.info("Nenhuma ação registrada para este cliente.")
-                
-                    st.divider()
-                    st.subheader("Adicionar nova ação")
-                
-                    with st.form(f"form_acao_{wl_id}", clear_on_submit=True):
-                        acao_texto = st.text_area(
-                            "O que foi feito",
-                            placeholder="Descreva a ação tomada (ex: Abrir chamado com técnico, Enviar comunicado, etc.)",
-                            height=100,
-                            key=f"acao_texto_{wl_id}"
-                        )
-                    
-                        col_prazo, col_status = st.columns(2)
-                        with col_prazo:
-                            prazo = st.date_input(
-                                "Prazo para ajustes",
-                                value=None,
-                                format="DD/MM/YYYY",
-                                key=f"prazo_acao_{wl_id}"
-                            )
-                        with col_status:
-                            status_acao = st.selectbox(
-                                "Status",
-                                ["Pendente", "Concluído"],
-                                key=f"status_nova_acao_{wl_id}"
-                            )
-                    
-                        if st.form_submit_button(f"➕ Registrar ação · {wl_id}", use_container_width=True):
-                            if not acao_texto.strip():
-                                st.error("Descreva a ação a ser realizada")
-                            else:
-                                prazo_str = prazo.strftime("%Y-%m-%d") if prazo else None
-                                sucesso, msg = salvar_acao_cliente(
-                                    id_whitelabel=wl_id,
-                                    nome_cliente=v.get("nome_cliente", ""),
-                                    o_que_foi_feito=acao_texto,
-                                    prazo_ajustes=prazo_str,
-                                    status_acao=status_acao
-                                )
-                                if sucesso:
-                                    st.success(msg)
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-
                 if st.button("← Voltar ao painel", key="btn_voltar_painel_detalhe_cliente_v1"):
                     del st.session_state["detalhe"]; st.rerun()
 
         with clientes_subtabs[1]:
             render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="clientes_relatorio_franquia")
 
-    # ════════════════════════════════════════════
-    # ABA 2 — CENTRAL DE AÇÕES
-    # ════════════════════════════════════════════
-    if MOSTRAR_CENTRAL_ACOES and "Central de Ações" in tabs:
-        with tabs["Central de Ações"]:
-            render_central_acoes(dados)
-
     with clientes_subtabs[2]:
         render_aba_tendencia(dados)
 
     with clientes_subtabs[3]:
         render_aba_total_por_franquia(df_clientes_ops)
-
-    with clientes_subtabs[4]:
-        render_aba_padrao_quedas(dados)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
