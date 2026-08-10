@@ -13,10 +13,12 @@ GOV_extracao_cameras*.csv
 # === Banco e caches gerados em runtime ===
 historico.db
 *.db
-geocode_cache.json
 
-# Observação: nome_clientes.xlsx e brazil_states.geojson
+# Observação: nome_clientes.xlsx, brazil_states.geojson e geocode_cache.json
 # permanecem versionados por serem dependências de runtime.
+# O geocode_cache.json é a semente de coordenadas das cidades: sem ele em
+# produção (Streamlit Cloud), o mapa geocodifica cada cidade via Nominatim
+# a cada cold start, deixando o app muito lento.
 
 # === Python ===
 __pycache__/
