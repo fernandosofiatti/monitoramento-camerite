@@ -16,7 +16,7 @@ import streamlit as st
 from src.constants import (
     COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS,
     COL_ULT_ATU, COL_OBS, COL_DATA_CAD, COL_PLANO, COL_DATA_INAT,
-    SUPABASE_TABLE, SUPABASE_PAGE_SIZE,
+    SUPABASE_TABLE, SUPABASE_PAGE_SIZE, CSV_GOV,
 )
 from src.utils import (
     agora_sao_paulo_str,
