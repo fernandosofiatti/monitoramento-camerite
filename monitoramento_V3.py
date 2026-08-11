@@ -3822,34 +3822,21 @@ def main():
 
     # ── ABAS ──
     _injetar_css_abas_visiveis()
-    abas_principais = ["Auditoria", "Clientes", "Evidências", "Atualizar Base", "Configuração"]
-    # Renderização preguiçosa: só a página ativa é processada. Antes, st.tabs
-    # executava o código de TODAS as abas (e subabas) a cada rerun — principal
-    # causa da lentidão. Agora a navegação tem estado e só a seção ativa roda.
-    pagina = st.segmented_control(
-        "Navegação", abas_principais, default="Auditoria",
-        label_visibility="collapsed", key="nav_principal",
-    ) or "Auditoria"
+    abas_principais = ["Auditoria", "Clientes"]
+    abas_principais += ["Evidências", "Atualizar Base", "Configuração"]
+    tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
-    _aud_secs = ["📋 Visão Geral", "🕐 Tempo offline", "📊 % por cliente", "🚘 LPRs Offline"]
-    _cli_secs = ["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🏆 Total por Franquia"]
-    sub_aud = _aud_secs[0]
-    sub_cli = _cli_secs[0]
-    if pagina == "Auditoria":
-        sub_aud = st.segmented_control(
-            "Seção da auditoria", _aud_secs, default=_aud_secs[0],
-            label_visibility="collapsed", key="nav_auditoria",
-        ) or _aud_secs[0]
-    elif pagina == "Clientes":
-        sub_cli = st.segmented_control(
-            "Seção de clientes", _cli_secs, default=_cli_secs[0],
-            label_visibility="collapsed", key="nav_clientes",
-        ) or _cli_secs[0]
+    with tabs["Auditoria"]:
+        auditoria_subtabs = st.tabs(["📋 Visão Geral", "🕐 Tempo offline", "📊 % por cliente", "🚘 LPRs Offline"])
+    tabs["Auditoria"] = auditoria_subtabs[0]
+    tabs["Tempo offline"] = auditoria_subtabs[1]
+    tabs["% por cliente"] = auditoria_subtabs[2]
+    tabs["LPRs Offline"] = auditoria_subtabs[3]
 
     # ════════════════════════════════════════════
     # ABA 0 — VISÃO EXECUTIVA
     # ════════════════════════════════════════════
-    if pagina == "Auditoria" and sub_aud == "📋 Visão Geral":
+    with tabs["Auditoria"]:
         st.markdown(f"""
         <div class="audit-hero">
             <div class="audit-hero-top">
@@ -4308,10 +4295,11 @@ def main():
     # ════════════════════════════════════════════
     # ABA 1 — PAINEL DE CLIENTES
     # ════════════════════════════════════════════
-    if pagina == "Clientes":
+    with tabs["Clientes"]:
         st.markdown("### 🏢 Clientes")
         st.caption("Painel operacional dos clientes e geração de relatórios em HTML por franquia para envio por e-mail.")
-        if sub_cli == "📊 Painel de clientes":
+        clientes_subtabs = st.tabs(["📊 Painel de clientes", "✉️ Relatório por franquia", "📈 Tendência", "🏆 Total por Franquia"])
+        with clientes_subtabs[0]:
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
             if "detalhe" not in st.session_state:
@@ -4564,19 +4552,19 @@ def main():
                 if st.button("← Voltar ao painel", key="btn_voltar_painel_detalhe_cliente_v1"):
                     del st.session_state["detalhe"]; st.rerun()
 
-        if sub_cli == "✉️ Relatório por franquia":
+        with clientes_subtabs[1]:
             render_relatorio_por_franquia(df_clientes_ops, dados, key_prefix="clientes_relatorio_franquia")
 
-    if pagina == "Clientes" and sub_cli == "📈 Tendência":
+    with clientes_subtabs[2]:
         render_aba_tendencia(dados)
 
-    if pagina == "Clientes" and sub_cli == "🏆 Total por Franquia":
+    with clientes_subtabs[3]:
         render_aba_total_por_franquia(df_clientes_ops)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
     # ════════════════════════════════════════════
-    if pagina == "Auditoria" and sub_aud == "🕐 Tempo offline":
+    with tabs["Tempo offline"]:
         st.markdown("#### Câmeras offline por tempo sem sinal")
         st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
 
@@ -4859,7 +4847,7 @@ def main():
     # ════════════════════════════════════════════
     # ABA 4 — % OFFLINE POR CLIENTE
     # ════════════════════════════════════════════
-    if pagina == "Auditoria" and sub_aud == "📊 % por cliente":
+    with tabs["% por cliente"]:
         st.markdown("#### Percentual de câmeras offline por cliente")
         st.caption("Escala 0–100% · Verde 0–5% · Amarelo >5–10% · Vermelho >10%")
 
@@ -4955,7 +4943,7 @@ def main():
     # ════════════════════════════════════════════
     # ABA 5 — HISTÓRICO & COMPARATIVO
     # ════════════════════════════════════════════
-    if pagina == "Evidências":
+    with tabs["Evidências"]:
         st.markdown("#### Histórico de snapshots")
         df_snaps = listar_snapshots()
 
@@ -5461,7 +5449,7 @@ def main():
     # ════════════════════════════════════════════
     # ABA 6 — LPRS OFFLINE
     # ════════════════════════════════════════════
-    if pagina == "Auditoria" and sub_aud == "🚘 LPRs Offline":
+    with tabs["LPRs Offline"]:
         st.markdown("### LPRs Offline")
         st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
 
@@ -5622,10 +5610,10 @@ def main():
     # ════════════════════════════════════════════
     # ABA 7 — ATUALIZAR BASE ONLINE
     # ════════════════════════════════════════════
-    if pagina == "Atualizar Base":
+    with tabs["Atualizar Base"]:
         render_aba_atualizar_base(df_origem)
 
-    if pagina == "Configuração":
+    with tabs["Configuração"]:
         render_aba_configuracao()
 
 if __name__ == "__main__":
