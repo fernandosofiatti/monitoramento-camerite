@@ -800,6 +800,7 @@ def geocode_cidade(nome: str, estado: str | None = None) -> tuple[float, float] 
     salvar_cache_geocode(cache)
     return None
 
+@st.cache_data(ttl=120, show_spinner=False)
 def montar_mapa_cidades(df: pd.DataFrame) -> tuple[go.Figure | None, str]:
     if df is None or df.empty:
         return None, "Sem dados de origem para criar o mapa."
@@ -1644,6 +1645,7 @@ def calcular_recorrencia(dias: int = 30) -> dict:
         })
     return {r["wl_id"]: r for r in rows}
 
+@st.cache_data(ttl=120, show_spinner=False)
 def montar_df_tempo(dados: dict) -> pd.DataFrame:
     rows = []
     for wl_id, v in dados.items():
