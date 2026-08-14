@@ -3594,6 +3594,460 @@ def render_aba_configuracao() -> None:
     st.caption(f"Arquivo de configuração: `{CONFIG_PATH}`")
 
 
+@st.fragment
+def render_aba_tempo_offline(dados: dict) -> None:
+    """Corpo da aba "Tempo offline": filtros, grafico e tabela.
+
+    Isolado em st.fragment: digitar na busca ou trocar a faixa de tempo
+    rerroda so este bloco, sem reprocessar o app inteiro.
+    """
+    st.markdown("#### Câmeras offline por tempo sem sinal")
+    st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
+
+    # Montar DataFrame global com todas as câmeras offline
+    rows_tempo = []
+    agora = agora_sao_paulo()
+    for wl_id, v in dados.items():
+        df_off = v["offline"]
+        if df_off.empty: continue
+        for _, row in df_off.iterrows():
+            td = row.get("_tempo_off", timedelta(seconds=-1))
+            if not isinstance(td, timedelta): td = timedelta(seconds=-1)
+            horas = td.total_seconds()/3600 if td.total_seconds() >= 0 else -1
+            rows_tempo.append({
+                "ID do Cliente": wl_id,
+                "Nome Cliente":  v["nome_cliente"],
+                "Cidade": v.get("cidade_estado") or v.get("cidade") or v["nome_cliente"],
+                "Nome Franqueado": v["nome_empresa"],
+                "ID da Câmera":  row.get(COL_ID_CAM,  "N/D"),
+                "Nome da Câmera":row.get(COL_NOME_CAM,"N/D"),
+                "Última vez Online": row.get(COL_ULT_ATU, pd.NaT),
+                "Observações":   row.get(COL_OBS, ""),
+                "Faixa":         faixa_tempo_dias(horas),
+                "_horas":        horas,
+                "_td":           td,
+            })
+
+    if not rows_tempo:
+        st.success("🎉 Nenhuma câmera offline no momento!")
+    else:
+        df_tempo = pd.DataFrame(rows_tempo).sort_values("_horas", ascending=False)
+
+        # KPIs de tempo
+        validos       = df_tempo[df_tempo["_horas"] >= 0]
+        menos_1d      = (validos["_horas"] < 24).sum()
+        entre_1_3d    = ((validos["_horas"] >= 24) & (validos["_horas"] < 72)).sum()
+        entre_3_7d    = ((validos["_horas"] >= 72) & (validos["_horas"] < 168)).sum()
+        acima_7d      = (validos["_horas"] >= 168).sum()
+        nd_count      = (df_tempo["_horas"] < 0).sum()
+
+        k1, k2, k3, k4 = st.columns(4)
+
+        def card_tempo_moderno(titulo, valor, subtitulo, cor):
+            return f'''
+            <div style="
+                background:#ffffff;
+                border:1px solid #E9D5FF;
+                border-radius:14px;
+                padding:18px 18px 16px;
+                text-align:center;
+                box-shadow:0 10px 26px rgba(16,42,63,.06);
+                position:relative;
+                overflow:hidden;
+                min-height:118px;
+            ">
+                <div style="position:absolute;top:0;left:0;right:0;height:4px;background:{cor};"></div>
+                <div style="font-size:10px;color:#7C6A91;font-weight:800;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">{titulo}</div>
+                <div style="font-size:34px;font-weight:800;color:{cor};font-family:DM Mono,monospace;line-height:1.15;margin-top:10px">{valor}</div>
+                <div style="font-size:11px;color:#7C6A91;margin-top:6px">{subtitulo}</div>
+            </div>
+            '''
+
+        k1.markdown(card_tempo_moderno("Menos de 1 dia", menos_1d, "câmeras recentes", "#10b981"), unsafe_allow_html=True)
+        k2.markdown(card_tempo_moderno("Entre 1 e 3 dias", entre_1_3d, "câmeras em atenção", "#f59e0b"), unsafe_allow_html=True)
+        k3.markdown(card_tempo_moderno("3 a 7 dias", entre_3_7d, "câmeras críticas", "#ef4444"), unsafe_allow_html=True)
+        k4.markdown(card_tempo_moderno("Acima de 7 dias", acima_7d, "câmeras mais antigas", "#ef4444"), unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if "tempo_offline_categoria" not in st.session_state:
+            st.session_state["tempo_offline_categoria"] = "Todas"
+
+        st.markdown("#### Filtrar por faixa de tempo")
+        cards = [
+            ("Menos de 1 dia", menos_1d),
+            ("Entre 1 e 3 dias", entre_1_3d),
+            ("3 a 7 dias", entre_3_7d),
+            ("Acima de 7 dias", acima_7d),
+            ("Sem data", nd_count),
+        ]
+        cols_cat = st.columns(len(cards))
+        for (label, count), col in zip(cards, cols_cat):
+            with col:
+                if st.button(f"{label} ({count})", key=f"tempo_cat_{label}"):
+                    st.session_state["tempo_offline_categoria"] = label
+
+        selected = st.session_state["tempo_offline_categoria"]
+        if selected != "Todas":
+            st.markdown(f"**Filtro ativo:** {selected}")
+            if st.button("Limpar filtro", key="tempo_cat_clear"):
+                st.session_state["tempo_offline_categoria"] = "Todas"
+
+        col_f1, col_f2 = st.columns([3,1])
+        with col_f1:
+            busca_t = st.text_input("Buscar", key="busca_tempo",
+                                    placeholder="Buscar câmera ou cliente…")
+        with col_f2:
+            top_n_t = st.selectbox("Exibir", ["Top 50","Top 100","Top 200","Todas"],
+                                   key="top_n_tempo")
+
+        df_exib = df_tempo.copy()
+        if selected != "Todas":
+            if selected == "Sem data":
+                df_exib = df_exib[df_exib["_horas"] < 0]
+            elif selected == "Menos de 1 dia":
+                df_exib = df_exib[(df_exib["_horas"] >= 0) & (df_exib["_horas"] < 24)]
+            elif selected == "Entre 1 e 3 dias":
+                df_exib = df_exib[(df_exib["_horas"] >= 24) & (df_exib["_horas"] < 72)]
+            elif selected == "3 a 7 dias":
+                df_exib = df_exib[(df_exib["_horas"] >= 72) & (df_exib["_horas"] < 168)]
+            elif selected == "Acima de 7 dias":
+                df_exib = df_exib[df_exib["_horas"] >= 168]
+
+        if busca_t:
+            termo = busca_t.upper()
+            df_exib = df_exib[
+                df_exib["Nome da Câmera"].astype(str).str.upper().str.contains(termo) |
+                df_exib["Nome Cliente"].str.upper().str.contains(termo) |
+                df_exib["Nome Franqueado"].astype(str).str.upper().str.contains(termo) |
+                df_exib["ID do Cliente"].astype(str).str.upper().str.contains(termo) |
+                df_exib["ID da Câmera"].astype(str).str.upper().str.contains(termo)
+            ]
+
+        lim = {"Top 50":50,"Top 100":100,"Top 200":200}.get(top_n_t, len(df_exib))
+        df_exib = df_exib.head(lim)
+
+        if df_exib.empty:
+            st.info("Nenhuma câmera encontrada com os filtros aplicados.")
+        else:
+            # Gráfico executivo — Top 30 por dias offline
+            df_graf = df_exib[df_exib["_horas"] >= 0].copy()
+            df_graf = df_graf.sort_values("_horas", ascending=False).head(30).copy()
+            if not df_graf.empty:
+                df_graf["_dias"] = (df_graf["_horas"] / 24).round(1)
+                df_graf["_rank"] = range(1, len(df_graf) + 1)
+                df_graf["_y"] = list(range(len(df_graf), 0, -1))
+
+                def _truncar_label_top30(id_camera, cidade, limite=34):
+                    id_camera = str(id_camera or "N/D").strip()
+                    cidade = str(cidade or "N/D").replace("\n", " ").strip()
+                    label = f"{id_camera} · {cidade}"
+                    return label if len(label) <= limite else label[:limite - 1].rstrip() + "…"
+
+                if "Cidade" not in df_graf.columns:
+                    df_graf["Cidade"] = df_graf["Nome Cliente"]
+
+                df_graf["_label_curto"] = df_graf.apply(
+                    lambda r: _truncar_label_top30(r["ID da Câmera"], r["Cidade"]), axis=1
+                )
+                df_graf["_tempo_fmt"] = df_graf["_td"].apply(lambda td: fmt_tempo(td))
+                df_graf["_criticidade"] = df_graf["_horas"].apply(
+                    lambda h: "Crítico · acima de 7 dias" if h >= 168 else (
+                        "Alto · 3 a 7 dias" if h >= 72 else (
+                            "Atenção · 1 a 3 dias" if h >= 24 else "Recente · menos de 1 dia"
+                        )
+                    )
+                )
+                df_graf["_cor"] = df_graf["_horas"].apply(
+                    lambda h: "#dc2626" if h >= 168 else (
+                        "#ea580c" if h >= 72 else (
+                            "#d97706" if h >= 24 else "#059669"
+                        )
+                    )
+                )
+
+                st.markdown(f"**Top {len(df_graf)} câmeras — tempo offline em dias**")
+                st.caption("Visão em área por ID da câmera e cidade. Passe o mouse para ver o nome completo da câmera, cliente e tempo detalhado.")
+
+                max_dias = float(df_graf["_dias"].max()) if not df_graf.empty else 1.0
+
+                # Visão de área moderna — ranking por tempo offline em dias.
+                # Mantém o gráfico limpo: eixo X por posição no ranking e detalhes completos no hover.
+                fig_t = go.Figure()
+                x_rank = df_graf["_rank"].tolist()
+                y_dias = df_graf["_dias"].tolist()
+
+                fig_t.add_trace(go.Scatter(
+                    x=x_rank,
+                    y=y_dias,
+                    mode="lines",
+                    line=dict(color="#dc2626", width=0),
+                    fill="tozeroy",
+                    fillcolor="rgba(220, 38, 38, 0.14)",
+                    hoverinfo="skip",
+                    showlegend=False,
+                ))
+
+                fig_t.add_trace(go.Scatter(
+                    x=x_rank,
+                    y=y_dias,
+                    mode="lines+markers",
+                    line=dict(color="#991b1b", width=3, shape="spline", smoothing=0.65),
+                    marker=dict(
+                        size=8,
+                        color=df_graf["_cor"],
+                        line=dict(color="#ffffff", width=1.5),
+                    ),
+                    customdata=df_graf[["_rank", "ID da Câmera", "Cidade", "Nome da Câmera", "Nome Cliente", "_tempo_fmt", "_criticidade"]].values,
+                    hovertemplate=(
+                        "<b>ID %{customdata[1]} · %{customdata[2]}</b><br>"
+                        "Nome da câmera: %{customdata[3]}<br>"
+                        "Cliente: %{customdata[4]}<br>"
+                        "Ranking: #%{customdata[0]}<br>"
+                        "Tempo offline: <b>%{y:.1f} dias</b><br>"
+                        "Tempo detalhado: %{customdata[5]}<br>"
+                        "Status: %{customdata[6]}"
+                        "<extra></extra>"
+                    ),
+                    name="Dias offline",
+                ))
+
+                # Labels fixos removidos para evitar caixas sobrepostas nos pontos.
+                # A identificação completa permanece no eixo X e no hover.
+
+                layout_padrao_top30 = {
+                    k: v for k, v in pdefaults().items()
+                    if k not in ["plot_bgcolor", "paper_bgcolor", "margin"]
+                }
+                tickvals = df_graf["_rank"].tolist()
+                ticktext = df_graf["_label_curto"].tolist()
+                fig_t.update_layout(
+                    **layout_padrao_top30,
+                    height=560,
+                    showlegend=False,
+                    plot_bgcolor="#ffffff",
+                    paper_bgcolor="#ffffff",
+                    hovermode="closest",
+                    xaxis=dict(
+                        title="ID da câmera · Cidade",
+                        tickmode="array",
+                        tickvals=tickvals,
+                        ticktext=ticktext,
+                        gridcolor="rgba(148,163,184,.10)",
+                        tickfont=dict(color="#8B7AA3", size=9),
+                        tickangle=-45,
+                        zeroline=False,
+                        range=[0.5, len(df_graf) + 0.5],
+                    ),
+                    yaxis=dict(
+                        title="Dias offline",
+                        gridcolor="rgba(148,163,184,.16)",
+                        tickfont=dict(color="#8B7AA3", size=10),
+                        zeroline=False,
+                        rangemode="tozero",
+                        ticksuffix="d",
+                    ),
+                    margin=dict(l=70, r=35, t=44, b=145),
+                )
+                st.plotly_chart(fig_t, use_container_width=True, key="top30_cameras_tempo_offline_area_moderno")
+
+            # Tabela detalhada
+            st.markdown(f"**Lista detalhada — {len(df_exib)} câmeras**")
+            df_tbl_t = df_exib[["Nome Cliente","Nome Franqueado","ID da Câmera","Nome da Câmera","Faixa","Última vez Online","Observações","_horas","_td"]].copy()
+            df_tbl_t["Tempo Offline"] = df_tbl_t["_td"].apply(lambda td: fmt_tempo(td) if isinstance(td,timedelta) and td.total_seconds()>=0 else "N/D")
+            df_tbl_t["Última vez Online"] = formatar_ultima_atualizacao(df_tbl_t["Última vez Online"])
+            df_tbl_t["Criticidade"] = df_tbl_t["_horas"].apply(
+                lambda h: "🔴 Crítico (>7 dias)" if h>=168 else (
+                    "🟠 Alto (3–7 dias)" if h>=72 else (
+                        "🟡 Atenção (1–3 dias)" if h>=24 else (
+                            "🟢 Recente (<1 dia)" if h>=0 else "⚫ Sem data"
+                        )
+                    )
+                )
+            )
+            df_tbl_t = df_tbl_t.drop(columns=["_horas","_td"]).reset_index(drop=True)
+            df_tbl_t.index += 1
+            # Reordenar colunas
+            df_tbl_t = df_tbl_t[["Criticidade","Faixa","Tempo Offline","Nome da Câmera","ID da Câmera","Nome Cliente","Nome Franqueado","Última vez Online","Observações"]]
+
+            # Download
+            buf_t = io.BytesIO()
+            df_tbl_t.to_excel(buf_t, index=True, engine="openpyxl")
+            st.download_button("⬇ Exportar lista",
+                data=buf_t.getvalue(),
+                file_name=f"tempo_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_tempo_offline_lista_v1")
+
+            render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
+
+
+
+@st.fragment
+def render_aba_lprs_offline(df_origem) -> None:
+    """Corpo da aba "LPRs Offline": radar + busca + tabela.
+
+    Isolado em st.fragment: digitar na busca rerroda so este bloco,
+    sem reprocessar o app inteiro.
+    """
+    st.markdown("### LPRs Offline")
+    st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
+
+    df_lpr_base = df_origem.copy() if df_origem is not None else pd.DataFrame()
+    if df_lpr_base.empty:
+        st.info("Sem dados carregados para validar LPRs offline.")
+    else:
+        for col in [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU]:
+            if col not in df_lpr_base.columns:
+                df_lpr_base[col] = ""
+
+        df_lpr_base[COL_WL] = df_lpr_base[COL_WL].astype(str).str.strip()
+        df_lpr_base[COL_STATUS] = df_lpr_base[COL_STATUS].astype(str).str.strip().str.upper()
+        df_lpr_base[COL_NOME_CAM] = df_lpr_base[COL_NOME_CAM].astype(str).fillna("")
+
+        # Garante o mesmo universo do dashboard: se existir mapa de clientes, considera apenas esses IDs.
+        clientes_map_lpr = carregar_clientes()
+        if clientes_map_lpr:
+            df_lpr_base = df_lpr_base[df_lpr_base[COL_WL].isin(set(clientes_map_lpr.keys()))].copy()
+
+        mask_lpr = df_lpr_base[COL_NOME_CAM].str.contains("LPR", case=False, na=False)
+        mask_off = df_lpr_base[COL_STATUS].eq("OFFLINE")
+        df_lprs_total = df_lpr_base[mask_lpr].copy()
+        df_lprs_off = df_lpr_base[mask_lpr & mask_off].copy()
+
+        total_lprs = int(len(df_lprs_total))
+        total_lprs_off = int(len(df_lprs_off))
+        clientes_lpr_total = int(df_lprs_total[COL_WL].nunique()) if not df_lprs_total.empty else 0
+        clientes_lpr_off = int(df_lprs_off[COL_WL].nunique()) if not df_lprs_off.empty else 0
+        pct_lpr_off = (total_lprs_off / total_lprs * 100) if total_lprs else 0
+
+        if not df_lprs_off.empty:
+            df_lprs_off["Cliente"] = df_lprs_off[COL_WL].map(clientes_map_lpr).fillna(df_lprs_off[COL_WL].apply(lambda x: f"ID {x}"))
+            df_lprs_off["Franqueado"] = df_lprs_off[COL_EMPRESA].astype(str).replace({"nan": ""}).str.strip()
+            df_lprs_off["Última atualização"] = formatar_ultima_atualizacao(df_lprs_off[COL_ULT_ATU])
+            df_lprs_off["Tempo offline"] = parse_ultima_atualizacao(df_lprs_off[COL_ULT_ATU]).apply(
+                lambda x: fmt_tempo(agora_sao_paulo() - x) if pd.notna(x) else "N/D"
+            )
+
+        st.markdown(f"""
+        <div class="compare-hero">
+            <div class="compare-title">🚘 Radar LPR Offline</div>
+            <div class="compare-sub">Validação operacional das câmeras LPR desconectadas na carteira filtrada.</div>
+        </div>
+        <div class="compare-grid">
+            <div class="compare-card neutral">
+                <div class="compare-label">Total de LPRs</div>
+                <div class="compare-value">{total_lprs}</div>
+                <div class="compare-note">câmeras LPR encontradas na base</div>
+            </div>
+            <div class="compare-card bad">
+                <div class="compare-label">LPRs offline</div>
+                <div class="compare-value" style="color:#dc2626">{total_lprs_off}</div>
+                <div class="compare-note">{pct_lpr_off:.1f}% das LPRs estão offline</div>
+            </div>
+            <div class="compare-card warn">
+                <div class="compare-label">Clientes afetados</div>
+                <div class="compare-value" style="color:#d97706">{clientes_lpr_off}</div>
+                <div class="compare-note">de {clientes_lpr_total} clientes com LPR</div>
+            </div>
+            <div class="compare-card good">
+                <div class="compare-label">LPRs online</div>
+                <div class="compare-value" style="color:#059669">{max(total_lprs - total_lprs_off, 0)}</div>
+                <div class="compare-note">câmeras LPR sem alerta offline</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if df_lprs_off.empty:
+            st.success("Nenhuma câmera LPR offline encontrada na carteira filtrada.")
+        else:
+            df_lpr_cli = (
+                df_lprs_off.groupby([COL_WL, "Cliente", "Franqueado"], as_index=False)
+                .agg(lprs_offline=(COL_ID_CAM, "count"))
+                .sort_values("lprs_offline", ascending=False)
+            )
+
+            st.markdown("#### Clientes com mais LPRs offline")
+            top_lpr_area = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True).copy()
+            top_lpr_area["Cliente eixo"] = top_lpr_area["Cliente"].astype(str)
+            max_lpr_area = max(3, int(top_lpr_area["lprs_offline"].max()) + 1) if not top_lpr_area.empty else 3
+            altura_lpr_area = max(380, min(680, 42 * len(top_lpr_area) + 140))
+
+            fig_lpr_area = go.Figure()
+            fig_lpr_area.add_trace(go.Scatter(
+                name="LPRs offline",
+                x=top_lpr_area["lprs_offline"],
+                y=top_lpr_area["Cliente eixo"],
+                mode="lines+markers+text",
+                fill="tozerox",
+                line=dict(color="#dc2626", width=3.0, shape="spline", smoothing=0.65),
+                marker=dict(color="#dc2626", size=9, line=dict(color="#ffffff", width=1)),
+                fillcolor="rgba(220, 38, 38, 0.18)",
+                text=top_lpr_area["lprs_offline"],
+                textposition="middle right",
+                customdata=top_lpr_area[["Cliente", "Franqueado"]],
+                hovertemplate=(
+                    "<b>%{customdata[0]}</b><br>"
+                    "Franqueado: %{customdata[1]}<br>"
+                    "LPRs offline: %{x}<extra></extra>"
+                ),
+            ))
+            fig_lpr_area.update_layout(
+                **pdefaults(),
+                height=altura_lpr_area,
+                margin=dict(l=10, r=55, t=10, b=35),
+                xaxis=dict(
+                    title="LPRs offline",
+                    range=[0, max_lpr_area],
+                    gridcolor="#E9D5FF",
+                    tickfont=dict(color="#8B7AA3", size=10),
+                    zeroline=False,
+                ),
+                yaxis=dict(
+                    title="",
+                    type="category",
+                    categoryorder="array",
+                    categoryarray=top_lpr_area["Cliente eixo"].tolist(),
+                    tickfont=dict(color="#6B5A7A", size=11),
+                    automargin=True,
+                ),
+                showlegend=False,
+                hovermode="closest",
+            )
+            st.plotly_chart(fig_lpr_area, use_container_width=True, key="lprs_offline_top_clientes_area_horizontal")
+
+            st.markdown("#### Detalhamento das LPRs offline")
+            busca_lpr = st.text_input("Buscar por cliente, franqueado, ID ou nome da câmera", key="busca_lprs_offline")
+            df_lpr_lista = df_lprs_off.copy()
+            if busca_lpr.strip():
+                termo = busca_lpr.strip().lower()
+                texto_busca = (
+                    df_lpr_lista["Cliente"].astype(str) + " " +
+                    df_lpr_lista["Franqueado"].astype(str) + " " +
+                    df_lpr_lista[COL_ID_CAM].astype(str) + " " +
+                    df_lpr_lista[COL_NOME_CAM].astype(str)
+                ).str.lower()
+                df_lpr_lista = df_lpr_lista[texto_busca.str.contains(re.escape(termo), na=False)].copy()
+
+            cols_lpr = ["Cliente", "Franqueado", COL_ID_CAM, COL_NOME_CAM, "Última atualização", "Tempo offline"]
+            df_lpr_lista = df_lpr_lista[cols_lpr].rename(columns={
+                COL_ID_CAM: "ID da Câmera",
+                COL_NOME_CAM: "Nome da Câmera",
+            }).sort_values(["Cliente", "Nome da Câmera"])
+            render_dataframe(df_lpr_lista, height=520)
+
+            csv_lpr = df_lpr_lista.to_csv(index=False, sep=";", encoding="utf-8-sig")
+            st.download_button(
+                "📥 Baixar LPRs offline em CSV",
+                data=csv_lpr,
+                file_name=f"lprs_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+                key="dl_lprs_offline_csv_v1",
+            )
+
+
+
+
 def main():
     init_db()
 
@@ -4579,284 +5033,7 @@ def main():
     # ABA 3 — TEMPO OFFLINE
     # ════════════════════════════════════════════
     with tabs["Tempo offline"]:
-        st.markdown("#### Câmeras offline por tempo sem sinal")
-        st.caption("Identifique as câmeras que estão há mais tempo sem atualização — ordenadas do mais crítico ao menos crítico")
-
-        # Montar DataFrame global com todas as câmeras offline
-        rows_tempo = []
-        agora = agora_sao_paulo()
-        for wl_id, v in dados.items():
-            df_off = v["offline"]
-            if df_off.empty: continue
-            for _, row in df_off.iterrows():
-                td = row.get("_tempo_off", timedelta(seconds=-1))
-                if not isinstance(td, timedelta): td = timedelta(seconds=-1)
-                horas = td.total_seconds()/3600 if td.total_seconds() >= 0 else -1
-                rows_tempo.append({
-                    "ID do Cliente": wl_id,
-                    "Nome Cliente":  v["nome_cliente"],
-                    "Cidade": v.get("cidade_estado") or v.get("cidade") or v["nome_cliente"],
-                    "Nome Franqueado": v["nome_empresa"],
-                    "ID da Câmera":  row.get(COL_ID_CAM,  "N/D"),
-                    "Nome da Câmera":row.get(COL_NOME_CAM,"N/D"),
-                    "Última vez Online": row.get(COL_ULT_ATU, pd.NaT),
-                    "Observações":   row.get(COL_OBS, ""),
-                    "Faixa":         faixa_tempo_dias(horas),
-                    "_horas":        horas,
-                    "_td":           td,
-                })
-
-        if not rows_tempo:
-            st.success("🎉 Nenhuma câmera offline no momento!")
-        else:
-            df_tempo = pd.DataFrame(rows_tempo).sort_values("_horas", ascending=False)
-
-            # KPIs de tempo
-            validos       = df_tempo[df_tempo["_horas"] >= 0]
-            menos_1d      = (validos["_horas"] < 24).sum()
-            entre_1_3d    = ((validos["_horas"] >= 24) & (validos["_horas"] < 72)).sum()
-            entre_3_7d    = ((validos["_horas"] >= 72) & (validos["_horas"] < 168)).sum()
-            acima_7d      = (validos["_horas"] >= 168).sum()
-            nd_count      = (df_tempo["_horas"] < 0).sum()
-
-            k1, k2, k3, k4 = st.columns(4)
-
-            def card_tempo_moderno(titulo, valor, subtitulo, cor):
-                return f'''
-                <div style="
-                    background:#ffffff;
-                    border:1px solid #E9D5FF;
-                    border-radius:14px;
-                    padding:18px 18px 16px;
-                    text-align:center;
-                    box-shadow:0 10px 26px rgba(16,42,63,.06);
-                    position:relative;
-                    overflow:hidden;
-                    min-height:118px;
-                ">
-                    <div style="position:absolute;top:0;left:0;right:0;height:4px;background:{cor};"></div>
-                    <div style="font-size:10px;color:#7C6A91;font-weight:800;text-transform:uppercase;letter-spacing:.8px;margin-top:4px">{titulo}</div>
-                    <div style="font-size:34px;font-weight:800;color:{cor};font-family:DM Mono,monospace;line-height:1.15;margin-top:10px">{valor}</div>
-                    <div style="font-size:11px;color:#7C6A91;margin-top:6px">{subtitulo}</div>
-                </div>
-                '''
-
-            k1.markdown(card_tempo_moderno("Menos de 1 dia", menos_1d, "câmeras recentes", "#10b981"), unsafe_allow_html=True)
-            k2.markdown(card_tempo_moderno("Entre 1 e 3 dias", entre_1_3d, "câmeras em atenção", "#f59e0b"), unsafe_allow_html=True)
-            k3.markdown(card_tempo_moderno("3 a 7 dias", entre_3_7d, "câmeras críticas", "#ef4444"), unsafe_allow_html=True)
-            k4.markdown(card_tempo_moderno("Acima de 7 dias", acima_7d, "câmeras mais antigas", "#ef4444"), unsafe_allow_html=True)
-
-            st.markdown("<br>", unsafe_allow_html=True)
-            if "tempo_offline_categoria" not in st.session_state:
-                st.session_state["tempo_offline_categoria"] = "Todas"
-
-            st.markdown("#### Filtrar por faixa de tempo")
-            cards = [
-                ("Menos de 1 dia", menos_1d),
-                ("Entre 1 e 3 dias", entre_1_3d),
-                ("3 a 7 dias", entre_3_7d),
-                ("Acima de 7 dias", acima_7d),
-                ("Sem data", nd_count),
-            ]
-            cols_cat = st.columns(len(cards))
-            for (label, count), col in zip(cards, cols_cat):
-                with col:
-                    if st.button(f"{label} ({count})", key=f"tempo_cat_{label}"):
-                        st.session_state["tempo_offline_categoria"] = label
-
-            selected = st.session_state["tempo_offline_categoria"]
-            if selected != "Todas":
-                st.markdown(f"**Filtro ativo:** {selected}")
-                if st.button("Limpar filtro", key="tempo_cat_clear"):
-                    st.session_state["tempo_offline_categoria"] = "Todas"
-
-            col_f1, col_f2 = st.columns([3,1])
-            with col_f1:
-                busca_t = st.text_input("Buscar", key="busca_tempo",
-                                        placeholder="Buscar câmera ou cliente…")
-            with col_f2:
-                top_n_t = st.selectbox("Exibir", ["Top 50","Top 100","Top 200","Todas"],
-                                       key="top_n_tempo")
-
-            df_exib = df_tempo.copy()
-            if selected != "Todas":
-                if selected == "Sem data":
-                    df_exib = df_exib[df_exib["_horas"] < 0]
-                elif selected == "Menos de 1 dia":
-                    df_exib = df_exib[(df_exib["_horas"] >= 0) & (df_exib["_horas"] < 24)]
-                elif selected == "Entre 1 e 3 dias":
-                    df_exib = df_exib[(df_exib["_horas"] >= 24) & (df_exib["_horas"] < 72)]
-                elif selected == "3 a 7 dias":
-                    df_exib = df_exib[(df_exib["_horas"] >= 72) & (df_exib["_horas"] < 168)]
-                elif selected == "Acima de 7 dias":
-                    df_exib = df_exib[df_exib["_horas"] >= 168]
-
-            if busca_t:
-                termo = busca_t.upper()
-                df_exib = df_exib[
-                    df_exib["Nome da Câmera"].astype(str).str.upper().str.contains(termo) |
-                    df_exib["Nome Cliente"].str.upper().str.contains(termo) |
-                    df_exib["Nome Franqueado"].astype(str).str.upper().str.contains(termo) |
-                    df_exib["ID do Cliente"].astype(str).str.upper().str.contains(termo) |
-                    df_exib["ID da Câmera"].astype(str).str.upper().str.contains(termo)
-                ]
-
-            lim = {"Top 50":50,"Top 100":100,"Top 200":200}.get(top_n_t, len(df_exib))
-            df_exib = df_exib.head(lim)
-
-            if df_exib.empty:
-                st.info("Nenhuma câmera encontrada com os filtros aplicados.")
-            else:
-                # Gráfico executivo — Top 30 por dias offline
-                df_graf = df_exib[df_exib["_horas"] >= 0].copy()
-                df_graf = df_graf.sort_values("_horas", ascending=False).head(30).copy()
-                if not df_graf.empty:
-                    df_graf["_dias"] = (df_graf["_horas"] / 24).round(1)
-                    df_graf["_rank"] = range(1, len(df_graf) + 1)
-                    df_graf["_y"] = list(range(len(df_graf), 0, -1))
-
-                    def _truncar_label_top30(id_camera, cidade, limite=34):
-                        id_camera = str(id_camera or "N/D").strip()
-                        cidade = str(cidade or "N/D").replace("\n", " ").strip()
-                        label = f"{id_camera} · {cidade}"
-                        return label if len(label) <= limite else label[:limite - 1].rstrip() + "…"
-
-                    if "Cidade" not in df_graf.columns:
-                        df_graf["Cidade"] = df_graf["Nome Cliente"]
-
-                    df_graf["_label_curto"] = df_graf.apply(
-                        lambda r: _truncar_label_top30(r["ID da Câmera"], r["Cidade"]), axis=1
-                    )
-                    df_graf["_tempo_fmt"] = df_graf["_td"].apply(lambda td: fmt_tempo(td))
-                    df_graf["_criticidade"] = df_graf["_horas"].apply(
-                        lambda h: "Crítico · acima de 7 dias" if h >= 168 else (
-                            "Alto · 3 a 7 dias" if h >= 72 else (
-                                "Atenção · 1 a 3 dias" if h >= 24 else "Recente · menos de 1 dia"
-                            )
-                        )
-                    )
-                    df_graf["_cor"] = df_graf["_horas"].apply(
-                        lambda h: "#dc2626" if h >= 168 else (
-                            "#ea580c" if h >= 72 else (
-                                "#d97706" if h >= 24 else "#059669"
-                            )
-                        )
-                    )
-
-                    st.markdown(f"**Top {len(df_graf)} câmeras — tempo offline em dias**")
-                    st.caption("Visão em área por ID da câmera e cidade. Passe o mouse para ver o nome completo da câmera, cliente e tempo detalhado.")
-
-                    max_dias = float(df_graf["_dias"].max()) if not df_graf.empty else 1.0
-
-                    # Visão de área moderna — ranking por tempo offline em dias.
-                    # Mantém o gráfico limpo: eixo X por posição no ranking e detalhes completos no hover.
-                    fig_t = go.Figure()
-                    x_rank = df_graf["_rank"].tolist()
-                    y_dias = df_graf["_dias"].tolist()
-
-                    fig_t.add_trace(go.Scatter(
-                        x=x_rank,
-                        y=y_dias,
-                        mode="lines",
-                        line=dict(color="#dc2626", width=0),
-                        fill="tozeroy",
-                        fillcolor="rgba(220, 38, 38, 0.14)",
-                        hoverinfo="skip",
-                        showlegend=False,
-                    ))
-
-                    fig_t.add_trace(go.Scatter(
-                        x=x_rank,
-                        y=y_dias,
-                        mode="lines+markers",
-                        line=dict(color="#991b1b", width=3, shape="spline", smoothing=0.65),
-                        marker=dict(
-                            size=8,
-                            color=df_graf["_cor"],
-                            line=dict(color="#ffffff", width=1.5),
-                        ),
-                        customdata=df_graf[["_rank", "ID da Câmera", "Cidade", "Nome da Câmera", "Nome Cliente", "_tempo_fmt", "_criticidade"]].values,
-                        hovertemplate=(
-                            "<b>ID %{customdata[1]} · %{customdata[2]}</b><br>"
-                            "Nome da câmera: %{customdata[3]}<br>"
-                            "Cliente: %{customdata[4]}<br>"
-                            "Ranking: #%{customdata[0]}<br>"
-                            "Tempo offline: <b>%{y:.1f} dias</b><br>"
-                            "Tempo detalhado: %{customdata[5]}<br>"
-                            "Status: %{customdata[6]}"
-                            "<extra></extra>"
-                        ),
-                        name="Dias offline",
-                    ))
-
-                    # Labels fixos removidos para evitar caixas sobrepostas nos pontos.
-                    # A identificação completa permanece no eixo X e no hover.
-
-                    layout_padrao_top30 = {
-                        k: v for k, v in pdefaults().items()
-                        if k not in ["plot_bgcolor", "paper_bgcolor", "margin"]
-                    }
-                    tickvals = df_graf["_rank"].tolist()
-                    ticktext = df_graf["_label_curto"].tolist()
-                    fig_t.update_layout(
-                        **layout_padrao_top30,
-                        height=560,
-                        showlegend=False,
-                        plot_bgcolor="#ffffff",
-                        paper_bgcolor="#ffffff",
-                        hovermode="closest",
-                        xaxis=dict(
-                            title="ID da câmera · Cidade",
-                            tickmode="array",
-                            tickvals=tickvals,
-                            ticktext=ticktext,
-                            gridcolor="rgba(148,163,184,.10)",
-                            tickfont=dict(color="#8B7AA3", size=9),
-                            tickangle=-45,
-                            zeroline=False,
-                            range=[0.5, len(df_graf) + 0.5],
-                        ),
-                        yaxis=dict(
-                            title="Dias offline",
-                            gridcolor="rgba(148,163,184,.16)",
-                            tickfont=dict(color="#8B7AA3", size=10),
-                            zeroline=False,
-                            rangemode="tozero",
-                            ticksuffix="d",
-                        ),
-                        margin=dict(l=70, r=35, t=44, b=145),
-                    )
-                    st.plotly_chart(fig_t, use_container_width=True, key="top30_cameras_tempo_offline_area_moderno")
-
-                # Tabela detalhada
-                st.markdown(f"**Lista detalhada — {len(df_exib)} câmeras**")
-                df_tbl_t = df_exib[["Nome Cliente","Nome Franqueado","ID da Câmera","Nome da Câmera","Faixa","Última vez Online","Observações","_horas","_td"]].copy()
-                df_tbl_t["Tempo Offline"] = df_tbl_t["_td"].apply(lambda td: fmt_tempo(td) if isinstance(td,timedelta) and td.total_seconds()>=0 else "N/D")
-                df_tbl_t["Última vez Online"] = formatar_ultima_atualizacao(df_tbl_t["Última vez Online"])
-                df_tbl_t["Criticidade"] = df_tbl_t["_horas"].apply(
-                    lambda h: "🔴 Crítico (>7 dias)" if h>=168 else (
-                        "🟠 Alto (3–7 dias)" if h>=72 else (
-                            "🟡 Atenção (1–3 dias)" if h>=24 else (
-                                "🟢 Recente (<1 dia)" if h>=0 else "⚫ Sem data"
-                            )
-                        )
-                    )
-                )
-                df_tbl_t = df_tbl_t.drop(columns=["_horas","_td"]).reset_index(drop=True)
-                df_tbl_t.index += 1
-                # Reordenar colunas
-                df_tbl_t = df_tbl_t[["Criticidade","Faixa","Tempo Offline","Nome da Câmera","ID da Câmera","Nome Cliente","Nome Franqueado","Última vez Online","Observações"]]
-
-                # Download
-                buf_t = io.BytesIO()
-                df_tbl_t.to_excel(buf_t, index=True, engine="openpyxl")
-                st.download_button("⬇ Exportar lista",
-                    data=buf_t.getvalue(),
-                    file_name=f"tempo_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="dl_tempo_offline_lista_v1")
-
-                render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
+        render_aba_tempo_offline(dados)
 
     # ════════════════════════════════════════════
     # ABA 4 — % OFFLINE POR CLIENTE
@@ -5464,162 +5641,7 @@ def main():
     # ABA 6 — LPRS OFFLINE
     # ════════════════════════════════════════════
     with tabs["LPRs Offline"]:
-        st.markdown("### LPRs Offline")
-        st.caption("Câmeras com status OFFLINE e com 'LPR' no nome da câmera, respeitando a base filtrada do painel.")
-
-        df_lpr_base = df_origem.copy() if df_origem is not None else pd.DataFrame()
-        if df_lpr_base.empty:
-            st.info("Sem dados carregados para validar LPRs offline.")
-        else:
-            for col in [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU]:
-                if col not in df_lpr_base.columns:
-                    df_lpr_base[col] = ""
-
-            df_lpr_base[COL_WL] = df_lpr_base[COL_WL].astype(str).str.strip()
-            df_lpr_base[COL_STATUS] = df_lpr_base[COL_STATUS].astype(str).str.strip().str.upper()
-            df_lpr_base[COL_NOME_CAM] = df_lpr_base[COL_NOME_CAM].astype(str).fillna("")
-
-            # Garante o mesmo universo do dashboard: se existir mapa de clientes, considera apenas esses IDs.
-            clientes_map_lpr = carregar_clientes()
-            if clientes_map_lpr:
-                df_lpr_base = df_lpr_base[df_lpr_base[COL_WL].isin(set(clientes_map_lpr.keys()))].copy()
-
-            mask_lpr = df_lpr_base[COL_NOME_CAM].str.contains("LPR", case=False, na=False)
-            mask_off = df_lpr_base[COL_STATUS].eq("OFFLINE")
-            df_lprs_total = df_lpr_base[mask_lpr].copy()
-            df_lprs_off = df_lpr_base[mask_lpr & mask_off].copy()
-
-            total_lprs = int(len(df_lprs_total))
-            total_lprs_off = int(len(df_lprs_off))
-            clientes_lpr_total = int(df_lprs_total[COL_WL].nunique()) if not df_lprs_total.empty else 0
-            clientes_lpr_off = int(df_lprs_off[COL_WL].nunique()) if not df_lprs_off.empty else 0
-            pct_lpr_off = (total_lprs_off / total_lprs * 100) if total_lprs else 0
-
-            if not df_lprs_off.empty:
-                df_lprs_off["Cliente"] = df_lprs_off[COL_WL].map(clientes_map_lpr).fillna(df_lprs_off[COL_WL].apply(lambda x: f"ID {x}"))
-                df_lprs_off["Franqueado"] = df_lprs_off[COL_EMPRESA].astype(str).replace({"nan": ""}).str.strip()
-                df_lprs_off["Última atualização"] = formatar_ultima_atualizacao(df_lprs_off[COL_ULT_ATU])
-                df_lprs_off["Tempo offline"] = parse_ultima_atualizacao(df_lprs_off[COL_ULT_ATU]).apply(
-                    lambda x: fmt_tempo(agora_sao_paulo() - x) if pd.notna(x) else "N/D"
-                )
-
-            st.markdown(f"""
-            <div class="compare-hero">
-                <div class="compare-title">🚘 Radar LPR Offline</div>
-                <div class="compare-sub">Validação operacional das câmeras LPR desconectadas na carteira filtrada.</div>
-            </div>
-            <div class="compare-grid">
-                <div class="compare-card neutral">
-                    <div class="compare-label">Total de LPRs</div>
-                    <div class="compare-value">{total_lprs}</div>
-                    <div class="compare-note">câmeras LPR encontradas na base</div>
-                </div>
-                <div class="compare-card bad">
-                    <div class="compare-label">LPRs offline</div>
-                    <div class="compare-value" style="color:#dc2626">{total_lprs_off}</div>
-                    <div class="compare-note">{pct_lpr_off:.1f}% das LPRs estão offline</div>
-                </div>
-                <div class="compare-card warn">
-                    <div class="compare-label">Clientes afetados</div>
-                    <div class="compare-value" style="color:#d97706">{clientes_lpr_off}</div>
-                    <div class="compare-note">de {clientes_lpr_total} clientes com LPR</div>
-                </div>
-                <div class="compare-card good">
-                    <div class="compare-label">LPRs online</div>
-                    <div class="compare-value" style="color:#059669">{max(total_lprs - total_lprs_off, 0)}</div>
-                    <div class="compare-note">câmeras LPR sem alerta offline</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            if df_lprs_off.empty:
-                st.success("Nenhuma câmera LPR offline encontrada na carteira filtrada.")
-            else:
-                df_lpr_cli = (
-                    df_lprs_off.groupby([COL_WL, "Cliente", "Franqueado"], as_index=False)
-                    .agg(lprs_offline=(COL_ID_CAM, "count"))
-                    .sort_values("lprs_offline", ascending=False)
-                )
-
-                st.markdown("#### Clientes com mais LPRs offline")
-                top_lpr_area = df_lpr_cli.head(15).sort_values("lprs_offline", ascending=True).copy()
-                top_lpr_area["Cliente eixo"] = top_lpr_area["Cliente"].astype(str)
-                max_lpr_area = max(3, int(top_lpr_area["lprs_offline"].max()) + 1) if not top_lpr_area.empty else 3
-                altura_lpr_area = max(380, min(680, 42 * len(top_lpr_area) + 140))
-
-                fig_lpr_area = go.Figure()
-                fig_lpr_area.add_trace(go.Scatter(
-                    name="LPRs offline",
-                    x=top_lpr_area["lprs_offline"],
-                    y=top_lpr_area["Cliente eixo"],
-                    mode="lines+markers+text",
-                    fill="tozerox",
-                    line=dict(color="#dc2626", width=3.0, shape="spline", smoothing=0.65),
-                    marker=dict(color="#dc2626", size=9, line=dict(color="#ffffff", width=1)),
-                    fillcolor="rgba(220, 38, 38, 0.18)",
-                    text=top_lpr_area["lprs_offline"],
-                    textposition="middle right",
-                    customdata=top_lpr_area[["Cliente", "Franqueado"]],
-                    hovertemplate=(
-                        "<b>%{customdata[0]}</b><br>"
-                        "Franqueado: %{customdata[1]}<br>"
-                        "LPRs offline: %{x}<extra></extra>"
-                    ),
-                ))
-                fig_lpr_area.update_layout(
-                    **pdefaults(),
-                    height=altura_lpr_area,
-                    margin=dict(l=10, r=55, t=10, b=35),
-                    xaxis=dict(
-                        title="LPRs offline",
-                        range=[0, max_lpr_area],
-                        gridcolor="#E9D5FF",
-                        tickfont=dict(color="#8B7AA3", size=10),
-                        zeroline=False,
-                    ),
-                    yaxis=dict(
-                        title="",
-                        type="category",
-                        categoryorder="array",
-                        categoryarray=top_lpr_area["Cliente eixo"].tolist(),
-                        tickfont=dict(color="#6B5A7A", size=11),
-                        automargin=True,
-                    ),
-                    showlegend=False,
-                    hovermode="closest",
-                )
-                st.plotly_chart(fig_lpr_area, use_container_width=True, key="lprs_offline_top_clientes_area_horizontal")
-
-                st.markdown("#### Detalhamento das LPRs offline")
-                busca_lpr = st.text_input("Buscar por cliente, franqueado, ID ou nome da câmera", key="busca_lprs_offline")
-                df_lpr_lista = df_lprs_off.copy()
-                if busca_lpr.strip():
-                    termo = busca_lpr.strip().lower()
-                    texto_busca = (
-                        df_lpr_lista["Cliente"].astype(str) + " " +
-                        df_lpr_lista["Franqueado"].astype(str) + " " +
-                        df_lpr_lista[COL_ID_CAM].astype(str) + " " +
-                        df_lpr_lista[COL_NOME_CAM].astype(str)
-                    ).str.lower()
-                    df_lpr_lista = df_lpr_lista[texto_busca.str.contains(re.escape(termo), na=False)].copy()
-
-                cols_lpr = ["Cliente", "Franqueado", COL_ID_CAM, COL_NOME_CAM, "Última atualização", "Tempo offline"]
-                df_lpr_lista = df_lpr_lista[cols_lpr].rename(columns={
-                    COL_ID_CAM: "ID da Câmera",
-                    COL_NOME_CAM: "Nome da Câmera",
-                }).sort_values(["Cliente", "Nome da Câmera"])
-                render_dataframe(df_lpr_lista, height=520)
-
-                csv_lpr = df_lpr_lista.to_csv(index=False, sep=";", encoding="utf-8-sig")
-                st.download_button(
-                    "📥 Baixar LPRs offline em CSV",
-                    data=csv_lpr,
-                    file_name=f"lprs_offline_{agora_sao_paulo_str('%Y%m%d_%H%M')}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    key="dl_lprs_offline_csv_v1",
-                )
-
+        render_aba_lprs_offline(df_origem)
 
     # ════════════════════════════════════════════
     # ABA 7 — ATUALIZAR BASE ONLINE
