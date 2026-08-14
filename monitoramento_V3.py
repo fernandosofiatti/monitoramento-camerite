@@ -5042,7 +5042,7 @@ def main():
     # ════════════════════════════════════════════
     with tabs["% por cliente"]:
         st.markdown("#### Percentual de câmeras offline por cliente")
-        st.caption("Escala 0–100% · Verde 0–5% · Amarelo >5–10% · Vermelho >10%")
+        st.caption(f"Verde 0–{CFG_ATENCAO_PCT:.0f}% · Amarelo >{CFG_ATENCAO_PCT:.0f}–{CFG_CRITICO_PCT:.0f}% · Vermelho >{CFG_CRITICO_PCT:.0f}%")
 
         df_bar = pd.DataFrame([
             {"Cliente": v["nome_cliente"], "Offline": len(v["offline"]),
@@ -5051,11 +5051,14 @@ def main():
             for v in dados.values()
         ]).sort_values("Pct", ascending=True)
 
+        # Eixo dinâmico: evita esbanjar espaço quando o pior cliente está bem abaixo de 100%.
+        x_max_bar = max(float(df_bar["Pct"].max()) * 1.15 if not df_bar.empty else 0, CFG_CRITICO_PCT + 5)
+
         fig_bar = go.Figure()
-        fig_bar.add_vrect(x0=0,   x1=10,  fillcolor="rgba(5,150,105,0.06)",  layer="below", line_width=0)
-        fig_bar.add_vrect(x0=10,  x1=15,  fillcolor="rgba(217,119,6,0.06)",  layer="below", line_width=0)
-        fig_bar.add_vrect(x0=15,  x1=100, fillcolor="rgba(220,38,38,0.06)",  layer="below", line_width=0)
-        for xv, lbl in [(5,"5%"),(10,"10%")]:
+        fig_bar.add_vrect(x0=0, x1=CFG_ATENCAO_PCT, fillcolor="rgba(5,150,105,0.06)", layer="below", line_width=0)
+        fig_bar.add_vrect(x0=CFG_ATENCAO_PCT, x1=CFG_CRITICO_PCT, fillcolor="rgba(217,119,6,0.06)", layer="below", line_width=0)
+        fig_bar.add_vrect(x0=CFG_CRITICO_PCT, x1=x_max_bar, fillcolor="rgba(220,38,38,0.06)", layer="below", line_width=0)
+        for xv, lbl in [(CFG_ATENCAO_PCT, f"{CFG_ATENCAO_PCT:.0f}%"), (CFG_CRITICO_PCT, f"{CFG_CRITICO_PCT:.0f}%")]:
             fig_bar.add_vline(x=xv, line_dash="dot", line_color="#C4B5FD", line_width=1.5,
                 annotation_text=lbl, annotation_position="top",
                 annotation_font=dict(color="#8B7AA3", size=10))
@@ -5068,7 +5071,7 @@ def main():
         ))
         fig_bar.update_layout(
             **pdefaults(), height=max(360, len(df_bar)*34), showlegend=False,
-            xaxis=dict(range=[0,100], ticksuffix="%", gridcolor="#E9D5FF",
+            xaxis=dict(range=[0,x_max_bar], ticksuffix="%", gridcolor="#E9D5FF",
                        tickfont=dict(color="#8B7AA3",size=10), zeroline=False),
             yaxis=dict(tickfont=dict(color="#6B5A7A",size=10), gridcolor="#FAF7FF"),
             margin=dict(l=10, r=80, t=30, b=10),
