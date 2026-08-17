@@ -488,6 +488,77 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
 
         st.markdown("#### Prévia da importação filtrada")
 
+        # Comparativo: base atual (já publicada) vs. CSV novo — ANTES de gravar no Supabase.
+        def _resumo_por_wl(df_in, wl_col, status_col):
+            if df_in is None or df_in.empty or wl_col not in df_in.columns:
+                return pd.DataFrame(columns=["wl_id", "total", "offline"])
+            tmp = pd.DataFrame({
+                "wl_id": df_in[wl_col].astype(str).str.strip(),
+                "status": df_in[status_col].astype(str).str.strip().str.upper(),
+            })
+            return tmp.groupby("wl_id").agg(
+                total=("status", "size"),
+                offline=("status", lambda s: int((s == "OFFLINE").sum())),
+            ).reset_index()
+
+        res_atual = _resumo_por_wl(df_origem, COL_WL, COL_STATUS).rename(columns={"total": "tot_a", "offline": "off_a"})
+        res_novo = _resumo_por_wl(df_preview, "id_whitelabel", "status_camera").rename(columns={"total": "tot_b", "offline": "off_b"})
+
+        if res_atual.empty:
+            st.info("Sem base atual carregada para comparar — salve/atualize a base ao menos uma vez para ver a variação aqui.")
+        else:
+            df_comp_up = pd.merge(res_atual, res_novo, on="wl_id", how="outer").fillna(0)
+            df_comp_up["cliente"] = df_comp_up["wl_id"].map(clientes_map).fillna("ID " + df_comp_up["wl_id"].astype(str))
+            df_comp_up["delta_off"] = df_comp_up["off_b"] - df_comp_up["off_a"]
+
+            df_top_piora_up = df_comp_up[df_comp_up["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
+            df_top_melhora_up = df_comp_up[df_comp_up["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
+
+            st.markdown("##### Maiores variações de câmeras offline")
+            st.caption('Base atual (já publicada) vs. CSV novo — antes de clicar em "Atualizar base online".')
+            col_up1, col_up2 = st.columns(2)
+            with col_up1:
+                st.caption("🔴 Clientes que mais pioraram")
+                if df_top_piora_up.empty:
+                    st.info("Nenhum cliente piora neste CSV.")
+                else:
+                    fig_piora_up = go.Figure(go.Bar(
+                        y=df_top_piora_up["cliente"], x=df_top_piora_up["delta_off"], orientation="h",
+                        marker=dict(color="#dc2626"),
+                        text=[f"+{int(v)}" for v in df_top_piora_up["delta_off"]],
+                        textposition="outside",
+                        hovertemplate="%{y}<br>+%{x:.0f} câmeras offline<extra></extra>",
+                    ))
+                    fig_piora_up.update_layout(
+                        **pdefaults(), height=max(320, len(df_top_piora_up) * 34), showlegend=False,
+                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10), zeroline=False),
+                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A", size=10)),
+                        margin=dict(l=10, r=60, t=10, b=10),
+                    )
+                    st.plotly_chart(fig_piora_up, use_container_width=True, key="atualizar_base_top_piora")
+            with col_up2:
+                st.caption("🟢 Clientes que mais melhoraram")
+                if df_top_melhora_up.empty:
+                    st.info("Nenhum cliente melhora neste CSV.")
+                else:
+                    df_m_plot_up = df_top_melhora_up.copy()
+                    df_m_plot_up["melhora_abs"] = df_m_plot_up["delta_off"].abs()
+                    fig_melhora_up = go.Figure(go.Bar(
+                        y=df_m_plot_up["cliente"], x=df_m_plot_up["melhora_abs"], orientation="h",
+                        marker=dict(color="#059669"),
+                        text=[f"-{int(v)}" for v in df_m_plot_up["melhora_abs"]],
+                        textposition="outside",
+                        hovertemplate="%{y}<br>-%{x:.0f} câmeras offline<extra></extra>",
+                    ))
+                    fig_melhora_up.update_layout(
+                        **pdefaults(), height=max(320, len(df_m_plot_up) * 34), showlegend=False,
+                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10), zeroline=False),
+                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A", size=10)),
+                        margin=dict(l=10, r=60, t=10, b=10),
+                    )
+                    st.plotly_chart(fig_melhora_up, use_container_width=True, key="atualizar_base_top_melhora")
+            st.markdown("")
+
         # Verificação dos campos novos — torna visível se o plano/datas vão preenchidos
         # ANTES de gravar (evita descobrir só depois que a base ficou nula).
         def _preenchidos(col: str) -> int:
@@ -525,7 +596,8 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
                     "`Plano_Contratado` preenchida. Sem isso, a aba de Padrão de Armazenamento fica vazia."
                 )
 
-        render_dataframe(df_preview.head(100), height=320)
+        with st.expander("Ver linhas brutas da prévia (100 primeiras)"):
+            render_dataframe(df_preview.head(100), height=320)
 
         # Diagnóstico de escopo: quantos clientes/linhas do CSV ficam FORA do filtro do painel.
         def _norm_wl(serie):
