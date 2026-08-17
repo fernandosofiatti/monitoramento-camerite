@@ -574,7 +574,6 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
             s = df_preview[col].astype(str).str.strip().str.lower()
             return int((~s.isin(["", "nan", "none", "null", "nat", "<na>"])).sum())
 
-        n_prev = len(df_preview)
         chk = {
             "plano_contratado": _preenchidos("plano_contratado"),
             "data_cadastro": _preenchidos("data_cadastro"),
@@ -587,21 +586,11 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
                 f"`{'`, `'.join(ausentes)}` (eles não aparecem no envio). "
                 "O código publicado está desatualizado — atualize o deploy antes de importar."
             )
-        else:
-            cols_chk = st.columns(3)
-            rotulos = {
-                "plano_contratado": "Plano contratado",
-                "data_cadastro": "Data de cadastro",
-                "data_inativacao": "Data de inativação",
-            }
-            for (campo, valor), col in zip(chk.items(), cols_chk):
-                pct = (valor / n_prev * 100) if n_prev else 0
-                col.metric(rotulos[campo], f"{fmt_card_num(valor)}/{fmt_card_num(n_prev)}", f"{pct:.0f}%")
-            if chk["plano_contratado"] == 0:
-                st.warning(
-                    "O campo `plano_contratado` está zerado no envio: confira se o CSV tem a coluna "
-                    "`Plano_Contratado` preenchida. Sem isso, a aba de Padrão de Armazenamento fica vazia."
-                )
+        elif chk["plano_contratado"] == 0:
+            st.warning(
+                "O campo `plano_contratado` está zerado no envio: confira se o CSV tem a coluna "
+                "`Plano_Contratado` preenchida. Sem isso, a aba de Padrão de Armazenamento fica vazia."
+            )
 
         with st.expander("Ver linhas brutas da prévia (100 primeiras)"):
             render_dataframe(df_preview.head(100), height=320)
