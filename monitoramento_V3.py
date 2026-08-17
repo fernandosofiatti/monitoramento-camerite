@@ -501,7 +501,14 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
                 offline=("status", lambda s: int((s == "OFFLINE").sum())),
             ).reset_index()
 
-        res_atual = _resumo_por_wl(df_origem, COL_WL, COL_STATUS).rename(columns={"total": "tot_a", "offline": "off_a"})
+        # Restringe a base atual ao mesmo universo de clientes do CSV novo (nome_clientes.xlsx),
+        # senão clientes fora do filtro entram no comparativo com off_b=0 e aparecem como falsa "melhora".
+        df_origem_comp = df_origem
+        if clientes_map and df_origem is not None and COL_WL in df_origem.columns:
+            ids_validos_comp = set(str(k).strip() for k in clientes_map.keys())
+            df_origem_comp = df_origem[df_origem[COL_WL].astype(str).str.strip().isin(ids_validos_comp)].copy()
+
+        res_atual = _resumo_por_wl(df_origem_comp, COL_WL, COL_STATUS).rename(columns={"total": "tot_a", "offline": "off_a"})
         res_novo = _resumo_por_wl(df_preview, "id_whitelabel", "status_camera").rename(columns={"total": "tot_b", "offline": "off_b"})
 
         if res_atual.empty:
