@@ -87,14 +87,12 @@ CFG_W_PCT = 2.0
 CFG_W_HORAS_DIV = 12.0
 CFG_W_ACIMA = 8.0
 CFG_W_DIASCRIT = 5.0
-CFG_TEND_JANELA_DIAS = 7   # janela (dias) para a "Tendência" dos KPIs (recente, sobre média móvel)
 
 CONFIG_DEFAULTS = {
     "SLA_META": 90.0, "PESO_LPR": 3.0, "LPR_KEYWORD": "LPR",
     "CFG_ATENCAO_PCT": 5.0, "CFG_CRITICO_PCT": 10.0, "CFG_ACIMA_HORAS": 24,
     "CFG_W_OFFLINE": 6.0, "CFG_W_PCT": 2.0, "CFG_W_HORAS_DIV": 12.0,
     "CFG_W_ACIMA": 8.0, "CFG_W_DIASCRIT": 5.0,
-    "CFG_TEND_JANELA_DIAS": 7,
 }
 CONFIG_PATH = os.path.join(BASE_DIR, "config_painel.json")
 
@@ -3359,13 +3357,13 @@ def _area_kpi_fig(x_dt, y, cor: str, sufixo: str = "", nome: str = "") -> "go.Fi
     return fig
 
 
-def _tendencia_recente(valores, datas=None, dias: int | None = None) -> tuple[float, str]:
-    """Tendência recente: inclinação sobre a MÉDIA MÓVEL, só nos últimos `dias`.
+def _tendencia_recente(valores, datas=None, dias: int = 30) -> tuple[float, str]:
+    """Tendência: inclinação sobre a MÉDIA MÓVEL, na janela `dias` (a mesma do gráfico exibido).
 
-    Evita que um pico isolado (ex.: um dia de 494) ou o período inteiro contradiga
-    o que o fim do gráfico mostra. Retorna (slope_por_dia, rótulo).
+    Evita que um pico isolado (ex.: um dia de 494) contradiga o que o fim do
+    gráfico mostra. Retorna (slope_por_dia, rótulo).
     """
-    dias = int(CFG_TEND_JANELA_DIAS if dias is None else dias)
+    dias = int(dias)
     s = pd.to_numeric(pd.Series(list(valores)), errors="coerce")
     if datas is not None:
         d = pd.to_datetime(pd.Series(list(datas)), errors="coerce")
@@ -3408,19 +3406,19 @@ def _tendencia_recente(valores, datas=None, dias: int | None = None) -> tuple[fl
     return slope, "estável"
 
 
-def _kpi_stats_row(s, suf: str = "", datas=None) -> None:
+def _kpi_stats_row(s, suf: str = "", datas=None, dias: int = 30) -> None:
     s2 = pd.to_numeric(pd.Series(list(s)), errors="coerce").dropna()
     if s2.empty:
         return
     atual, media, pico, melhor = s2.iloc[-1], s2.mean(), s2.max(), s2.min()
-    _, tend = _tendencia_recente(s, datas=datas)
+    _, tend = _tendencia_recente(s, datas=datas, dias=dias)
     fmt = (lambda v: f"{v:.1f}{suf}") if suf == "%" else (lambda v: f"{v:.0f}")
     c = st.columns(5)
     c[0].metric("Atual", fmt(atual))
-    c[1].metric("Média 30d", fmt(media))
+    c[1].metric(f"Média {dias}d", fmt(media))
     c[2].metric("Pico", fmt(pico))
     c[3].metric("Melhor", fmt(melhor))
-    c[4].metric(f"Tendência ({int(CFG_TEND_JANELA_DIAS)}d)", tend)
+    c[4].metric(f"Tendência ({dias}d)", tend)
 
 
 def _render_kpi_hist(sel: str) -> None:
@@ -3440,7 +3438,7 @@ def _render_kpi_hist(sel: str) -> None:
         st.markdown(f"#### 📈 {label} — últimos {dias_hist} dias")
         fig = _area_kpi_fig(g["gravado_dt"], g[col], cor, suf, label)
         st.plotly_chart(fig, use_container_width=True, key=f"kpihist_{sel}")
-        _kpi_stats_row(g[col], suf, datas=g["gravado_dt"])
+        _kpi_stats_row(g[col], suf, datas=g["gravado_dt"], dias=dias_hist)
 
 
 def _sparkline_svg(vals, cor: str, w: int = 118, h: int = 32) -> str:
@@ -3578,15 +3576,9 @@ def render_aba_configuracao() -> None:
         st.warning("O limite de Crítico deve ser maior que o de Atenção.")
 
     st.markdown("#### ⏱️ Operacional")
-    o1, o2 = st.columns(2)
-    with o1:
-        v_horas = st.number_input("Horas para considerar offline 'há muito tempo'", min_value=1, max_value=240,
-                                  value=int(cfg["CFG_ACIMA_HORAS"]), step=1, key="cfg_horas",
-                                  help="Usado na contagem 'Acima 24h' e no score de criticidade.")
-    with o2:
-        v_tend = st.number_input("Janela da Tendência dos KPIs (dias)", min_value=2, max_value=30,
-                                 value=int(cfg["CFG_TEND_JANELA_DIAS"]), step=1, key="cfg_tend",
-                                 help="A Tendência (▲/▼) é medida só nos últimos N dias, sobre a média móvel — reflete o movimento recente, não o mês inteiro.")
+    v_horas = st.number_input("Horas para considerar offline 'há muito tempo'", min_value=1, max_value=240,
+                              value=int(cfg["CFG_ACIMA_HORAS"]), step=1, key="cfg_horas",
+                              help="Usado na contagem 'Acima 24h' e no score de criticidade.")
 
     with st.expander("🧮 Pesos do score de criticidade (avançado)"):
         st.caption("Score = offline×A + %offline×B + horas_offline/C + acima_limite×D + dias_críticos×E")
@@ -3600,7 +3592,6 @@ def render_aba_configuracao() -> None:
     nova = {
         "SLA_META": v_meta, "PESO_LPR": v_peso, "LPR_KEYWORD": (v_kw or "LPR").strip() or "LPR",
         "CFG_ATENCAO_PCT": v_at, "CFG_CRITICO_PCT": v_cr, "CFG_ACIMA_HORAS": int(v_horas),
-        "CFG_TEND_JANELA_DIAS": int(v_tend),
         "CFG_W_OFFLINE": v_wo, "CFG_W_PCT": v_wp, "CFG_W_HORAS_DIV": v_wh,
         "CFG_W_ACIMA": v_wa, "CFG_W_DIASCRIT": v_wd,
     }
