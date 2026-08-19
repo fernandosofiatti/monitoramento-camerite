@@ -3406,31 +3406,38 @@ def _tendencia_recente(valores, datas=None, dias: int = 30) -> tuple[float, str]
     return slope, "estável"
 
 
-def _kpi_stats_row(s, suf: str = "", datas=None, dias: int = 30) -> None:
+def _kpi_stats_row(s, suf: str = "", datas=None, dias: int = 30, good_up: bool = False) -> None:
     s2 = pd.to_numeric(pd.Series(list(s)), errors="coerce").dropna()
     if s2.empty:
         return
-    atual, media, pico, melhor = s2.iloc[-1], s2.mean(), s2.max(), s2.min()
+    atual, media = s2.iloc[-1], s2.mean()
+    # "Melhor" é sempre o ponto mais favorável: maior valor quando subir é bom (ex.: disponibilidade),
+    # menor valor quando subir é ruim (ex.: offline/críticos) — e vice-versa pro pior ponto.
+    if good_up:
+        pior_label, pior_val, melhor_val = "Pior", s2.min(), s2.max()
+    else:
+        pior_label, pior_val, melhor_val = "Pico", s2.max(), s2.min()
     _, tend = _tendencia_recente(s, datas=datas, dias=dias)
     fmt = (lambda v: f"{v:.1f}{suf}") if suf == "%" else (lambda v: f"{v:.0f}")
     c = st.columns(5)
     c[0].metric("Atual", fmt(atual))
     c[1].metric(f"Média {dias}d", fmt(media))
-    c[2].metric("Pico", fmt(pico))
-    c[3].metric("Melhor", fmt(melhor))
+    c[2].metric(pior_label, fmt(pior_val))
+    c[3].metric("Melhor", fmt(melhor_val))
     c[4].metric(f"Tendência ({dias}d)", tend)
 
 
 def _render_kpi_hist(sel: str) -> None:
+    # (coluna, rótulo, cor, sufixo, dias da janela, subir é bom?)
     cfg = {
-        "offline30": ("offline", "Câmeras offline", "#e11d48", "", 30),
-        "offline7": ("offline", "Câmeras offline", "#e11d48", "", 7),
-        "disp": ("disp", "Disponibilidade GOV", "#0f766e", "%", 30),
-        "criticos": ("criticos", "Clientes críticos", "#f59e0b", "", 30),
+        "offline30": ("offline", "Câmeras offline", "#e11d48", "", 30, False),
+        "offline7": ("offline", "Câmeras offline", "#e11d48", "", 7, False),
+        "disp": ("disp", "Disponibilidade GOV", "#0f766e", "%", 30, True),
+        "criticos": ("criticos", "Clientes críticos", "#f59e0b", "", 30, False),
     }
     st.markdown("---")
     if sel in cfg:
-        col, label, cor, suf, dias_hist = cfg[sel]
+        col, label, cor, suf, dias_hist, good_up = cfg[sel]
         g = kpi_historico_30d(dias_hist)
         if g is None or g.empty:
             st.info(f"Sem histórico suficiente nos últimos {dias_hist} dias.")
@@ -3438,7 +3445,7 @@ def _render_kpi_hist(sel: str) -> None:
         st.markdown(f"#### 📈 {label} — últimos {dias_hist} dias")
         fig = _area_kpi_fig(g["gravado_dt"], g[col], cor, suf, label)
         st.plotly_chart(fig, use_container_width=True, key=f"kpihist_{sel}")
-        _kpi_stats_row(g[col], suf, datas=g["gravado_dt"], dias=dias_hist)
+        _kpi_stats_row(g[col], suf, datas=g["gravado_dt"], dias=dias_hist, good_up=good_up)
 
 
 def _sparkline_svg(vals, cor: str, w: int = 118, h: int = 32) -> str:
