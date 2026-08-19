@@ -3425,31 +3425,19 @@ def _kpi_stats_row(s, suf: str = "", datas=None) -> None:
 
 def _render_kpi_hist(sel: str) -> None:
     cfg = {
-        "offline": ("offline", "Câmeras offline", "#e11d48", ""),
-        "disp": ("disp", "Disponibilidade GOV", "#0f766e", "%"),
-        "criticos": ("criticos", "Clientes críticos", "#f59e0b", ""),
+        "offline30": ("offline", "Câmeras offline", "#e11d48", "", 30),
+        "offline7": ("offline", "Câmeras offline", "#e11d48", "", 7),
+        "disp": ("disp", "Disponibilidade GOV", "#0f766e", "%", 30),
+        "criticos": ("criticos", "Clientes críticos", "#f59e0b", "", 30),
     }
     st.markdown("---")
-    if sel == "sla":
-        with st.spinner("Calculando SLA dos últimos 30 dias..."):
-            g = sla_historico_30d(30)
+    if sel in cfg:
+        col, label, cor, suf, dias_hist = cfg[sel]
+        g = kpi_historico_30d(dias_hist)
         if g is None or g.empty:
-            st.info("Sem histórico suficiente para o SLA de 30 dias (é preciso ter snapshots com câmeras salvas).")
+            st.info(f"Sem histórico suficiente nos últimos {dias_hist} dias.")
             return
-        st.markdown("#### 📈 SLA da Operação — últimos 30 dias")
-        fig = _area_kpi_fig(g["gravado_dt"], g["sla"], "#7C3AED", "%", "SLA")
-        fig.add_hline(y=SLA_META, line_dash="dash", line_color="#0f766e", line_width=1.4,
-                      annotation_text=f"Meta {SLA_META:.0f}%", annotation_position="top left",
-                      annotation_font=dict(color="#0f766e", size=11))
-        st.plotly_chart(fig, use_container_width=True, key="kpihist_sla")
-        _kpi_stats_row(g["sla"], "%", datas=g["gravado_dt"])
-    elif sel in cfg:
-        col, label, cor, suf = cfg[sel]
-        g = kpi_historico_30d(30)
-        if g is None or g.empty:
-            st.info("Sem histórico suficiente nos últimos 30 dias.")
-            return
-        st.markdown(f"#### 📈 {label} — últimos 30 dias")
+        st.markdown(f"#### 📈 {label} — últimos {dias_hist} dias")
         fig = _area_kpi_fig(g["gravado_dt"], g[col], cor, suf, label)
         st.plotly_chart(fig, use_container_width=True, key=f"kpihist_{sel}")
         _kpi_stats_row(g[col], suf, datas=g["gravado_dt"])
@@ -3488,12 +3476,11 @@ def _chip_delta(delta, good_is_up: bool, suf: str = "") -> str:
 
 
 @st.fragment
-def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cameras: int, total_offline: int) -> None:
-    """Bloco de KPIs clicáveis (SLA ponderado + offline + disponibilidade + críticos) com histórico de 30 dias.
+def render_resumo_operacional(df_clientes_ops, total_cameras: int, total_offline: int) -> None:
+    """Bloco de KPIs clicáveis (offline 30/7 dias + disponibilidade + críticos) com histórico.
 
-    Em st.fragment: clicar em "Últimos 30 dias" rerroda só este bloco (rápido), não o app inteiro.
+    Em st.fragment: clicar em "Últimos N dias" rerroda só este bloco (rápido), não o app inteiro.
     """
-    sla = calcular_sla_operacao(df_origem, wl_validos=set(dados.keys()) if dados else None)
     total_online = int(total_cameras - total_offline)
     disp = round(total_online / total_cameras * 100, 1) if total_cameras else 0.0
     n_clientes = int(len(df_clientes_ops)) if df_clientes_ops is not None else 0
@@ -3502,67 +3489,45 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
         criticos = int((pd.to_numeric(df_clientes_ops["% Offline"], errors="coerce") > CFG_CRITICO_PCT).sum())
     pct_frota = round(total_offline / total_cameras * 100, 1) if total_cameras else 0.0
 
-    # Histórico (cacheado, barato) para sparkline + variação dos 3 KPIs simples.
-    hist = kpi_historico_30d(30)
+    # Histórico (cacheado, barato) para sparkline + variação dos KPIs, em duas janelas p/ offline.
+    hist30 = kpi_historico_30d(30)
+    hist7 = kpi_historico_30d(7)
 
-    def _serie(col):
+    def _serie(hist, col):
         if hist is None or hist.empty or col not in hist.columns:
             return [], None
         s = pd.to_numeric(hist[col], errors="coerce").dropna().tolist()
         delta = (s[-1] - s[-2]) if len(s) >= 2 else None
         return s, delta
 
-    s_off, d_off = _serie("offline")
-    s_disp, d_disp = _serie("disp")
-    s_crit, d_crit = _serie("criticos")
+    s_off30, d_off30 = _serie(hist30, "offline")
+    s_off7, d_off7 = _serie(hist7, "offline")
+    s_disp, d_disp = _serie(hist30, "disp")
+    s_crit, d_crit = _serie(hist30, "criticos")
 
-    # Série do SLA (cacheada) — para chip + sparkline, no mesmo padrão dos demais.
-    sla_hist = sla_historico_30d(30)
-    s_sla = pd.to_numeric(sla_hist["sla"], errors="coerce").dropna().tolist() if (sla_hist is not None and not sla_hist.empty) else []
-    d_sla = (s_sla[-1] - s_sla[-2]) if len(s_sla) >= 2 else None
-
-    # (chave, rótulo, valor, cor, ícone, subtexto, série, delta, good_is_up, sufixo)
+    # (chave, rótulo, valor, cor, ícone, subtexto, série, delta, good_is_up, sufixo, texto do botão)
     metrics = [
-        ("sla", "SLA da Operação", f"{sla['sla']:.1f}%", "#7C3AED", "🎯", None, None, None, None, ""),
-        ("offline", "Câmeras offline", f"{total_offline}", "#e11d48", "📴",
-         f"{pct_frota:.1f}% da frota", s_off, d_off, False, ""),
+        ("offline30", "Câmeras Offline Últimos 30 dias", f"{total_offline}", "#e11d48", "📴",
+         f"{pct_frota:.1f}% da frota", s_off30, d_off30, False, "", "📈 Últimos 30 dias"),
+        ("offline7", "Câmeras Offline Últimos 7 dias", f"{total_offline}", "#e11d48", "📴",
+         f"{pct_frota:.1f}% da frota", s_off7, d_off7, False, "", "📅 Últimos 7 dias"),
         ("disp", "Disponibilidade GOV", f"{disp:.1f}%", "#0f766e", "📶",
-         f"{total_online} de {total_cameras} online", s_disp, d_disp, True, "%"),
+         f"{total_online} de {total_cameras} online", s_disp, d_disp, True, "%", "📈 Últimos 30 dias"),
         ("criticos", "Clientes críticos", f"{criticos}", "#f59e0b", "🔥",
-         f"de {n_clientes} clientes monitorados", s_crit, d_crit, False, ""),
+         f"de {n_clientes} clientes monitorados", s_crit, d_crit, False, "", "📈 Últimos 30 dias"),
     ]
 
     cols = st.columns(4)
     for m, c in zip(metrics, cols):
-        mkey, label, val, cor, icone, sub, serie, delta, good_up, suf = m
+        mkey, label, val, cor, icone, sub, serie, delta, good_up, suf, btn_label = m
         with c:
-            if mkey == "sla":
-                denom = sla["lpr_total"] * sla["peso"] + sla["reg_total"]
-                w_lpr = (sla["lpr_online"] * sla["peso"] / denom * 100) if denom else 0
-                w_reg = (sla["reg_online"] / denom * 100) if denom else 0
-                dentro = sla["sla"] >= SLA_META
-                meta_cor = "#0f766e" if dentro else "#e11d48"
-                chip_sla = _chip_delta(d_sla, True, "%")   # SLA subir = bom
-                spark_sla = _sparkline_svg(s_sla, "#7C3AED")
-                corpo = (
-                    f"<div style='font-size:10px;margin-top:8px;color:{meta_cor};font-weight:700'>"
-                    f"meta {SLA_META:.0f}% · {'dentro' if dentro else 'abaixo'}</div>"
-                    f"<div style='display:flex;height:7px;background:#F1ECFA;border-radius:99px;margin-top:8px;overflow:hidden'>"
-                    f"<div style='width:{w_lpr:.2f}%;background:linear-gradient(90deg,#7c3aed,#22d3ee)'></div>"
-                    f"<div style='width:{w_reg:.2f}%;background:#c9bcea'></div></div>"
-                    f"{chip_sla}"
-                    f"<div style='margin-top:auto'>{spark_sla}"
-                    f"<div style='font-size:9px;color:#9A92AD;margin-top:4px'>"
-                    f"LPR {sla['lpr_online']}/{sla['lpr_total']} (peso {sla['peso']:.0f}×) · comuns {sla['reg_online']}/{sla['reg_total']}</div></div>"
-                )
-            else:
-                chip = _chip_delta(delta, good_up, suf)
-                spark = _sparkline_svg(serie, cor)
-                corpo = (
-                    f"{chip}"
-                    f"<div style='margin-top:auto'>{spark}"
-                    f"<div style='font-size:10px;color:#9A92AD;margin-top:4px'>{sub}</div></div>"
-                )
+            chip = _chip_delta(delta, good_up, suf)
+            spark = _sparkline_svg(serie, cor)
+            corpo = (
+                f"{chip}"
+                f"<div style='margin-top:auto'>{spark}"
+                f"<div style='font-size:10px;color:#9A92AD;margin-top:4px'>{sub}</div></div>"
+            )
             st.markdown(
                 f"<div style=\"background:#fff;border:1px solid #ECE8F5;border-top:3px solid {cor};"
                 f"border-radius:16px;padding:14px 16px;box-shadow:0 6px 20px rgba(23,17,38,.05);"
@@ -3574,7 +3539,7 @@ def render_resumo_operacional(dados: dict, df_origem, df_clientes_ops, total_cam
                 f"{corpo}</div>",
                 unsafe_allow_html=True,
             )
-            if st.button("📈 Últimos 30 dias", key=f"kpi30_{mkey}", use_container_width=True):
+            if st.button(btn_label, key=f"kpi30_{mkey}", use_container_width=True):
                 atual = st.session_state.get("kpi_hist_sel")
                 st.session_state["kpi_hist_sel"] = None if atual == mkey else mkey
 
@@ -4959,8 +4924,8 @@ def main():
             # Quando um cliente está aberto, não renderiza todos os cards novamente.
             # Isso deixa o clique em "Ver detalhes" muito mais rápido.
             if "detalhe" not in st.session_state:
-                # Resumo operacional: KPIs clicáveis (SLA ponderado + histórico 30 dias).
-                render_resumo_operacional(dados, df_origem, df_clientes_ops, total_cameras, total_offline)
+                # Resumo operacional: KPIs clicáveis (offline 30/7 dias + histórico).
+                render_resumo_operacional(df_clientes_ops, total_cameras, total_offline)
                 st.markdown("")
                 # Filtros + grade de clientes isolados em fragment: aplicar a busca/filtros
                 # não reprocessa o app inteiro (comparativo de snapshots, outras abas etc).
