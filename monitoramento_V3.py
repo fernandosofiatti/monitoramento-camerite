@@ -9,6 +9,8 @@ import json
 import re
 import unicodedata
 import math
+import hashlib
+import hmac
 import requests
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
@@ -58,6 +60,118 @@ st.set_page_config(
 # CSS global extraído para src/theme.py (Fase 2 da modularização)
 injetar_css_global()
 # Constantes (paths, COL_*, SUPABASE_*, mapas de estados) movidas para src/constants.py
+
+# ─────────────────────────────────────────────
+# ACESSO — senha compartilhada + cookie de sessão
+# ─────────────────────────────────────────────
+AUTH_COOKIE_NOME = "camerite_bi_auth"
+AUTH_COOKIE_DIAS = 30
+
+
+def _auth_chave(senha_app: str) -> str:
+    # Deriva a chave de assinatura da própria senha: não precisa de um segredo
+    # separado, e trocar a senha já invalida os cookies "lembrar" antigos.
+    return hashlib.sha256((senha_app + "camerite-bi-auth-salt").encode()).hexdigest()
+
+
+def _auth_gerar_token(chave: str, dias: int) -> str:
+    exp = str(int(time.time()) + dias * 86400)
+    assinatura = hmac.new(chave.encode(), exp.encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{assinatura}"
+
+
+def _auth_token_valido(token: str, chave: str) -> bool:
+    try:
+        exp, assinatura = token.split(".", 1)
+        esperado = hmac.new(chave.encode(), exp.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(assinatura, esperado) and int(exp) > time.time()
+    except Exception:
+        return False
+
+
+def _auth_definir_cookie(token: str, dias: int) -> None:
+    st.components.v1.html(
+        f"<script>document.cookie = "
+        f"\"{AUTH_COOKIE_NOME}={token}; Max-Age={dias * 86400}; Path=/; SameSite=Lax\";</script>",
+        height=0,
+    )
+
+
+def _auth_logout_e_recarregar() -> None:
+    # Limpa o cookie e recarrega a página de verdade — não usa st.rerun() aqui:
+    # um rerun imediato mataria o componente antes do navegador rodar o script.
+    # A própria recarga já reinicia a sessão lendo o cookie (agora vazio).
+    st.components.v1.html(
+        f"<script>"
+        f"document.cookie = \"{AUTH_COOKIE_NOME}=; Max-Age=0; Path=/; SameSite=Lax\";"
+        f"window.location.reload();"
+        f"</script>",
+        height=0,
+    )
+
+
+def exigir_login() -> None:
+    """Bloqueia o app até a senha correta ser informada.
+
+    Sem controle por usuário — é só um portão de entrada com uma senha
+    compartilhada (ver [[seguranca-acesso]] na memória: prioridade era ter
+    algo simples logo, não um sistema de contas). O cookie assinado evita
+    pedir a senha de novo a cada recarregamento de página, por até 30 dias.
+    """
+    senha_app = st.secrets.get("APP_PASSWORD")
+    if not senha_app:
+        st.error(
+            "🔒 A variável `APP_PASSWORD` não está configurada nos Secrets do Streamlit.\n\n"
+            "Local: crie/edite `.streamlit/secrets.toml` com `APP_PASSWORD = \"sua-senha\"`.\n\n"
+            "Streamlit Cloud: Settings → Secrets → adicione `APP_PASSWORD = \"sua-senha\"`."
+        )
+        st.stop()
+
+    if st.session_state.get("_autenticado"):
+        return
+
+    chave = _auth_chave(senha_app)
+    cookie_val = st.context.cookies.get(AUTH_COOKIE_NOME)
+    if cookie_val and _auth_token_valido(cookie_val, chave):
+        st.session_state["_autenticado"] = True
+        return
+
+    # Form dentro de um placeholder: se a senha bater, dá pra "apagar" o formulário
+    # sem precisar de st.rerun() — um rerun imediato interromperia o componente
+    # de cookie antes do navegador executar o script que grava o cookie.
+    login_placeholder = st.empty()
+    logou_agora = False
+    with login_placeholder.container():
+        st.markdown(
+            "<div style='max-width:340px;margin:12vh auto 0;text-align:center'>"
+            "<div style='font-size:40px'>🔒</div>"
+            "<h3>Acesso restrito</h3>"
+            "<p style='color:#8B7AA3;font-size:13px'>Monitoramento Franquias GOV</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        _col_esq, col_meio, _col_dir = st.columns([1, 1.2, 1])
+        with col_meio:
+            with st.form("form_login_app"):
+                senha_digitada = st.text_input("Senha", type="password")
+                entrar = st.form_submit_button("Entrar", use_container_width=True)
+            if entrar:
+                if senha_digitada == senha_app:
+                    st.session_state["_autenticado"] = True
+                    logou_agora = True
+                else:
+                    st.error("Senha incorreta.")
+
+    if logou_agora:
+        login_placeholder.empty()
+        _auth_definir_cookie(_auth_gerar_token(chave, AUTH_COOKIE_DIAS), AUTH_COOKIE_DIAS)
+        return
+
+    if not st.session_state.get("_autenticado"):
+        st.stop()
+
+
+exigir_login()
 
 # ─────────────────────────────────────────────
 # HELPERS DE COR
@@ -2332,6 +2446,12 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
             key="sidebar_exportar_excel_v1",
         ):
             pass
+
+        st.markdown("---")
+        if st.button("🚪 Sair", key="sidebar_logout_v1", use_container_width=True):
+            st.session_state.pop("_autenticado", None)
+            _auth_logout_e_recarregar()
+            st.stop()
 
 
 # ─────────────────────────────────────────────
