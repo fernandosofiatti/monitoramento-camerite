@@ -417,6 +417,63 @@ def enviar_df_supabase(df_csv: pd.DataFrame, progress_callback=None) -> tuple[bo
     return True, "Base online sincronizada com sucesso.", total
 
 
+def carregar_usuarios_supabase() -> tuple[dict | None, str]:
+    """Carrega os usuários do painel (login/senha) da tabela usuarios_painel."""
+    if not supabase_configurado():
+        return None, "Supabase não configurado."
+    try:
+        resp = requests.get(
+            supabase_table_url("usuarios_painel"),
+            headers=supabase_headers(),
+            params={"select": "usuario,senha_hash,salt"},
+            timeout=20,
+        )
+        if resp.status_code not in (200, 206):
+            return None, erro_supabase_amigavel(resp)
+        linhas = resp.json()
+    except Exception as e:
+        return None, f"Erro ao conectar no Supabase: {e}"
+    usuarios = {r["usuario"]: {"senha_hash": r["senha_hash"], "salt": r["salt"]} for r in linhas}
+    return usuarios, ""
+
+
+def salvar_usuario_supabase(usuario: str, senha_hash: str, salt: str) -> tuple[bool, str]:
+    """Cria ou atualiza (upsert, por `usuario`) um usuário do painel."""
+    if not supabase_configurado():
+        return False, "Supabase não configurado."
+    try:
+        resp = requests.post(
+            supabase_table_url("usuarios_painel"),
+            headers=supabase_headers("resolution=merge-duplicates,return=minimal"),
+            params={"on_conflict": "usuario"},
+            json={"usuario": usuario, "senha_hash": senha_hash, "salt": salt},
+            timeout=20,
+        )
+        if resp.status_code not in (200, 201, 204):
+            return False, erro_supabase_amigavel(resp)
+    except Exception as e:
+        return False, f"Erro ao conectar no Supabase: {e}"
+    return True, ""
+
+
+def remover_usuario_supabase(usuario: str) -> tuple[bool, str]:
+    """Remove um usuário do painel pelo login."""
+    if not supabase_configurado():
+        return False, "Supabase não configurado."
+    try:
+        resp = requests.delete(
+            supabase_table_url("usuarios_painel"),
+            headers=supabase_headers("return=minimal"),
+            params={"usuario": f"eq.{usuario}"},
+            timeout=20,
+        )
+        if resp.status_code not in (200, 204):
+            return False, erro_supabase_amigavel(resp)
+    except Exception as e:
+        return False, f"Erro ao conectar no Supabase: {e}"
+    return True, ""
+
+
 def sql_criacao_supabase() -> str:
     return f"""
 create table if not exists public.{SUPABASE_TABLE} (
@@ -492,6 +549,36 @@ create policy "acoes_clientes_update"
     on public.acoes_clientes for update
     using (true)
     with check (true);
+
+create table if not exists public.usuarios_painel (
+    usuario text primary key,
+    senha_hash text not null,
+    salt text not null,
+    criado_em timestamp default now()
+);
+
+alter table public.usuarios_painel enable row level security;
+
+drop policy if exists "usuarios_painel_select" on public.usuarios_painel;
+create policy "usuarios_painel_select"
+    on public.usuarios_painel for select
+    using (true);
+
+drop policy if exists "usuarios_painel_insert" on public.usuarios_painel;
+create policy "usuarios_painel_insert"
+    on public.usuarios_painel for insert
+    with check (true);
+
+drop policy if exists "usuarios_painel_update" on public.usuarios_painel;
+create policy "usuarios_painel_update"
+    on public.usuarios_painel for update
+    using (true)
+    with check (true);
+
+drop policy if exists "usuarios_painel_delete" on public.usuarios_painel;
+create policy "usuarios_painel_delete"
+    on public.usuarios_painel for delete
+    using (true);
 """.strip()
 
 

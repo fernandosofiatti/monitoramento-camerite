@@ -14,6 +14,10 @@ GOV_extracao_cameras*.csv
 historico.db
 *.db
 
+# Fallback local de login (usuário/senha hasheados) quando Supabase não está
+# configurado. Nunca versionar — mesmo hasheado, é dado sensível de acesso.
+usuarios_painel.json
+
 # Observação: nome_clientes.xlsx, brazil_states.geojson e geocode_cache.json
 # permanecem versionados por serem dependências de runtime.
 # O geocode_cache.json é a semente de coordenadas das cidades: sem ele em
