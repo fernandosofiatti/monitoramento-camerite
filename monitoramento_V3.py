@@ -2192,6 +2192,7 @@ def gerar_eml_relatorio_franquia(nome_franquia: str, html_body: str, anexos: lis
 
     return msg.as_bytes()
 
+@st.fragment
 def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict, key_prefix: str = "relatorio_franquia") -> None:
     st.markdown("#### 📧 Relatório por franquia")
     st.caption("Gere um HTML pronto para colar no corpo do e-mail ou um arquivo .eml para abrir no Outlook. O .eml já vai com anexos XLSX separados por cidade da franquia.")
@@ -2704,8 +2705,14 @@ PLANO_DIAS_MAP = {
 }
 
 
+@st.fragment
 def render_aba_tendencia(dados: dict) -> None:
-    """Aba Tendencia: evolucao do percentual offline por cliente ou franquia ao longo dos snapshots."""
+    """Aba Tendencia: evolucao do percentual offline por cliente ou franquia ao longo dos snapshots.
+
+    Isolado em st.fragment: trocar periodo/filtro rerroda so este bloco. O botao
+    "Atualizar" continua limpando cache + st.rerun() de escopo app (default),
+    entao ainda refresca o app inteiro quando isso e necessario de verdade.
+    """
     st.markdown("### 📈 Tendência")
     st.caption("Evolução do percentual offline a partir dos snapshots salvos.")
 
@@ -3322,6 +3329,7 @@ def _area_horizontal_franquia(
     st.plotly_chart(fig, use_container_width=True, key=key)
 
 
+@st.fragment
 def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
     """Total por Franquia: câmeras offline e % offline consolidados por franquia (todas as cidades somadas)."""
     st.markdown("### 🏆 Total por Franquia")
@@ -3426,6 +3434,7 @@ def render_aba_total_por_franquia(df_clientes_ops: pd.DataFrame) -> None:
 
 
 # render_aba_padrao_quedas removida (feature Padrão de Quedas descontinuada)
+@st.fragment
 def render_top5_criticos(df_clientes_ops: pd.DataFrame) -> None:
     """Top 5 clientes mais críticos.
 
