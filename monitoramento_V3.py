@@ -20,6 +20,7 @@ import html
 import time
 import uuid
 import base64
+import extra_streamlit_components as stx
 
 from src.theme import injetar_css_global
 from src.constants import *  # noqa: F401,F403 (paths, COL_*, SUPABASE_*, mapas de estados)
@@ -189,25 +190,8 @@ def _auth_usuario_do_token(token: str, usuarios: dict) -> str | None:
         return None
 
 
-def _auth_definir_cookie(token: str, dias: int) -> None:
-    st.components.v1.html(
-        f"<script>document.cookie = "
-        f"\"{AUTH_COOKIE_NOME}={token}; Max-Age={dias * 86400}; Path=/; SameSite=Lax\";</script>",
-        height=0,
-    )
-
-
-def _auth_logout_e_recarregar() -> None:
-    # Limpa o cookie e recarrega a página de verdade — não usa st.rerun() aqui:
-    # um rerun imediato mataria o componente antes do navegador rodar o script.
-    # A própria recarga já reinicia a sessão lendo o cookie (agora vazio).
-    st.components.v1.html(
-        f"<script>"
-        f"document.cookie = \"{AUTH_COOKIE_NOME}=; Max-Age=0; Path=/; SameSite=Lax\";"
-        f"window.location.reload();"
-        f"</script>",
-        height=0,
-    )
+def _cookie_manager(key: str) -> "stx.CookieManager":
+    return stx.CookieManager(key=key)
 
 
 def exigir_login() -> None:
@@ -218,13 +202,21 @@ def exigir_login() -> None:
     usuários/senhas cadastráveis, a pedido). Primeiro acesso: usuário e senha
     "adm". O cookie assinado evita pedir login de novo a cada recarregamento
     de página, por até 30 dias.
+
+    O cookie é lido/gravado via `extra_streamlit_components.CookieManager`
+    (componente de verdade, com round-trip JS↔Python), não mais injetando
+    `<script>` cru com `st.components.v1.html` + lendo via `st.context.cookies`:
+    essa combinação funcionava no teste local mas falhou em produção no
+    Streamlit Cloud (o cookie nunca chegava a persistir de fato). Ver
+    [[seguranca-acesso]] pra detalhe da investigação.
     """
     if st.session_state.get("_autenticado"):
         return
 
     usuarios, aviso_carga = carregar_usuarios_painel()
 
-    cookie_val = st.context.cookies.get(AUTH_COOKIE_NOME)
+    cookie_manager = _cookie_manager(key="auth_cookie_login")
+    cookie_val = cookie_manager.get(AUTH_COOKIE_NOME)
     if cookie_val:
         usuario_cookie = _auth_usuario_do_token(cookie_val, usuarios)
         if usuario_cookie:
@@ -234,7 +226,7 @@ def exigir_login() -> None:
 
     # Form dentro de um placeholder: se o login bater, dá pra "apagar" o formulário
     # sem precisar de st.rerun() — um rerun imediato interromperia o componente
-    # de cookie antes do navegador executar o script que grava o cookie.
+    # do cookie antes do navegador processar o comando de gravação.
     login_placeholder = st.empty()
     logou_agora = False
     usuario_logado = None
@@ -271,7 +263,12 @@ def exigir_login() -> None:
     if logou_agora:
         login_placeholder.empty()
         token = _auth_gerar_token(usuario_logado, usuarios[usuario_logado], AUTH_COOKIE_DIAS)
-        _auth_definir_cookie(token, AUTH_COOKIE_DIAS)
+        cookie_manager.set(
+            AUTH_COOKIE_NOME, token,
+            key="set_auth_cookie",
+            expires_at=datetime.now() + timedelta(days=AUTH_COOKIE_DIAS),
+            same_site="lax",
+        )
         return
 
     if not st.session_state.get("_autenticado"):
@@ -2559,7 +2556,12 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
         if st.button("🚪 Sair", key="sidebar_logout_v1", use_container_width=True):
             st.session_state.pop("_autenticado", None)
             st.session_state.pop("_usuario", None)
-            _auth_logout_e_recarregar()
+            _cookie_manager(key="auth_cookie_logout").delete(AUTH_COOKIE_NOME, key="del_auth_cookie")
+            # Sem st.rerun() aqui — a recarga (com o cookie já vazio) já reinicia a sessão.
+            st.components.v1.html(
+                "<script>setTimeout(function(){ window.location.reload(); }, 300);</script>",
+                height=0,
+            )
             st.stop()
 
 
