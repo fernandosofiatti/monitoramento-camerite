@@ -9,9 +9,6 @@ import json
 import re
 import unicodedata
 import math
-import hashlib
-import hmac
-import secrets
 import requests
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
@@ -20,7 +17,6 @@ import html
 import time
 import uuid
 import base64
-import extra_streamlit_components as stx
 
 from src.theme import injetar_css_global
 from src.constants import *  # noqa: F401,F403 (paths, COL_*, SUPABASE_*, mapas de estados)
@@ -31,13 +27,6 @@ from src.utils import (
     encontrar_coluna_por_chaves,
     parse_ultima_atualizacao,
     formatar_ultima_atualizacao,
-)
-# Import cedo (o gate de login roda antes do bloco de imports do Supabase mais abaixo).
-from src.db.supabase import (
-    supabase_configurado,
-    carregar_usuarios_supabase,
-    salvar_usuario_supabase,
-    remover_usuario_supabase,
 )
 
 THEME_OPTIONS = {
@@ -70,212 +59,6 @@ st.set_page_config(
 injetar_css_global()
 # Constantes (paths, COL_*, SUPABASE_*, mapas de estados) movidas para src/constants.py
 
-# ─────────────────────────────────────────────
-# ACESSO — usuários/senhas cadastráveis (aba Configuração) + cookie de sessão
-# ─────────────────────────────────────────────
-AUTH_COOKIE_NOME = "camerite_bi_auth"
-AUTH_COOKIE_DIAS = 30
-AUTH_ITERACOES_HASH = 200_000
-# Constante fixa no código (não é um segredo de infraestrutura tipo Secrets):
-# só entra na assinatura do cookie pra não depender de nenhum armazenamento à parte.
-AUTH_SALT_FIXO = "camerite-bi-auth-v1"
-USUARIOS_JSON_PATH = os.path.join(BASE_DIR, "usuarios_painel.json")
-
-
-def _auth_hash_senha(senha: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", senha.encode(), salt.encode(), AUTH_ITERACOES_HASH).hex()
-
-
-def _auth_verificar_senha(senha: str, salt: str, hash_esperado: str) -> bool:
-    return hmac.compare_digest(_auth_hash_senha(senha, salt), hash_esperado)
-
-
-def _usuarios_ler_arquivo_local() -> dict:
-    if os.path.exists(USUARIOS_JSON_PATH):
-        try:
-            with open(USUARIOS_JSON_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-
-def _usuarios_salvar_arquivo_local(usuarios: dict) -> None:
-    with open(USUARIOS_JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump(usuarios, f, ensure_ascii=False, indent=2)
-
-
-def _criar_usuario_adm_padrao() -> dict:
-    salt = secrets.token_hex(16)
-    return {"adm": {"senha_hash": _auth_hash_senha("adm", salt), "salt": salt}}
-
-
-def carregar_usuarios_painel() -> tuple[dict, str]:
-    """Usuários do painel (login/senha), cadastrados na aba Configuração.
-
-    Guardados no Supabase quando configurado (sobrevive a redeploy no Streamlit
-    Cloud); um arquivo local (`usuarios_painel.json`, fora do Git) serve só de
-    fallback pra rodar sem Supabase. Sem nenhum usuário cadastrado ainda, semeia
-    o admin padrão usuário=adm senha=adm.
-    """
-    if supabase_configurado():
-        usuarios, erro = carregar_usuarios_supabase()
-        if usuarios is None:
-            return _usuarios_ler_arquivo_local() or _criar_usuario_adm_padrao(), (
-                f"Não consegui ler usuários do Supabase ({erro}). Usando um admin local até a "
-                "tabela `usuarios_painel` existir (SQL na aba Atualizar Base)."
-            )
-        if not usuarios:
-            padrao = _criar_usuario_adm_padrao()
-            dados = padrao["adm"]
-            salvar_usuario_supabase("adm", dados["senha_hash"], dados["salt"])
-            return padrao, ""
-        return usuarios, ""
-
-    usuarios = _usuarios_ler_arquivo_local()
-    if not usuarios:
-        usuarios = _criar_usuario_adm_padrao()
-        _usuarios_salvar_arquivo_local(usuarios)
-    return usuarios, ""
-
-
-def salvar_usuario_painel(usuario: str, senha: str) -> tuple[bool, str]:
-    salt = secrets.token_hex(16)
-    senha_hash = _auth_hash_senha(senha, salt)
-    if supabase_configurado():
-        return salvar_usuario_supabase(usuario, senha_hash, salt)
-    usuarios = _usuarios_ler_arquivo_local()
-    usuarios[usuario] = {"senha_hash": senha_hash, "salt": salt}
-    _usuarios_salvar_arquivo_local(usuarios)
-    return True, ""
-
-
-def remover_usuario_painel(usuario: str) -> tuple[bool, str]:
-    if supabase_configurado():
-        return remover_usuario_supabase(usuario)
-    usuarios = _usuarios_ler_arquivo_local()
-    usuarios.pop(usuario, None)
-    _usuarios_salvar_arquivo_local(usuarios)
-    return True, ""
-
-
-def _auth_chave_usuario(dados_usuario: dict) -> str:
-    # Deriva a chave de assinatura da senha_hash ATUAL do usuário: trocar a
-    # senha (ou remover o usuário) já invalida os cookies "lembrar" antigos dele.
-    return hashlib.sha256((AUTH_SALT_FIXO + dados_usuario["senha_hash"]).encode()).hexdigest()
-
-
-def _auth_gerar_token(usuario: str, dados_usuario: dict, dias: int) -> str:
-    payload = f"{usuario}|{int(time.time()) + dias * 86400}"
-    assinatura = hmac.new(_auth_chave_usuario(dados_usuario).encode(), payload.encode(), hashlib.sha256).hexdigest()
-    return f"{payload}.{assinatura}"
-
-
-def _auth_usuario_do_token(token: str, usuarios: dict) -> str | None:
-    """Retorna o usuário do cookie se a assinatura bater com a senha_hash atual dele."""
-    try:
-        payload, assinatura = token.rsplit(".", 1)
-        usuario, exp = payload.split("|", 1)
-    except ValueError:
-        return None
-    dados_usuario = usuarios.get(usuario)
-    if not dados_usuario:
-        return None
-    esperado = hmac.new(_auth_chave_usuario(dados_usuario).encode(), payload.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(assinatura, esperado):
-        return None
-    try:
-        return usuario if int(exp) > time.time() else None
-    except ValueError:
-        return None
-
-
-def _cookie_manager(key: str) -> "stx.CookieManager":
-    return stx.CookieManager(key=key)
-
-
-def exigir_login() -> None:
-    """Bloqueia o app até usuário/senha corretos serem informados.
-
-    Usuários são cadastrados na aba Configuração → Usuários do Painel (ver
-    [[seguranca-acesso]] na memória — trocado de senha única em Secrets pra
-    usuários/senhas cadastráveis, a pedido). Primeiro acesso: usuário e senha
-    "adm". O cookie assinado evita pedir login de novo a cada recarregamento
-    de página, por até 30 dias.
-
-    O cookie é lido/gravado via `extra_streamlit_components.CookieManager`
-    (componente de verdade, com round-trip JS↔Python), não mais injetando
-    `<script>` cru com `st.components.v1.html` + lendo via `st.context.cookies`:
-    essa combinação funcionava no teste local mas falhou em produção no
-    Streamlit Cloud (o cookie nunca chegava a persistir de fato). Ver
-    [[seguranca-acesso]] pra detalhe da investigação.
-    """
-    if st.session_state.get("_autenticado"):
-        return
-
-    usuarios, aviso_carga = carregar_usuarios_painel()
-
-    cookie_manager = _cookie_manager(key="auth_cookie_login")
-    cookie_val = cookie_manager.get(AUTH_COOKIE_NOME)
-    if cookie_val:
-        usuario_cookie = _auth_usuario_do_token(cookie_val, usuarios)
-        if usuario_cookie:
-            st.session_state["_autenticado"] = True
-            st.session_state["_usuario"] = usuario_cookie
-            return
-
-    # Form dentro de um placeholder: se o login bater, dá pra "apagar" o formulário
-    # sem precisar de st.rerun() — um rerun imediato interromperia o componente
-    # do cookie antes do navegador processar o comando de gravação.
-    login_placeholder = st.empty()
-    logou_agora = False
-    usuario_logado = None
-    with login_placeholder.container():
-        st.markdown(
-            "<div style='max-width:340px;margin:12vh auto 0;text-align:center'>"
-            "<div style='font-size:40px'>🔒</div>"
-            "<h3>Acesso restrito</h3>"
-            "<p style='color:#8B7AA3;font-size:13px'>Monitoramento Franquias GOV</p>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        if aviso_carga:
-            st.warning(aviso_carga)
-        _col_esq, col_meio, _col_dir = st.columns([1, 1.2, 1])
-        with col_meio:
-            if set(usuarios.keys()) == {"adm"} and _auth_verificar_senha("adm", usuarios["adm"]["salt"], usuarios["adm"]["senha_hash"]):
-                st.caption("Primeiro acesso: usuário e senha **adm**.")
-            with st.form("form_login_app"):
-                usuario_digitado = st.text_input("Usuário")
-                senha_digitada = st.text_input("Senha", type="password")
-                entrar = st.form_submit_button("Entrar", use_container_width=True)
-            if entrar:
-                usuario_norm = usuario_digitado.strip()
-                dados_usuario = usuarios.get(usuario_norm)
-                if dados_usuario and _auth_verificar_senha(senha_digitada, dados_usuario["salt"], dados_usuario["senha_hash"]):
-                    st.session_state["_autenticado"] = True
-                    st.session_state["_usuario"] = usuario_norm
-                    logou_agora = True
-                    usuario_logado = usuario_norm
-                else:
-                    st.error("Usuário ou senha incorretos.")
-
-    if logou_agora:
-        login_placeholder.empty()
-        token = _auth_gerar_token(usuario_logado, usuarios[usuario_logado], AUTH_COOKIE_DIAS)
-        cookie_manager.set(
-            AUTH_COOKIE_NOME, token,
-            key="set_auth_cookie",
-            expires_at=datetime.now() + timedelta(days=AUTH_COOKIE_DIAS),
-            same_site="lax",
-        )
-        return
-
-    if not st.session_state.get("_autenticado"):
-        st.stop()
-
-
-exigir_login()
 
 # ─────────────────────────────────────────────
 # HELPERS DE COR
@@ -553,6 +336,7 @@ def recomendacao_auditoria(n_critico: int, n_atencao: int, saude: dict) -> tuple
 # ─────────────────────────────────────────────
 from src.ui.helpers import escape_html, _rgba, tabela_clara, render_dataframe
 from src.db.supabase import (
+    supabase_configurado,
     get_secret_value,
     get_supabase_key,
     supabase_headers,
@@ -2551,19 +2335,6 @@ def render_sidebar(dados, total_cameras, total_offline, pct_global, df_origem=No
         ):
             pass
 
-        st.markdown("---")
-        st.caption(f"Logado como **{st.session_state.get('_usuario', '?')}**")
-        if st.button("🚪 Sair", key="sidebar_logout_v1", use_container_width=True):
-            st.session_state.pop("_autenticado", None)
-            st.session_state.pop("_usuario", None)
-            _cookie_manager(key="auth_cookie_logout").delete(AUTH_COOKIE_NOME, key="del_auth_cookie")
-            # Sem st.rerun() aqui — a recarga (com o cookie já vazio) já reinicia a sessão.
-            st.components.v1.html(
-                "<script>setTimeout(function(){ window.location.reload(); }, 300);</script>",
-                height=0,
-            )
-            st.stop()
-
 
 # ─────────────────────────────────────────────
 # MAIN
@@ -3864,54 +3635,6 @@ def render_aba_configuracao() -> None:
             st.rerun()
 
     st.caption(f"Arquivo de configuração: `{CONFIG_PATH}`")
-
-    st.markdown("---")
-    st.markdown("#### 👥 Usuários do Painel")
-    st.caption("Quem pode acessar este painel. Primeiro acesso padrão: usuário e senha **adm** — troque a senha assim que entrar.")
-
-    usuarios_atuais, aviso_usuarios = carregar_usuarios_painel()
-    if aviso_usuarios:
-        st.warning(aviso_usuarios)
-    if not supabase_configurado():
-        st.info("Supabase não configurado: os usuários cadastrados aqui ficam só neste ambiente local — não sobrevivem a um redeploy no Streamlit Cloud.")
-
-    with st.form("form_usuario_painel", clear_on_submit=True):
-        col_u, col_s1, col_s2 = st.columns(3)
-        usuario_form = col_u.text_input("Usuário")
-        senha_form = col_s1.text_input("Senha", type="password")
-        confirmar_form = col_s2.text_input("Confirmar senha", type="password")
-        salvar_usuario_btn = st.form_submit_button("💾 Salvar usuário (cria ou troca a senha)")
-
-    if salvar_usuario_btn:
-        usuario_norm = usuario_form.strip()
-        if not usuario_norm:
-            st.error("Informe um nome de usuário.")
-        elif not senha_form:
-            st.error("Informe uma senha.")
-        elif senha_form != confirmar_form:
-            st.error("As senhas não coincidem.")
-        else:
-            ok, erro = salvar_usuario_painel(usuario_norm, senha_form)
-            if ok:
-                st.success(f"Usuário `{usuario_norm}` salvo.")
-                st.rerun()
-            else:
-                st.error(f"Erro ao salvar usuário: {erro}")
-
-    if usuarios_atuais:
-        st.caption(f"{len(usuarios_atuais)} usuário(s) cadastrado(s):")
-        for nome_usuario in sorted(usuarios_atuais.keys()):
-            c_nome, c_remove = st.columns([4, 1])
-            sufixo = " · você" if nome_usuario == st.session_state.get("_usuario") else ""
-            c_nome.write(f"👤 {nome_usuario}{sufixo}")
-            if len(usuarios_atuais) > 1:
-                if c_remove.button("Remover", key=f"remover_usuario_painel_{nome_usuario}"):
-                    ok, erro = remover_usuario_painel(nome_usuario)
-                    if ok:
-                        st.success(f"Usuário `{nome_usuario}` removido.")
-                        st.rerun()
-                    else:
-                        st.error(f"Erro ao remover usuário: {erro}")
 
 
 @st.fragment
