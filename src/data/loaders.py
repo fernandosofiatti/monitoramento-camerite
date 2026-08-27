@@ -34,7 +34,7 @@ from src.db.supabase import (
 
 
 # ── Trecho A: clientes + leitura CSV/xlsx + processamento ──
-@st.cache_data(ttl=60)
+@st.cache_data
 def carregar_clientes() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: nome_cliente}."""
     caminho_clientes = caminho_xlsx_clientes()
@@ -50,7 +50,7 @@ def carregar_clientes() -> dict:
     except Exception:
         return {}
 
-@st.cache_data(ttl=60)
+@st.cache_data
 def carregar_clientes_prefeitura() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Prefeitura / cidade-estado}."""
     caminho_clientes = caminho_xlsx_clientes()
@@ -72,7 +72,7 @@ def carregar_clientes_prefeitura() -> dict:
         return {}
 
 
-@st.cache_data(ttl=60)
+@st.cache_data
 def carregar_clientes_franqueado() -> dict:
     """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Franqueado}."""
     caminho_clientes = caminho_xlsx_clientes()
@@ -354,7 +354,7 @@ def processar_df_gov(df: pd.DataFrame, clientes_map: dict) -> dict:
 
 
 # ── Trecho B: carregar_dados + calculo de saude ──
-@st.cache_data(ttl=60)
+@st.cache_data
 def carregar_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> tuple[dict, str, pd.DataFrame | None]:
 
     """
@@ -494,7 +494,7 @@ def calcular_saude_dataframe(df: pd.DataFrame | None, clientes_map: dict, origem
         "colunas_faltando": faltando,
     }
 
-@st.cache_data(ttl=60)
+@st.cache_data
 def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> dict:
     clientes_map = carregar_clientes()
     if supabase_configurado():

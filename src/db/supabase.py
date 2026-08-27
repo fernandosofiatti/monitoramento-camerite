@@ -172,7 +172,7 @@ def converter_supabase_para_df_gov(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-@st.cache_data(ttl=60)
+@st.cache_data
 def carregar_cameras_supabase() -> tuple[pd.DataFrame | None, str]:
     if not supabase_configurado():
         return None, "Supabase não configurado. Configure SUPABASE_URL e SUPABASE_KEY nos Secrets."
@@ -223,7 +223,7 @@ def formatar_data_hora_br(valor) -> str:
         return "N/D"
 
 
-@st.cache_data(ttl=60)
+@st.cache_data
 def carregar_ultima_atualizacao_base() -> str:
     """
     Retorna quando a base foi atualizada pela última vez.

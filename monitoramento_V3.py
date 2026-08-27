@@ -138,7 +138,7 @@ def salvar_config(cfg: dict) -> bool:
         return False
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def calcular_sla_operacao(df_origem, peso: float | None = None, wl_validos=None) -> dict:
     """SLA ponderado: câmeras LPR (nome contém a palavra-chave) pesam `peso`× as comuns.
 
@@ -868,7 +868,7 @@ def geocode_cidade(nome: str, estado: str | None = None) -> tuple[float, float] 
     salvar_cache_geocode(cache)
     return None
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def montar_mapa_cidades(df: pd.DataFrame) -> tuple[go.Figure | None, str]:
     if df is None or df.empty:
         return None, "Sem dados de origem para criar o mapa."
@@ -1713,7 +1713,7 @@ def calcular_recorrencia(dias: int = 30) -> dict:
         })
     return {r["wl_id"]: r for r in rows}
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def montar_df_tempo(dados: dict) -> pd.DataFrame:
     rows = []
     for wl_id, v in dados.items():
@@ -2022,7 +2022,7 @@ def render_relatorio_por_franquia(df_clientes_ops: pd.DataFrame, dados: dict, ke
         html_preview = gerar_relatorio_franquia_html(franquia_preview, df_base[df_base["Franqueado"].eq(franquia_preview)].copy(), dados)
         st.components.v1.html(html_preview, height=650, scrolling=True)
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def montar_df_clientes(dados: dict, tendencias: dict | None = None, delta_offs: dict | None = None,
                        recorrencia: dict | None = None) -> pd.DataFrame:
     tendencias = tendencias or {}
