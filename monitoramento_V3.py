@@ -4256,6 +4256,10 @@ def render_evolucao_cadastro_cidade(dados: dict, cidades: list) -> None:
         render_dataframe(df_ver, height=min(400, (len(df_ver) + 1) * 35 + 3))
         if st.button("Fechar detalhe", key="evolucao_ver_fechar"):
             st.session_state["evolucao_cidade_ver_tipo"] = None
+            # Este bloco já foi renderizado nesta mesma execução (a tabela está
+            # acima); sem forçar um novo rerun aqui, ele só sumiria na próxima
+            # interação do usuário em outro widget.
+            st.rerun(scope="fragment")
         st.markdown("---")
 
     fig = go.Figure()
