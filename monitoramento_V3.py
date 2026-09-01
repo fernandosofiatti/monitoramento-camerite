@@ -4002,7 +4002,7 @@ def render_aba_cameras_cidade(dados: dict, df_origem: pd.DataFrame) -> None:
         _render_lista_cameras_cidade(df_cam, cidades)
 
     with sub_evolucao:
-        render_evolucao_cadastro_cidade(df_origem, dados, cidades)
+        render_evolucao_cadastro_cidade(dados, cidades)
 
 
 def _render_lista_cameras_cidade(df_cam: pd.DataFrame, cidades: list) -> None:
@@ -4062,50 +4062,75 @@ def _render_lista_cameras_cidade(df_cam: pd.DataFrame, cidades: list) -> None:
 
 
 @st.cache_data(show_spinner=False)
-def montar_evolucao_cameras_cidade(df_origem: pd.DataFrame, dados: dict, cidade: str) -> pd.DataFrame:
-    """Evolução semanal de câmeras cadastradas/inativadas numa única cidade.
+def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> pd.DataFrame:
+    """Evolução semanal de câmeras adicionadas/removidas numa única cidade.
 
-    "Adicionadas" vem da Data_de_Cadastro (sempre presente). "Inativadas" usa a
-    Data_de_Inativacao — a base é um export do estado atual e não guarda quando
-    uma câmera é excluída de vez, então isso é o sinal mais próximo disso que
-    existe nos dados. Calculado só para a cidade escolhida (e só quando o
-    usuário escolhe uma) pra não processar as ~20 mil linhas à toa a cada
-    troca de aba.
+    Mesma lógica do card "Crescimento da Base" (diferença de conjuntos de
+    câmeras — chave `wl_id||id_camera` — entre dois snapshots salvos), só que
+    aqui encadeando TODOS os snapshots disponíveis em ordem cronológica, em vez
+    de comparar só os dois escolhidos manualmente no comparativo. Cada câmera
+    que aparece num snapshot e não estava no anterior conta como "adicionada"
+    na semana desse snapshot; cada câmera que sumiu conta como "removida".
+
+    Não usa Data_de_Cadastro/Data_de_Inativação: esses campos vêm do export
+    atual (não de um histórico), então não servem pra reconstruir remoção real.
+    Só funciona entre snapshots que gravam `snapshot_cameras` (detalhe por
+    câmera) — snapshots mais antigos, sem esse detalhe, quebram a cadeia
+    naquele trecho e ficam sem comparação ali (mesma limitação do comparativo
+    manual). Calculado só para a cidade escolhida, e só quando o usuário
+    escolhe uma, pra não varrer todos os snapshots à toa a cada troca de aba.
     """
-    if df_origem is None or df_origem.empty or not dados or not cidade:
+    if not dados or not cidade:
         return pd.DataFrame()
 
-    wl_ids_validos = set(str(k).strip() for k in dados.keys())
-    df = df_origem[df_origem[COL_WL].astype(str).str.strip().isin(wl_ids_validos)].copy()
-    if df.empty:
-        return pd.DataFrame()
-    df[COL_WL] = df[COL_WL].astype(str).str.strip()
-    cidade_de = df[COL_WL].map(lambda wl: dados.get(wl, {}).get("cidade_estado") or dados.get(wl, {}).get("cidade") or "")
-    df = df[cidade_de == cidade]
-    if df.empty:
+    wl_ids_cidade = {
+        str(wl).strip() for wl, v in dados.items()
+        if (v.get("cidade_estado") or v.get("cidade") or "") == cidade
+    }
+    if not wl_ids_cidade:
         return pd.DataFrame()
 
-    cadastro = pd.to_datetime(df.get(COL_DATA_CAD), errors="coerce").dropna()
-    inativacao = pd.to_datetime(df.get(COL_DATA_INAT), errors="coerce").dropna() if COL_DATA_INAT in df.columns else pd.Series(dtype="datetime64[ns]")
-
-    if cadastro.empty and inativacao.empty:
+    df_snaps = listar_snapshots()
+    if df_snaps.empty or len(df_snaps) < 2:
         return pd.DataFrame()
 
-    partes = []
-    if not cadastro.empty:
-        partes.append(pd.DataFrame({"data": cadastro.values, "tipo": "Adicionadas"}))
-    if not inativacao.empty:
-        partes.append(pd.DataFrame({"data": inativacao.values, "tipo": "Inativadas"}))
-    df_ev = pd.concat(partes, ignore_index=True)
+    df_snaps = df_snaps.sort_values("id").reset_index(drop=True)
+    snap_ids = df_snaps["id"].astype(int).tolist()
+    datas_map = dict(zip(df_snaps["id"].astype(int), pd.to_datetime(df_snaps["gravado_em"], errors="coerce")))
+
+    eventos = []
+    chaves_prev = None
+    for sid in snap_ids:
+        df_cams = carregar_snapshot_cameras(sid, wl_ids_validos=wl_ids_cidade)
+        if df_cams.empty:
+            chaves_prev = None  # sem detalhe por câmera nesse snapshot: quebra a cadeia aqui
+            continue
+        chaves_atual = set(
+            df_cams["wl_id"].astype(str).str.strip() + "||" + df_cams["id_camera"].astype(str).str.strip()
+        )
+        if chaves_prev is not None:
+            data_evento = datas_map.get(sid)
+            if pd.notna(data_evento):
+                n_novas = len(chaves_atual - chaves_prev)
+                n_removidas = len(chaves_prev - chaves_atual)
+                if n_novas:
+                    eventos.append({"data": data_evento, "tipo": "Adicionadas", "qtd": n_novas})
+                if n_removidas:
+                    eventos.append({"data": data_evento, "tipo": "Removidas", "qtd": n_removidas})
+        chaves_prev = chaves_atual
+
+    if not eventos:
+        return pd.DataFrame()
+
+    df_ev = pd.DataFrame(eventos)
     dt_ev = pd.to_datetime(df_ev["data"])
-    # Segunda-feira da semana de cada data. Evita to_period("W-MON"): seu
+    # Segunda-feira da semana de cada snapshot. Evita to_period("W-MON"): seu
     # start_time cai na terça (o período W-MON vai de terça a segunda), o que
-    # desalinhava com o pd.date_range(freq="W-MON") usado no reindex abaixo e
-    # zerava a tabela inteira.
+    # desalinharia com o pd.date_range(freq="W-MON") usado no reindex abaixo.
     df_ev["semana"] = (dt_ev - pd.to_timedelta(dt_ev.dt.weekday, unit="D")).dt.normalize()
 
-    tabela = df_ev.groupby(["semana", "tipo"]).size().unstack(fill_value=0)
-    for col in ("Adicionadas", "Inativadas"):
+    tabela = df_ev.groupby(["semana", "tipo"])["qtd"].sum().unstack(fill_value=0)
+    for col in ("Adicionadas", "Removidas"):
         if col not in tabela.columns:
             tabela[col] = 0
     tabela = tabela.sort_index()
@@ -4114,24 +4139,24 @@ def montar_evolucao_cameras_cidade(df_origem: pd.DataFrame, dados: dict, cidade:
     tabela = tabela.reindex(todas_semanas, fill_value=0)
     tabela.index.name = "semana"
     tabela = tabela.reset_index()
-    tabela["Saldo"] = tabela["Adicionadas"] - tabela["Inativadas"]
+    tabela["Saldo"] = tabela["Adicionadas"] - tabela["Removidas"]
     tabela["Rótulo"] = tabela["semana"].apply(
         lambda d: f"{d.strftime('%d/%m/%Y')} a {(d + timedelta(days=6)).strftime('%d/%m/%Y')}"
     )
-    return tabela[["semana", "Rótulo", "Adicionadas", "Inativadas", "Saldo"]]
+    return tabela[["semana", "Rótulo", "Adicionadas", "Removidas", "Saldo"]]
 
 
 @st.fragment
-def render_evolucao_cadastro_cidade(df_origem: pd.DataFrame, dados: dict, cidades: list) -> None:
+def render_evolucao_cadastro_cidade(dados: dict, cidades: list) -> None:
     """Sub-aba de evolução de cadastro: só calcula depois que uma cidade é escolhida.
 
     Isolado em fragment próprio: trocar a cidade aqui não reprocessa a lista de
     câmeras (a outra sub-aba).
     """
     st.caption(
-        "Evolução semanal de câmeras cadastradas e inativadas na cidade escolhida. "
-        "\"Inativadas\" usa a Data de Inativação do cadastro — a base não registra quando uma "
-        "câmera é excluída de vez, então esse é o sinal mais próximo disso que existe hoje."
+        "Evolução semanal de câmeras adicionadas e removidas na cidade escolhida, "
+        "comparando os snapshots salvos ao longo do tempo (mesma lógica do card "
+        "\"Crescimento da Base\" da Auditoria, encadeando todo o histórico de snapshots)."
     )
 
     placeholder = "— Selecione uma cidade —"
@@ -4141,16 +4166,19 @@ def render_evolucao_cadastro_cidade(df_origem: pd.DataFrame, dados: dict, cidade
         st.info("Escolha uma cidade acima para gerar o gráfico.")
         return
 
-    df_evo = montar_evolucao_cameras_cidade(df_origem, dados, cidade_sel)
+    df_evo = montar_evolucao_cameras_cidade(dados, cidade_sel)
     if df_evo.empty:
-        st.info("Não há datas de cadastro/inativação suficientes para montar a evolução dessa cidade.")
+        st.info(
+            "Sem snapshots suficientes com detalhe por câmera para montar a evolução dessa cidade. "
+            "Salve snapshots periodicamente (aba Auditoria) para essa visão ir se formando."
+        )
         return
 
     total_add = int(df_evo["Adicionadas"].sum())
-    total_rem = int(df_evo["Inativadas"].sum())
+    total_rem = int(df_evo["Removidas"].sum())
     m1, m2, m3 = st.columns(3)
     m1.metric("Adicionadas (total)", total_add)
-    m2.metric("Inativadas (total)", total_rem)
+    m2.metric("Removidas (total)", total_rem)
     m3.metric("Saldo líquido", f"{total_add - total_rem:+d}")
 
     fig = go.Figure()
@@ -4159,7 +4187,7 @@ def render_evolucao_cadastro_cidade(df_origem: pd.DataFrame, dados: dict, cidade
         line=dict(color="#059669", width=2), fill="tozeroy", fillcolor="rgba(5,150,105,.14)",
     ))
     fig.add_trace(go.Scatter(
-        x=df_evo["Rótulo"], y=df_evo["Inativadas"], mode="lines+markers", name="Inativadas",
+        x=df_evo["Rótulo"], y=df_evo["Removidas"], mode="lines+markers", name="Removidas",
         line=dict(color="#dc2626", width=2), fill="tozeroy", fillcolor="rgba(220,38,38,.14)",
     ))
     fig.update_layout(
@@ -4172,7 +4200,7 @@ def render_evolucao_cadastro_cidade(df_origem: pd.DataFrame, dados: dict, cidade
     )
     st.plotly_chart(fig, use_container_width=True, key=f"fig_evolucao_cidade_{slug_arquivo(cidade_sel)}")
 
-    df_tab_show = df_evo[["Rótulo", "Adicionadas", "Inativadas", "Saldo"]].rename(columns={"Rótulo": "Semana"})
+    df_tab_show = df_evo[["Rótulo", "Adicionadas", "Removidas", "Saldo"]].rename(columns={"Rótulo": "Semana"})
     df_tab_show.index = range(1, len(df_tab_show) + 1)
     render_dataframe(df_tab_show, height=min(400, (len(df_tab_show) + 1) * 35 + 3))
 
