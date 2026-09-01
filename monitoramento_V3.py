@@ -4069,7 +4069,7 @@ def _render_lista_cameras_cidade(df_cam: pd.DataFrame, cidades: list) -> None:
 
 
 @st.cache_data(show_spinner=False)
-def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Evolução semanal de câmeras adicionadas/removidas numa única cidade.
 
     Mesma lógica do card "Crescimento da Base" (diferença de conjuntos de
@@ -4087,10 +4087,14 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFra
     manual). Calculado só para a cidade escolhida, e só quando o usuário
     escolhe uma, pra não varrer todos os snapshots à toa a cada troca de aba.
 
-    Retorna (tabela_semanal, detalhe_por_camera) — o segundo é usado pelos
-    cards clicáveis "Adicionadas"/"Removidas", com uma linha por câmera.
+    Retorna (tabela_semanal, detalhe_por_camera, info) — o segundo é usado
+    pelos cards clicáveis "Adicionadas"/"Removidas", com uma linha por câmera;
+    o terceiro diz se houve pelo menos uma comparação válida entre snapshots
+    (`comparavel`) e o período coberto por ela (`data_inicio`/`data_fim`), pra
+    diferenciar "não tem snapshot suficiente" de "comparou e não mudou nada".
     """
-    vazio = (pd.DataFrame(), pd.DataFrame())
+    sem_info = {"comparavel": False, "data_inicio": None, "data_fim": None}
+    vazio = (pd.DataFrame(), pd.DataFrame(), sem_info)
     if not dados or not cidade:
         return vazio
 
@@ -4130,15 +4134,20 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFra
 
     eventos = []
     linhas_detalhe = []
+    datas_comparadas = []
     df_prev = None
+    data_prev = None
     for sid in snap_ids:
         df_atual = dfs_por_snapshot.get(sid)
         if df_atual is None:
             df_prev = None  # sem detalhe por câmera nesse snapshot: quebra a cadeia aqui
+            data_prev = None
             continue
         if df_prev is not None:
             data_evento = datas_map.get(sid)
             if pd.notna(data_evento):
+                datas_comparadas.append(data_prev)
+                datas_comparadas.append(data_evento)
                 semana = (data_evento - timedelta(days=data_evento.weekday())).normalize()
                 rotulo = f"{semana.strftime('%d/%m/%Y')} a {(semana + timedelta(days=6)).strftime('%d/%m/%Y')}"
 
@@ -4164,9 +4173,18 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFra
                             "Nome da Câmera": row.get("nome_camera", ""),
                         })
         df_prev = df_atual
+        data_prev = datas_map.get(sid)
+
+    info = dict(sem_info)
+    if datas_comparadas:
+        info = {
+            "comparavel": True,
+            "data_inicio": min(datas_comparadas),
+            "data_fim": max(datas_comparadas),
+        }
 
     if not eventos:
-        return vazio
+        return pd.DataFrame(), pd.DataFrame(), info
 
     df_ev = pd.DataFrame(eventos)
     dt_ev = pd.to_datetime(df_ev["data"])
@@ -4196,7 +4214,7 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFra
         df_detalhe["Data"] = pd.to_datetime(df_detalhe["_data"]).dt.strftime("%d/%m/%Y %H:%M")
         df_detalhe = df_detalhe[["Tipo", "Data", "Semana", "Cliente", "ID da Câmera", "Nome da Câmera"]]
 
-    return tabela[["semana", "Rótulo", "Adicionadas", "Removidas", "Saldo"]], df_detalhe
+    return tabela[["semana", "Rótulo", "Adicionadas", "Removidas", "Saldo"]], df_detalhe, info
 
 
 @st.fragment
@@ -4220,12 +4238,23 @@ def render_evolucao_cadastro_cidade(dados: dict, cidades: list) -> None:
         st.info("Escolha uma cidade acima para gerar o gráfico.")
         return
 
-    df_evo, df_detalhe = montar_evolucao_cameras_cidade(dados, cidade_sel)
+    df_evo, df_detalhe, info_evo = montar_evolucao_cameras_cidade(dados, cidade_sel)
     if df_evo.empty:
-        st.info(
-            "Sem snapshots suficientes com detalhe por câmera para montar a evolução dessa cidade. "
-            "Salve snapshots periodicamente (aba Auditoria) para essa visão ir se formando."
-        )
+        if info_evo.get("comparavel"):
+            data_ini = info_evo["data_inicio"]
+            data_fim = info_evo["data_fim"]
+            txt_ini = data_ini.strftime("%d/%m/%Y") if pd.notna(data_ini) else "?"
+            txt_fim = data_fim.strftime("%d/%m/%Y") if pd.notna(data_fim) else "?"
+            st.info(
+                f"De {txt_ini} até {txt_fim}, a cidade **{cidade_sel}** não teve nenhuma "
+                "câmera adicionada ou removida da base (os snapshots salvos nesse período "
+                "não mostram diferença)."
+            )
+        else:
+            st.info(
+                "Sem snapshots suficientes com detalhe por câmera para montar a evolução dessa cidade. "
+                "Salve snapshots periodicamente (aba Auditoria) para essa visão ir se formando."
+            )
         return
 
     total_add = int(df_evo["Adicionadas"].sum())
