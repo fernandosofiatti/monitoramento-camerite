@@ -3980,12 +3980,11 @@ def render_aba_tempo_offline(dados: dict) -> None:
 
 @st.fragment
 def render_aba_cameras_cidade(dados: dict, df_origem: pd.DataFrame) -> None:
-    """Corpo da aba "Câmeras por Cidade": escolhe a cidade e lista todas as câmeras dela.
+    """Corpo da aba "Câmeras por Cidade": lista de câmeras + evolução de cadastro.
 
     Isolado em st.fragment: trocar a cidade ou buscar não reprocessa o app inteiro.
     """
     st.markdown("### 🏙️ Câmeras por Cidade")
-    st.caption("Selecione uma cidade para ver todas as câmeras monitoradas nela — status, data de cadastro e tempo offline.")
 
     df_cam = montar_df_cameras_por_cidade(df_origem, dados)
     if df_cam.empty:
@@ -3996,6 +3995,18 @@ def render_aba_cameras_cidade(dados: dict, df_origem: pd.DataFrame) -> None:
     if not cidades:
         st.warning("Nenhuma cidade cadastrada para os clientes do painel.")
         return
+
+    sub_lista, sub_evolucao = st.tabs(["📋 Lista de câmeras", "📈 Evolução de cadastro"])
+
+    with sub_lista:
+        _render_lista_cameras_cidade(df_cam, cidades)
+
+    with sub_evolucao:
+        render_evolucao_cadastro_cidade(df_origem, dados, cidades)
+
+
+def _render_lista_cameras_cidade(df_cam: pd.DataFrame, cidades: list) -> None:
+    st.caption("Selecione uma cidade para ver todas as câmeras monitoradas nela — status, data de cadastro e tempo offline.")
 
     col_sel, col_busca = st.columns([2, 3])
     with col_sel:
@@ -4048,6 +4059,122 @@ def render_aba_cameras_cidade(dados: dict, df_origem: pd.DataFrame) -> None:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="dl_cameras_cidade_v1",
     )
+
+
+@st.cache_data(show_spinner=False)
+def montar_evolucao_cameras_cidade(df_origem: pd.DataFrame, dados: dict, cidade: str) -> pd.DataFrame:
+    """Evolução semanal de câmeras cadastradas/inativadas numa única cidade.
+
+    "Adicionadas" vem da Data_de_Cadastro (sempre presente). "Inativadas" usa a
+    Data_de_Inativacao — a base é um export do estado atual e não guarda quando
+    uma câmera é excluída de vez, então isso é o sinal mais próximo disso que
+    existe nos dados. Calculado só para a cidade escolhida (e só quando o
+    usuário escolhe uma) pra não processar as ~20 mil linhas à toa a cada
+    troca de aba.
+    """
+    if df_origem is None or df_origem.empty or not dados or not cidade:
+        return pd.DataFrame()
+
+    wl_ids_validos = set(str(k).strip() for k in dados.keys())
+    df = df_origem[df_origem[COL_WL].astype(str).str.strip().isin(wl_ids_validos)].copy()
+    if df.empty:
+        return pd.DataFrame()
+    df[COL_WL] = df[COL_WL].astype(str).str.strip()
+    cidade_de = df[COL_WL].map(lambda wl: dados.get(wl, {}).get("cidade_estado") or dados.get(wl, {}).get("cidade") or "")
+    df = df[cidade_de == cidade]
+    if df.empty:
+        return pd.DataFrame()
+
+    cadastro = pd.to_datetime(df.get(COL_DATA_CAD), errors="coerce").dropna()
+    inativacao = pd.to_datetime(df.get(COL_DATA_INAT), errors="coerce").dropna() if COL_DATA_INAT in df.columns else pd.Series(dtype="datetime64[ns]")
+
+    if cadastro.empty and inativacao.empty:
+        return pd.DataFrame()
+
+    partes = []
+    if not cadastro.empty:
+        partes.append(pd.DataFrame({"data": cadastro.values, "tipo": "Adicionadas"}))
+    if not inativacao.empty:
+        partes.append(pd.DataFrame({"data": inativacao.values, "tipo": "Inativadas"}))
+    df_ev = pd.concat(partes, ignore_index=True)
+    dt_ev = pd.to_datetime(df_ev["data"])
+    # Segunda-feira da semana de cada data. Evita to_period("W-MON"): seu
+    # start_time cai na terça (o período W-MON vai de terça a segunda), o que
+    # desalinhava com o pd.date_range(freq="W-MON") usado no reindex abaixo e
+    # zerava a tabela inteira.
+    df_ev["semana"] = (dt_ev - pd.to_timedelta(dt_ev.dt.weekday, unit="D")).dt.normalize()
+
+    tabela = df_ev.groupby(["semana", "tipo"]).size().unstack(fill_value=0)
+    for col in ("Adicionadas", "Inativadas"):
+        if col not in tabela.columns:
+            tabela[col] = 0
+    tabela = tabela.sort_index()
+
+    todas_semanas = pd.date_range(tabela.index.min(), tabela.index.max(), freq="W-MON")
+    tabela = tabela.reindex(todas_semanas, fill_value=0)
+    tabela.index.name = "semana"
+    tabela = tabela.reset_index()
+    tabela["Saldo"] = tabela["Adicionadas"] - tabela["Inativadas"]
+    tabela["Rótulo"] = tabela["semana"].apply(
+        lambda d: f"{d.strftime('%d/%m/%Y')} a {(d + timedelta(days=6)).strftime('%d/%m/%Y')}"
+    )
+    return tabela[["semana", "Rótulo", "Adicionadas", "Inativadas", "Saldo"]]
+
+
+@st.fragment
+def render_evolucao_cadastro_cidade(df_origem: pd.DataFrame, dados: dict, cidades: list) -> None:
+    """Sub-aba de evolução de cadastro: só calcula depois que uma cidade é escolhida.
+
+    Isolado em fragment próprio: trocar a cidade aqui não reprocessa a lista de
+    câmeras (a outra sub-aba).
+    """
+    st.caption(
+        "Evolução semanal de câmeras cadastradas e inativadas na cidade escolhida. "
+        "\"Inativadas\" usa a Data de Inativação do cadastro — a base não registra quando uma "
+        "câmera é excluída de vez, então esse é o sinal mais próximo disso que existe hoje."
+    )
+
+    placeholder = "— Selecione uma cidade —"
+    cidade_sel = st.selectbox("Cidade", [placeholder] + cidades, key="evolucao_cidade_sel")
+
+    if cidade_sel == placeholder:
+        st.info("Escolha uma cidade acima para gerar o gráfico.")
+        return
+
+    df_evo = montar_evolucao_cameras_cidade(df_origem, dados, cidade_sel)
+    if df_evo.empty:
+        st.info("Não há datas de cadastro/inativação suficientes para montar a evolução dessa cidade.")
+        return
+
+    total_add = int(df_evo["Adicionadas"].sum())
+    total_rem = int(df_evo["Inativadas"].sum())
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Adicionadas (total)", total_add)
+    m2.metric("Inativadas (total)", total_rem)
+    m3.metric("Saldo líquido", f"{total_add - total_rem:+d}")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df_evo["Rótulo"], y=df_evo["Adicionadas"], mode="lines+markers", name="Adicionadas",
+        line=dict(color="#059669", width=2), fill="tozeroy", fillcolor="rgba(5,150,105,.14)",
+    ))
+    fig.add_trace(go.Scatter(
+        x=df_evo["Rótulo"], y=df_evo["Inativadas"], mode="lines+markers", name="Inativadas",
+        line=dict(color="#dc2626", width=2), fill="tozeroy", fillcolor="rgba(220,38,38,.14)",
+    ))
+    fig.update_layout(
+        height=380,
+        margin=dict(l=10, r=10, t=30, b=90),
+        xaxis=dict(tickangle=-45, title=""),
+        yaxis=dict(title="Câmeras"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig, use_container_width=True, key=f"fig_evolucao_cidade_{slug_arquivo(cidade_sel)}")
+
+    df_tab_show = df_evo[["Rótulo", "Adicionadas", "Inativadas", "Saldo"]].rename(columns={"Rótulo": "Semana"})
+    df_tab_show.index = range(1, len(df_tab_show) + 1)
+    render_dataframe(df_tab_show, height=min(400, (len(df_tab_show) + 1) * 35 + 3))
 
 
 @st.fragment
