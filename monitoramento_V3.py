@@ -4069,7 +4069,7 @@ def _render_lista_cameras_cidade(df_cam: pd.DataFrame, cidades: list) -> None:
 
 
 @st.cache_data(show_spinner=False)
-def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> pd.DataFrame:
+def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Evolução semanal de câmeras adicionadas/removidas numa única cidade.
 
     Mesma lógica do card "Crescimento da Base" (diferença de conjuntos de
@@ -4086,20 +4086,24 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> pd.DataFrame:
     naquele trecho e ficam sem comparação ali (mesma limitação do comparativo
     manual). Calculado só para a cidade escolhida, e só quando o usuário
     escolhe uma, pra não varrer todos os snapshots à toa a cada troca de aba.
+
+    Retorna (tabela_semanal, detalhe_por_camera) — o segundo é usado pelos
+    cards clicáveis "Adicionadas"/"Removidas", com uma linha por câmera.
     """
+    vazio = (pd.DataFrame(), pd.DataFrame())
     if not dados or not cidade:
-        return pd.DataFrame()
+        return vazio
 
     wl_ids_cidade = {
         str(wl).strip() for wl, v in dados.items()
         if (v.get("cidade_estado") or v.get("cidade") or "") == cidade
     }
     if not wl_ids_cidade:
-        return pd.DataFrame()
+        return vazio
 
     df_snaps = listar_snapshots()
     if df_snaps.empty or len(df_snaps) < 2:
-        return pd.DataFrame()
+        return vazio
 
     df_snaps = df_snaps.sort_values("id").reset_index(drop=True)
     snap_ids = df_snaps["id"].astype(int).tolist()
@@ -4108,7 +4112,7 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> pd.DataFrame:
     # Os snapshots são independentes entre si (cada um é uma chamada de rede pro
     # Supabase) — buscar em paralelo em vez de um por um é o que faz essa tela
     # deixar de ser lenta quando há muitos snapshots salvos ao longo do tempo.
-    chaves_por_snapshot: dict[int, set] = {}
+    dfs_por_snapshot: dict[int, pd.DataFrame] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(snap_ids))) as executor:
         futuros = {
             executor.submit(carregar_snapshot_cameras, sid, wl_ids_cidade): sid
@@ -4117,31 +4121,52 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> pd.DataFrame:
         for futuro in concurrent.futures.as_completed(futuros):
             sid = futuros[futuro]
             df_cams = futuro.result()
-            chaves_por_snapshot[sid] = (
-                set(df_cams["wl_id"].astype(str).str.strip() + "||" + df_cams["id_camera"].astype(str).str.strip())
-                if not df_cams.empty else None
-            )
+            if df_cams.empty:
+                dfs_por_snapshot[sid] = None
+                continue
+            df_cams = df_cams.copy()
+            df_cams["_chave"] = df_cams["wl_id"].astype(str).str.strip() + "||" + df_cams["id_camera"].astype(str).str.strip()
+            dfs_por_snapshot[sid] = df_cams.set_index("_chave")
 
     eventos = []
-    chaves_prev = None
+    linhas_detalhe = []
+    df_prev = None
     for sid in snap_ids:
-        chaves_atual = chaves_por_snapshot.get(sid)
-        if chaves_atual is None:
-            chaves_prev = None  # sem detalhe por câmera nesse snapshot: quebra a cadeia aqui
+        df_atual = dfs_por_snapshot.get(sid)
+        if df_atual is None:
+            df_prev = None  # sem detalhe por câmera nesse snapshot: quebra a cadeia aqui
             continue
-        if chaves_prev is not None:
+        if df_prev is not None:
             data_evento = datas_map.get(sid)
             if pd.notna(data_evento):
-                n_novas = len(chaves_atual - chaves_prev)
-                n_removidas = len(chaves_prev - chaves_atual)
-                if n_novas:
-                    eventos.append({"data": data_evento, "tipo": "Adicionadas", "qtd": n_novas})
-                if n_removidas:
-                    eventos.append({"data": data_evento, "tipo": "Removidas", "qtd": n_removidas})
-        chaves_prev = chaves_atual
+                semana = (data_evento - timedelta(days=data_evento.weekday())).normalize()
+                rotulo = f"{semana.strftime('%d/%m/%Y')} a {(semana + timedelta(days=6)).strftime('%d/%m/%Y')}"
+
+                chaves_novas = df_atual.index.difference(df_prev.index)
+                chaves_removidas = df_prev.index.difference(df_atual.index)
+
+                if len(chaves_novas):
+                    eventos.append({"data": data_evento, "tipo": "Adicionadas", "qtd": len(chaves_novas)})
+                    for _, row in df_atual.loc[chaves_novas].iterrows():
+                        linhas_detalhe.append({
+                            "Tipo": "Adicionada", "_data": data_evento, "Semana": rotulo,
+                            "Cliente": row.get("nome_cliente", ""),
+                            "ID da Câmera": row.get("id_camera", ""),
+                            "Nome da Câmera": row.get("nome_camera", ""),
+                        })
+                if len(chaves_removidas):
+                    eventos.append({"data": data_evento, "tipo": "Removidas", "qtd": len(chaves_removidas)})
+                    for _, row in df_prev.loc[chaves_removidas].iterrows():
+                        linhas_detalhe.append({
+                            "Tipo": "Removida", "_data": data_evento, "Semana": rotulo,
+                            "Cliente": row.get("nome_cliente", ""),
+                            "ID da Câmera": row.get("id_camera", ""),
+                            "Nome da Câmera": row.get("nome_camera", ""),
+                        })
+        df_prev = df_atual
 
     if not eventos:
-        return pd.DataFrame()
+        return vazio
 
     df_ev = pd.DataFrame(eventos)
     dt_ev = pd.to_datetime(df_ev["data"])
@@ -4164,7 +4189,14 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> pd.DataFrame:
     tabela["Rótulo"] = tabela["semana"].apply(
         lambda d: f"{d.strftime('%d/%m/%Y')} a {(d + timedelta(days=6)).strftime('%d/%m/%Y')}"
     )
-    return tabela[["semana", "Rótulo", "Adicionadas", "Removidas", "Saldo"]]
+
+    df_detalhe = pd.DataFrame(linhas_detalhe)
+    if not df_detalhe.empty:
+        df_detalhe = df_detalhe.sort_values("_data", ascending=False).reset_index(drop=True)
+        df_detalhe["Data"] = pd.to_datetime(df_detalhe["_data"]).dt.strftime("%d/%m/%Y %H:%M")
+        df_detalhe = df_detalhe[["Tipo", "Data", "Semana", "Cliente", "ID da Câmera", "Nome da Câmera"]]
+
+    return tabela[["semana", "Rótulo", "Adicionadas", "Removidas", "Saldo"]], df_detalhe
 
 
 @st.fragment
@@ -4184,10 +4216,11 @@ def render_evolucao_cadastro_cidade(dados: dict, cidades: list) -> None:
     cidade_sel = st.selectbox("Cidade", [placeholder] + cidades, key="evolucao_cidade_sel")
 
     if cidade_sel == placeholder:
+        st.session_state["evolucao_cidade_ver_tipo"] = None
         st.info("Escolha uma cidade acima para gerar o gráfico.")
         return
 
-    df_evo = montar_evolucao_cameras_cidade(dados, cidade_sel)
+    df_evo, df_detalhe = montar_evolucao_cameras_cidade(dados, cidade_sel)
     if df_evo.empty:
         st.info(
             "Sem snapshots suficientes com detalhe por câmera para montar a evolução dessa cidade. "
@@ -4197,10 +4230,33 @@ def render_evolucao_cadastro_cidade(dados: dict, cidades: list) -> None:
 
     total_add = int(df_evo["Adicionadas"].sum())
     total_rem = int(df_evo["Removidas"].sum())
+
+    if "evolucao_cidade_ver_tipo" not in st.session_state:
+        st.session_state["evolucao_cidade_ver_tipo"] = None
+
     m1, m2, m3 = st.columns(3)
-    m1.metric("Adicionadas (total)", total_add)
-    m2.metric("Removidas (total)", total_rem)
-    m3.metric("Saldo líquido", f"{total_add - total_rem:+d}")
+    with m1:
+        st.metric("Adicionadas (total)", total_add)
+        if st.button("Ver câmeras adicionadas", key="evolucao_ver_adicionadas", disabled=total_add == 0):
+            st.session_state["evolucao_cidade_ver_tipo"] = "Adicionada"
+    with m2:
+        st.metric("Removidas (total)", total_rem)
+        if st.button("Ver câmeras removidas", key="evolucao_ver_removidas", disabled=total_rem == 0):
+            st.session_state["evolucao_cidade_ver_tipo"] = "Removida"
+    with m3:
+        st.metric("Saldo líquido", f"{total_add - total_rem:+d}")
+
+    tipo_ver = st.session_state.get("evolucao_cidade_ver_tipo")
+    if tipo_ver:
+        st.markdown("---")
+        df_ver = df_detalhe[df_detalhe["Tipo"] == tipo_ver].drop(columns=["Tipo"]).reset_index(drop=True)
+        df_ver.index += 1
+        rotulo_tipo = "adicionadas" if tipo_ver == "Adicionada" else "removidas"
+        st.markdown(f"**{len(df_ver)} câmeras {rotulo_tipo} em {cidade_sel}**")
+        render_dataframe(df_ver, height=min(400, (len(df_ver) + 1) * 35 + 3))
+        if st.button("Fechar detalhe", key="evolucao_ver_fechar"):
+            st.session_state["evolucao_cidade_ver_tipo"] = None
+        st.markdown("---")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
