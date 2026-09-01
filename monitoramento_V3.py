@@ -10,6 +10,7 @@ import re
 import unicodedata
 import math
 import requests
+import concurrent.futures
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
 import glob
@@ -1383,6 +1384,12 @@ def carregar_snapshot_cameras(sid: int, wl_ids_validos: set[str] | None = None) 
         "snapshot_id": f"eq.{int(sid)}",
         "order": "id_camera.asc",
     }
+    if wl_ids_validos:
+        # Filtra no servidor (não só depois de baixar tudo): quando só interessa
+        # uma cidade (poucos clientes), evita trazer o snapshot inteiro pela rede.
+        filtro = _postgrest_in_filter_text(sorted(str(x).strip() for x in wl_ids_validos if str(x).strip()))
+        if filtro != "in.()":
+            params["id_whitelabel"] = filtro
     df, erro = _supabase_select_all(
         SNAPSHOT_TABLE,
         params=params,
@@ -4098,16 +4105,30 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> pd.DataFrame:
     snap_ids = df_snaps["id"].astype(int).tolist()
     datas_map = dict(zip(df_snaps["id"].astype(int), pd.to_datetime(df_snaps["gravado_em"], errors="coerce")))
 
+    # Os snapshots são independentes entre si (cada um é uma chamada de rede pro
+    # Supabase) — buscar em paralelo em vez de um por um é o que faz essa tela
+    # deixar de ser lenta quando há muitos snapshots salvos ao longo do tempo.
+    chaves_por_snapshot: dict[int, set] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(snap_ids))) as executor:
+        futuros = {
+            executor.submit(carregar_snapshot_cameras, sid, wl_ids_cidade): sid
+            for sid in snap_ids
+        }
+        for futuro in concurrent.futures.as_completed(futuros):
+            sid = futuros[futuro]
+            df_cams = futuro.result()
+            chaves_por_snapshot[sid] = (
+                set(df_cams["wl_id"].astype(str).str.strip() + "||" + df_cams["id_camera"].astype(str).str.strip())
+                if not df_cams.empty else None
+            )
+
     eventos = []
     chaves_prev = None
     for sid in snap_ids:
-        df_cams = carregar_snapshot_cameras(sid, wl_ids_validos=wl_ids_cidade)
-        if df_cams.empty:
+        chaves_atual = chaves_por_snapshot.get(sid)
+        if chaves_atual is None:
             chaves_prev = None  # sem detalhe por câmera nesse snapshot: quebra a cadeia aqui
             continue
-        chaves_atual = set(
-            df_cams["wl_id"].astype(str).str.strip() + "||" + df_cams["id_camera"].astype(str).str.strip()
-        )
         if chaves_prev is not None:
             data_evento = datas_map.get(sid)
             if pd.notna(data_evento):
