@@ -1743,6 +1743,60 @@ def montar_df_tempo(dados: dict) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("_horas", ascending=False)
 
 
+@st.cache_data(show_spinner=False)
+def montar_df_cameras_por_cidade(df_origem: pd.DataFrame, dados: dict) -> pd.DataFrame:
+    """Todas as câmeras (online + offline) dos clientes do painel, para consulta por cidade.
+
+    Diferente de `montar_df_tempo` (só câmeras offline), `dados[wl_id]` guarda apenas
+    o recorte offline de cada cliente — então o universo completo por câmera vem de
+    `df_origem` (a base bruta), filtrado para os mesmos clientes do painel (mesma
+    técnica usada no comparativo de "Atualizar Base", pra não misturar clientes de
+    fora da lista).
+    """
+    if df_origem is None or df_origem.empty or not dados:
+        return pd.DataFrame()
+
+    wl_ids_validos = set(str(k).strip() for k in dados.keys())
+    df = df_origem[df_origem[COL_WL].astype(str).str.strip().isin(wl_ids_validos)].copy()
+    if df.empty:
+        return pd.DataFrame()
+    df[COL_WL] = df[COL_WL].astype(str).str.strip()
+
+    if COL_ULT_ATU in df.columns:
+        agora = agora_sao_paulo()
+        df[COL_ULT_ATU] = parse_ultima_atualizacao(df[COL_ULT_ATU])
+        tempo_off = df[COL_ULT_ATU].apply(
+            lambda x: max(agora - x, timedelta(seconds=0)) if pd.notna(x) else timedelta(seconds=-1)
+        )
+    else:
+        df[COL_ULT_ATU] = pd.NaT
+        tempo_off = pd.Series([timedelta(seconds=-1)] * len(df), index=df.index)
+
+    status_norm = df.get(COL_STATUS, "").astype(str).str.strip().str.upper()
+    esta_offline = status_norm == "OFFLINE"
+
+    horas = tempo_off.apply(lambda td: td.total_seconds() / 3600 if td.total_seconds() >= 0 else -1)
+    tempo_off_fmt = pd.Series(
+        [fmt_tempo(td) if (td.total_seconds() >= 0) else "N/D" for td in tempo_off],
+        index=df.index,
+    )
+    tempo_off_fmt = tempo_off_fmt.where(esta_offline, "—")
+
+    out = pd.DataFrame({
+        "Cidade": df[COL_WL].map(lambda wl: dados.get(wl, {}).get("cidade_estado") or dados.get(wl, {}).get("cidade") or ""),
+        "Cliente": df[COL_WL].map(lambda wl: dados.get(wl, {}).get("nome_cliente", "")),
+        "ID da Câmera": df.get(COL_ID_CAM, ""),
+        "Nome da Câmera": df.get(COL_NOME_CAM, ""),
+        "Status": status_norm.str.capitalize(),
+        "Data de Cadastro": df.get(COL_DATA_CAD, pd.NaT),
+        "Última Atualização": df[COL_ULT_ATU],
+        "Tempo Offline": tempo_off_fmt,
+        "_horas": horas,
+    })
+    out = out[out["Cidade"].astype(str).str.strip() != ""]
+    return out.reset_index(drop=True)
+
+
 def slug_arquivo(valor: str) -> str:
     texto = unicodedata.normalize("NFKD", str(valor or "relatorio")).encode("ascii", "ignore").decode("ascii")
     texto = re.sub(r"[^A-Za-z0-9_-]+", "_", texto).strip("_").lower()
@@ -3924,6 +3978,77 @@ def render_aba_tempo_offline(dados: dict) -> None:
             render_dataframe(df_tbl_t, height=min(600,(len(df_tbl_t)+1)*35+3))
 
 
+@st.fragment
+def render_aba_cameras_cidade(dados: dict, df_origem: pd.DataFrame) -> None:
+    """Corpo da aba "Câmeras por Cidade": escolhe a cidade e lista todas as câmeras dela.
+
+    Isolado em st.fragment: trocar a cidade ou buscar não reprocessa o app inteiro.
+    """
+    st.markdown("### 🏙️ Câmeras por Cidade")
+    st.caption("Selecione uma cidade para ver todas as câmeras monitoradas nela — status, data de cadastro e tempo offline.")
+
+    df_cam = montar_df_cameras_por_cidade(df_origem, dados)
+    if df_cam.empty:
+        st.info("Nenhuma câmera encontrada para os clientes do painel.")
+        return
+
+    cidades = sorted({c for c in df_cam["Cidade"].astype(str).str.strip() if c})
+    if not cidades:
+        st.warning("Nenhuma cidade cadastrada para os clientes do painel.")
+        return
+
+    col_sel, col_busca = st.columns([2, 3])
+    with col_sel:
+        cidade_sel = st.selectbox("Cidade", cidades, key="cameras_cidade_sel")
+    with col_busca:
+        busca_cam = st.text_input(
+            "Buscar câmera", key="cameras_cidade_busca",
+            placeholder="Nome ou ID da câmera…",
+        )
+
+    df_filtrado = df_cam[df_cam["Cidade"] == cidade_sel].copy()
+
+    if busca_cam:
+        termo = busca_cam.upper()
+        df_filtrado = df_filtrado[
+            df_filtrado["Nome da Câmera"].astype(str).str.upper().str.contains(termo) |
+            df_filtrado["ID da Câmera"].astype(str).str.upper().str.contains(termo)
+        ]
+
+    total_cid = len(df_filtrado)
+    offline_cid = int((df_filtrado["Status"].astype(str).str.upper() == "OFFLINE").sum())
+    online_cid = total_cid - offline_cid
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total de câmeras", total_cid)
+    m2.metric("Online", online_cid)
+    m3.metric("Offline", offline_cid)
+
+    if df_filtrado.empty:
+        st.info("Nenhuma câmera encontrada com os filtros aplicados.")
+        return
+
+    df_show = (
+        df_filtrado.sort_values(["Status", "_horas"], ascending=[True, False])
+        .drop(columns=["Cidade", "_horas"])
+        .reset_index(drop=True)
+    )
+    df_show.index += 1
+    df_show["Data de Cadastro"] = df_show["Data de Cadastro"].apply(formatar_data_hora_br)
+    df_show["Última Atualização"] = formatar_ultima_atualizacao(df_show["Última Atualização"])
+
+    render_dataframe(df_show, height=min(600, (len(df_show) + 1) * 35 + 3))
+
+    buf_cid = io.BytesIO()
+    df_show.to_excel(buf_cid, index=True, engine="openpyxl")
+    st.download_button(
+        "⬇ Exportar lista (.xlsx)",
+        data=buf_cid.getvalue(),
+        file_name=f"cameras_{slug_arquivo(cidade_sel)}_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_cameras_cidade_v1",
+    )
+
 
 @st.fragment
 def render_aba_lprs_offline(df_origem) -> None:
@@ -4451,7 +4576,7 @@ def main():
 
     # ── ABAS ──
     _injetar_css_abas_visiveis()
-    abas_principais = ["Auditoria", "Clientes"]
+    abas_principais = ["Auditoria", "Clientes", "Câmeras por Cidade"]
     abas_principais += ["Evidências", "Atualizar Base", "Configuração"]
     tabs = dict(zip(abas_principais, st.tabs(abas_principais)))
 
@@ -5071,6 +5196,12 @@ def main():
 
     with clientes_subtabs[3]:
         render_aba_total_por_franquia(df_clientes_ops)
+
+    # ════════════════════════════════════════════
+    # ABA — CÂMERAS POR CIDADE
+    # ════════════════════════════════════════════
+    with tabs["Câmeras por Cidade"]:
+        render_aba_cameras_cidade(dados, df_origem)
 
     # ════════════════════════════════════════════
     # ABA 3 — TEMPO OFFLINE
