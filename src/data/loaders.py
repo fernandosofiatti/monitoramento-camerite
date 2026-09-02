@@ -30,65 +30,122 @@ from src.db.supabase import (
     carregar_cameras_supabase,
     converter_supabase_para_df_gov,
     carregar_ultima_atualizacao_base,
+    carregar_clientes_painel_supabase,
+    salvar_clientes_painel_supabase,
 )
 
 
 # ── Trecho A: clientes + leitura CSV/xlsx + processamento ──
-@st.cache_data
-def carregar_clientes() -> dict:
-    """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: nome_cliente}."""
+def _ler_clientes_xlsx_normalizado() -> pd.DataFrame:
+    """Lê nome_clientes.xlsx (fallback local) e normaliza para id_whitelabel/cidade/uf/franqueado."""
+    colunas = ["id_whitelabel", "cidade", "uf", "franqueado"]
     caminho_clientes = caminho_xlsx_clientes()
     if not caminho_clientes:
-        return {}
+        return pd.DataFrame(columns=colunas)
     try:
         df = pd.read_excel(caminho_clientes, engine="openpyxl")
-        # Aceitar qualquer variação de nome de coluna
-        col_id = next((c for c in df.columns if "whitelabel" in c.lower() or "id" in c.lower()), df.columns[0])
-        col_nom = next((c for c in df.columns if "nome" in c.lower() or "client" in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
-        chaves = df[col_id].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
-        return dict(zip(chaves, df[col_nom].astype(str).str.strip()))
+        if df.empty:
+            return pd.DataFrame(columns=colunas)
+        col_id = next((c for c in df.columns if "whitelabel" in str(c).lower() or str(c).lower().strip() in ("id", "id_cliente")), df.columns[0])
+        col_city = next((c for c in df.columns if any(k in str(c).lower() for k in ("prefeitura", "cidade", "municipio", "city"))), None)
+        col_state = next((c for c in df.columns if any(k in str(c).lower() for k in ("estado", "uf", "state"))), None)
+        col_franq = next((c for c in df.columns if "franqueado" in str(c).lower() or "franquia" in str(c).lower()), None)
+        if col_city is None:
+            col_city = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+
+        out = pd.DataFrame()
+        out["id_whitelabel"] = df[col_id].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+        out["cidade"] = df[col_city].astype(str).str.strip()
+        out["uf"] = df[col_state].astype(str).str.strip() if col_state else ""
+        out["franqueado"] = df[col_franq].astype(str).replace({"nan": ""}).str.strip() if col_franq else ""
+        return out
     except Exception:
+        return pd.DataFrame(columns=colunas)
+
+
+@st.cache_data
+def carregar_clientes_painel_df() -> pd.DataFrame:
+    """Vínculo ID_Whitelabel -> cidade/uf/franqueado — fonte única usada pelas 3 funções abaixo.
+
+    Prioridade: Supabase (tabela `clientes_painel`, sobrevive a redeploy no Streamlit
+    Cloud) quando configurado; senão `nome_clientes.xlsx` local, que só vale para
+    este ambiente (é apagado a cada redeploy, já que o filesystem é efêmero).
+    """
+    if supabase_configurado():
+        df, erro = carregar_clientes_painel_supabase()
+        if df is not None:
+            df = df.rename(columns={"id_whitelabel": "id_whitelabel", "franqueado": "franqueado"}).copy()
+            df["id_whitelabel"] = df["id_whitelabel"].astype(str).str.strip()
+            return df
+    return _ler_clientes_xlsx_normalizado()
+
+
+def salvar_clientes_painel(df: pd.DataFrame) -> tuple[bool, str]:
+    """Grava o vínculo ID_Whitelabel -> cidade/uf/franqueado inteiro (substitui tudo).
+
+    No Supabase quando configurado (persiste entre redeploys); senão sobrescreve o
+    `nome_clientes.xlsx` local (só vale enquanto o ambiente atual não for reciclado).
+    """
+    df = df.copy()
+    df["id_whitelabel"] = pd.to_numeric(df["id_whitelabel"], errors="coerce")
+    if df["id_whitelabel"].isna().any():
+        return False, "Todas as linhas precisam de um ID_Whitelabel numérico."
+    df["id_whitelabel"] = df["id_whitelabel"].astype(int)
+    if df["id_whitelabel"].duplicated().any():
+        dups = sorted(df.loc[df["id_whitelabel"].duplicated(keep=False), "id_whitelabel"].unique().tolist())
+        return False, f"ID_Whitelabel repetido: {', '.join(str(d) for d in dups)}. Cada cliente precisa de um ID único."
+    df["cidade"] = df["cidade"].astype(str).str.strip()
+    if (df["cidade"] == "").any():
+        return False, "Todas as linhas precisam de um nome de cidade."
+    df["uf"] = df["uf"].astype(str).str.strip().str.upper().replace({"NAN": ""})
+    df["franqueado"] = df["franqueado"].astype(str).str.strip().replace({"nan": ""})
+    df = df.sort_values("id_whitelabel").reset_index(drop=True)
+
+    if supabase_configurado():
+        ok, erro = salvar_clientes_painel_supabase(df)
+        if not ok:
+            return False, erro
+        return True, ""
+
+    caminho = caminho_xlsx_clientes() or XLSX_CLIENTES
+    try:
+        df_xlsx = df.rename(columns={
+            "id_whitelabel": "ID_Whitelabel", "cidade": "cidade", "uf": "uf", "franqueado": "Franqueado",
+        })
+        df_xlsx.to_excel(caminho, index=False, engine="openpyxl")
+    except Exception as e:
+        return False, str(e)
+    return True, ""
+
+
+@st.cache_data
+def carregar_clientes() -> dict:
+    """Retorna dict {ID_Whitelabel: nome_cliente} — aqui, nome_cliente = nome da cidade."""
+    df = carregar_clientes_painel_df()
+    if df.empty:
         return {}
+    return dict(zip(df["id_whitelabel"], df["cidade"]))
+
 
 @st.cache_data
 def carregar_clientes_prefeitura() -> dict:
-    """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Prefeitura / cidade-estado}."""
-    caminho_clientes = caminho_xlsx_clientes()
-    if not caminho_clientes:
+    """Retorna dict {ID_Whitelabel: 'Cidade - UF'} (ou só 'Cidade' quando não há UF)."""
+    df = carregar_clientes_painel_df()
+    if df.empty:
         return {}
-    try:
-        df = pd.read_excel(caminho_clientes, engine="openpyxl")
-        col_id = next((c for c in df.columns if "whitelabel" in c.lower() or "id" in c.lower()), df.columns[0])
-        col_city = next((c for c in df.columns if any(k in c.lower() for k in ("prefeitura", "cidade", "municipio", "city"))), None)
-        col_state = next((c for c in df.columns if any(k in c.lower() for k in ("estado", "uf", "state"))), None)
-        if col_city is None:
-            col_city = df.columns[1] if len(df.columns) > 1 else df.columns[0]
-        if col_state and col_state != col_city:
-            valores = df[col_city].astype(str).str.strip() + " - " + df[col_state].astype(str).str.strip()
-        else:
-            valores = df[col_city].astype(str).str.strip()
-        return dict(zip(df[col_id].astype(str).str.strip(), valores))
-    except Exception:
-        return {}
+    tem_uf = df["uf"].astype(str).str.strip().ne("")
+    valores = df["cidade"].astype(str).str.strip()
+    valores = valores.where(~tem_uf, valores + " - " + df["uf"].astype(str).str.strip())
+    return dict(zip(df["id_whitelabel"], valores))
 
 
 @st.cache_data
 def carregar_clientes_franqueado() -> dict:
-    """Carrega nome_clientes.xlsx e retorna dict {ID_Whitelabel: Franqueado}."""
-    caminho_clientes = caminho_xlsx_clientes()
-    if not caminho_clientes:
+    """Retorna dict {ID_Whitelabel: Franqueado}."""
+    df = carregar_clientes_painel_df()
+    if df.empty:
         return {}
-    try:
-        df = pd.read_excel(caminho_clientes, engine="openpyxl")
-        if df.empty:
-            return {}
-        col_id = next((c for c in df.columns if "whitelabel" in str(c).lower() or str(c).lower().strip() in ("id", "id_cliente")), df.columns[0])
-        col_franq = next((c for c in df.columns if "franqueado" in str(c).lower() or "franquia" in str(c).lower()), None)
-        if col_franq is None:
-            return {}
-        return dict(zip(df[col_id].astype(str).str.strip(), df[col_franq].astype(str).replace({"nan": ""}).str.strip()))
-    except Exception:
-        return {}
+    return dict(zip(df["id_whitelabel"], df["franqueado"].astype(str).replace({"nan": ""}).str.strip()))
 
 
 def parse_prefeitura_localidade(valor: str) -> tuple[str | None, str | None]:
