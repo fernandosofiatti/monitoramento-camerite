@@ -3673,9 +3673,8 @@ def _salvar_df_clientes_editavel(df: pd.DataFrame) -> tuple[bool, str]:
 def render_config_cidades_clientes() -> None:
     st.caption(
         "Vínculo entre ID_Whitelabel e a cidade monitorada — a mesma informação hoje mantida na "
-        "planilha `nome_clientes.xlsx`. Edite direto na tabela: use a linha em branco no rodapé para "
-        "adicionar uma cidade nova; para remover uma existente, clique na caixinha à esquerda da linha "
-        "(seleciona a linha inteira) e aperte a tecla **Delete** do teclado."
+        "planilha `nome_clientes.xlsx`. Edite direto na tabela: use o ⊕ no rodapé para adicionar uma "
+        "cidade nova e o ícone de lixeira na linha para remover uma existente."
     )
 
     caminho = caminho_xlsx_clientes()
