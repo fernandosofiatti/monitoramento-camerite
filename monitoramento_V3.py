@@ -775,8 +775,6 @@ from src.data.loaders import (
     carregar_clientes,
     carregar_clientes_prefeitura,
     carregar_clientes_franqueado,
-    carregar_clientes_painel_df,
-    salvar_clientes_painel,
     parse_prefeitura_localidade,
     preencher_cidade_estado_por_clientes,
     ler_csv_gov,
@@ -3626,6 +3624,52 @@ def render_resumo_operacional(df_clientes_ops, total_cameras: int, total_offline
         _render_kpi_hist(sel)
 
 
+def _carregar_df_clientes_editavel() -> pd.DataFrame:
+    """Lê nome_clientes.xlsx como tabela editável (ID_Whitelabel, cidade, uf, Franqueado)."""
+    colunas = ["ID_Whitelabel", "cidade", "uf", "Franqueado"]
+    caminho = caminho_xlsx_clientes()
+    if not caminho:
+        return pd.DataFrame(columns=colunas)
+    try:
+        df = pd.read_excel(caminho, engine="openpyxl")
+    except Exception:
+        return pd.DataFrame(columns=colunas)
+    for col in colunas:
+        if col not in df.columns:
+            df[col] = ""
+    return df[colunas].copy()
+
+
+def _salvar_df_clientes_editavel(df: pd.DataFrame) -> tuple[bool, str]:
+    """Valida e grava a tabela editada de volta em nome_clientes.xlsx."""
+    caminho = caminho_xlsx_clientes() or XLSX_CLIENTES
+    try:
+        df_salvar = df.copy()
+        df_salvar = df_salvar[df_salvar["ID_Whitelabel"].notna() | df_salvar["cidade"].astype(str).str.strip().ne("")]
+
+        ids_num = pd.to_numeric(df_salvar["ID_Whitelabel"], errors="coerce")
+        if ids_num.isna().any():
+            return False, "Todas as linhas precisam de um ID_Whitelabel numérico."
+        df_salvar["ID_Whitelabel"] = ids_num.astype(int)
+
+        if df_salvar["ID_Whitelabel"].duplicated().any():
+            dups = sorted(df_salvar.loc[df_salvar["ID_Whitelabel"].duplicated(keep=False), "ID_Whitelabel"].unique().tolist())
+            return False, f"ID_Whitelabel repetido: {', '.join(str(d) for d in dups)}. Cada cliente precisa de um ID único."
+
+        df_salvar["cidade"] = df_salvar["cidade"].astype(str).str.strip()
+        if (df_salvar["cidade"] == "").any():
+            return False, "Todas as linhas precisam de um nome de cidade."
+
+        df_salvar["uf"] = df_salvar["uf"].astype(str).str.strip().str.upper().replace({"NAN": ""})
+        df_salvar["Franqueado"] = df_salvar["Franqueado"].astype(str).str.strip().replace({"nan": ""})
+
+        df_salvar = df_salvar.sort_values("ID_Whitelabel").reset_index(drop=True)
+        df_salvar.to_excel(caminho, index=False, engine="openpyxl")
+    except Exception as e:
+        return False, str(e)
+    return True, ""
+
+
 def render_config_cidades_clientes() -> None:
     st.caption(
         "Vínculo entre ID_Whitelabel e a cidade monitorada — a mesma informação hoje mantida na "
@@ -3634,15 +3678,11 @@ def render_config_cidades_clientes() -> None:
         "(seleciona a linha inteira) e aperte a tecla **Delete** do teclado."
     )
 
-    if not supabase_configurado():
-        st.warning(
-            "Supabase não configurado: as cidades/clientes salvos aqui ficam só neste ambiente local "
-            "(arquivo `nome_clientes.xlsx`) — não sobrevivem a um redeploy no Streamlit Cloud."
-        )
+    caminho = caminho_xlsx_clientes()
+    if not caminho:
+        st.warning("Arquivo `nome_clientes.xlsx` não encontrado — salvar aqui cria um novo arquivo.")
 
-    df_atual = carregar_clientes_painel_df().rename(
-        columns={"id_whitelabel": "ID_Whitelabel", "cidade": "Cidade", "uf": "UF", "franqueado": "Franqueado"}
-    )
+    df_atual = _carregar_df_clientes_editavel()
 
     df_editado = st.data_editor(
         df_atual,
@@ -3651,19 +3691,15 @@ def render_config_cidades_clientes() -> None:
         key="cfg_clientes_editor",
         column_config={
             "ID_Whitelabel": st.column_config.NumberColumn("ID_Whitelabel", required=True, step=1, format="%d"),
-            "Cidade": st.column_config.TextColumn("Cidade", required=True),
-            "UF": st.column_config.TextColumn("UF"),
+            "cidade": st.column_config.TextColumn("Cidade", required=True),
+            "uf": st.column_config.TextColumn("UF"),
             "Franqueado": st.column_config.TextColumn("Franqueado"),
         },
     )
 
     if st.button("💾 Salvar cidades/clientes", type="primary", key="cfg_clientes_salvar"):
-        df_salvar = df_editado.rename(
-            columns={"ID_Whitelabel": "id_whitelabel", "Cidade": "cidade", "UF": "uf", "Franqueado": "franqueado"}
-        )
-        ok, erro = salvar_clientes_painel(df_salvar)
+        ok, erro = _salvar_df_clientes_editavel(df_editado)
         if ok:
-            carregar_clientes_painel_df.clear()
             carregar_clientes.clear()
             carregar_clientes_prefeitura.clear()
             carregar_clientes_franqueado.clear()
@@ -3673,8 +3709,7 @@ def render_config_cidades_clientes() -> None:
         else:
             st.error(f"Não foi possível salvar: {erro}")
 
-    origem = "Supabase" if supabase_configurado() else f"arquivo local `{caminho_xlsx_clientes() or XLSX_CLIENTES}`"
-    st.caption(f"Fonte: {origem} · {len(df_atual)} cliente(s) cadastrado(s) atualmente.")
+    st.caption(f"Arquivo: `{caminho or XLSX_CLIENTES}` · {len(df_atual)} cliente(s) cadastrado(s) atualmente.")
 
 
 def render_aba_configuracao() -> None:

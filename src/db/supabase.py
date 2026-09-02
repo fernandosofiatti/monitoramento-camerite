@@ -204,76 +204,6 @@ def carregar_cameras_supabase() -> tuple[pd.DataFrame | None, str]:
     return pd.DataFrame(todos), ""
 
 
-def carregar_clientes_painel_supabase() -> tuple[pd.DataFrame | None, str]:
-    """Carrega o vínculo ID_Whitelabel -> cidade/uf/franqueado da tabela clientes_painel."""
-    if not supabase_configurado():
-        return None, "Supabase não configurado."
-    try:
-        resp = requests.get(
-            supabase_table_url("clientes_painel"),
-            headers=supabase_headers(),
-            params={"select": "id_whitelabel,cidade,uf,franqueado", "order": "id_whitelabel.asc"},
-            timeout=20,
-        )
-        if resp.status_code not in (200, 206):
-            return None, erro_supabase_amigavel(resp)
-        linhas = resp.json()
-    except Exception as e:
-        return None, f"Erro ao conectar no Supabase: {e}"
-    colunas = ["id_whitelabel", "cidade", "uf", "franqueado"]
-    df = pd.DataFrame(linhas) if linhas else pd.DataFrame(columns=colunas)
-    for col in colunas:
-        if col not in df.columns:
-            df[col] = ""
-    return df[colunas], ""
-
-
-def salvar_clientes_painel_supabase(df: pd.DataFrame) -> tuple[bool, str]:
-    """Substitui o conteúdo da tabela clientes_painel pelo `df` inteiro (upsert + remove o que sumiu)."""
-    if not supabase_configurado():
-        return False, "Supabase não configurado."
-    try:
-        df_existente, erro = carregar_clientes_painel_supabase()
-        if erro:
-            return False, erro
-        ids_existentes = set(df_existente["id_whitelabel"].astype(int).tolist()) if not df_existente.empty else set()
-        ids_atuais = set(df["id_whitelabel"].astype(int).tolist()) if not df.empty else set()
-
-        if not df.empty:
-            registros = [
-                {
-                    "id_whitelabel": int(r["id_whitelabel"]),
-                    "cidade": str(r["cidade"]),
-                    "uf": str(r.get("uf", "") or ""),
-                    "franqueado": str(r.get("franqueado", "") or ""),
-                }
-                for r in df.to_dict(orient="records")
-            ]
-            resp = requests.post(
-                supabase_table_url("clientes_painel"),
-                headers=supabase_headers("resolution=merge-duplicates,return=minimal"),
-                params={"on_conflict": "id_whitelabel"},
-                json=registros,
-                timeout=30,
-            )
-            if resp.status_code not in (200, 201, 204):
-                return False, erro_supabase_amigavel(resp)
-
-        ids_remover = ids_existentes - ids_atuais
-        if ids_remover:
-            resp_del = requests.delete(
-                supabase_table_url("clientes_painel"),
-                headers=supabase_headers("return=minimal"),
-                params={"id_whitelabel": _postgrest_in_filter_int(ids_remover)},
-                timeout=20,
-            )
-            if resp_del.status_code not in (200, 204):
-                return False, erro_supabase_amigavel(resp_del)
-    except Exception as e:
-        return False, f"Erro ao conectar no Supabase: {e}"
-    return True, ""
-
-
 def formatar_data_hora_br(valor) -> str:
     """Formata datas/timestamps para dd/mm/aaaa hh:mm, com fallback seguro."""
     if valor is None:
@@ -562,37 +492,6 @@ create policy "acoes_clientes_update"
     on public.acoes_clientes for update
     using (true)
     with check (true);
-
-create table if not exists public.clientes_painel (
-    id_whitelabel bigint primary key,
-    cidade text not null,
-    uf text,
-    franqueado text,
-    atualizado_em timestamp default now()
-);
-
-alter table public.clientes_painel enable row level security;
-
-drop policy if exists "clientes_painel_select" on public.clientes_painel;
-create policy "clientes_painel_select"
-    on public.clientes_painel for select
-    using (true);
-
-drop policy if exists "clientes_painel_insert" on public.clientes_painel;
-create policy "clientes_painel_insert"
-    on public.clientes_painel for insert
-    with check (true);
-
-drop policy if exists "clientes_painel_update" on public.clientes_painel;
-create policy "clientes_painel_update"
-    on public.clientes_painel for update
-    using (true)
-    with check (true);
-
-drop policy if exists "clientes_painel_delete" on public.clientes_painel;
-create policy "clientes_painel_delete"
-    on public.clientes_painel for delete
-    using (true);
 """.strip()
 
 
