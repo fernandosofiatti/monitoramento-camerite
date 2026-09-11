@@ -3429,10 +3429,15 @@ def _area_kpi_fig(x_dt, y, cor: str, sufixo: str = "", nome: str = "") -> "go.Fi
 
 
 def _tendencia_recente(valores, datas=None, dias: int = 30) -> tuple[float, str]:
-    """Tendência: inclinação sobre a MÉDIA MÓVEL, na janela `dias` (a mesma do gráfico exibido).
+    """Tendência: média do trecho RECENTE (~último terço da janela) contra a média
+    do trecho anterior, na janela `dias` (a mesma do gráfico exibido).
 
-    Evita que um pico isolado (ex.: um dia de 494) contradiga o que o fim do
-    gráfico mostra. Retorna (slope_por_dia, rótulo).
+    Antes usava uma regressão linear sobre a janela inteira — isso deixava a
+    tendência sensível a um pico isolado no MEIO do período: mesmo já resolvido,
+    ele "puxava" a reta pra cima e a tendência dizia "subindo" enquanto os pontos
+    mais recentes já mostravam melhora clara. Comparar só o trecho recente contra
+    o anterior reflete "como está indo ULTIMAMENTE", que é o que importa numa
+    tela operacional. Retorna (diferença absoluta, rótulo).
     """
     dias = int(dias)
     s = pd.to_numeric(pd.Series(list(valores)), errors="coerce")
@@ -3446,35 +3451,35 @@ def _tendencia_recente(valores, datas=None, dias: int = 30) -> tuple[float, str]
     if len(base) < 2:
         return 0.0, "estável"
 
-    # Suaviza com média móvel curta (reduz o efeito de picos isolados).
-    jan = max(2, min(5, len(base) // 3))
-    base["ym"] = base["y"].rolling(jan, min_periods=1).mean()
-
     # Recorta a janela recente.
     if base["dt"].notna().all():
         corte = base["dt"].max() - pd.Timedelta(days=dias)
-        janela = base[base["dt"] >= corte]
+        janela = base[base["dt"] >= corte].reset_index(drop=True)
         if len(janela) < 2:
-            janela = base.tail(max(2, dias))
-        x = (janela["dt"] - janela["dt"].iloc[0]).dt.total_seconds().to_numpy() / 86400.0
+            janela = base.tail(max(2, dias)).reset_index(drop=True)
     else:
-        janela = base.tail(max(2, dias))
-        x = np.arange(len(janela), dtype=float)
+        janela = base.tail(max(2, dias)).reset_index(drop=True)
 
-    y = janela["ym"].to_numpy(dtype=float)
-    if len(y) < 2 or float(x[-1]) <= float(x[0]):
+    y = janela["y"].to_numpy(dtype=float)
+    n = len(y)
+    if n < 2:
         return 0.0, "estável"
-    slope = float(np.polyfit(x, y, 1)[0])   # variação por dia
+
+    # Últimos ~30% da janela = "recente"; o resto = "anterior". Pelo menos 1
+    # ponto de cada lado, mesmo com poucos dados.
+    recente_n = max(1, min(n - 1, round(n * 0.3)))
+    media_recente = float(np.mean(y[-recente_n:]))
+    media_anterior = float(np.mean(y[:-recente_n]))
+    diff = media_recente - media_anterior
 
     # Limiar relativo à escala da série (evita ruído virar "tendência").
-    escala = float(np.nanmean(np.abs(base["y"].to_numpy()))) or 1.0
-    span = float(x[-1] - x[0]) or 1.0
-    variacao_rel = (slope * span) / escala   # variação modelada na janela, relativa
-    if variacao_rel > 0.01:
-        return slope, "▲ subindo"
-    if variacao_rel < -0.01:
-        return slope, "▼ caindo"
-    return slope, "estável"
+    escala = float(np.nanmean(np.abs(y))) or 1.0
+    variacao_rel = diff / escala
+    if variacao_rel > 0.03:
+        return diff, "▲ subindo"
+    if variacao_rel < -0.03:
+        return diff, "▼ caindo"
+    return diff, "estável"
 
 
 def _kpi_stats_row(s, suf: str = "", datas=None, dias: int = 30, good_up: bool = False) -> None:
