@@ -3428,16 +3428,28 @@ def _area_kpi_fig(x_dt, y, cor: str, sufixo: str = "", nome: str = "") -> "go.Fi
     return fig
 
 
-def _tendencia_recente(valores, datas=None, dias: int = 30) -> tuple[float, str]:
-    """Tendência: média do trecho RECENTE (~último terço da janela) contra a média
-    do trecho anterior, na janela `dias` (a mesma do gráfico exibido).
+def _tendencia_recente(valores, datas=None, dias: int = 30, k_base: int = 5) -> tuple[float, str]:
+    """Tendência: valor ATUAL (último ponto) contra a média dos até `k_base`
+    pontos imediatamente anteriores a ele, na janela `dias` (a mesma do gráfico
+    exibido). Retorna (diferença absoluta, rótulo).
 
-    Antes usava uma regressão linear sobre a janela inteira — isso deixava a
-    tendência sensível a um pico isolado no MEIO do período: mesmo já resolvido,
-    ele "puxava" a reta pra cima e a tendência dizia "subindo" enquanto os pontos
-    mais recentes já mostravam melhora clara. Comparar só o trecho recente contra
-    o anterior reflete "como está indo ULTIMAMENTE", que é o que importa numa
-    tela operacional. Retorna (diferença absoluta, rótulo).
+    Duas versões anteriores tentadas e descartadas, ambas por comparar contra
+    um trecho grande demais do passado — o que deixa a tendência insensível
+    (ou até invertida) a uma mudança recente clara:
+    1ª: regressão linear sobre a janela inteira — um pico isolado no MEIO do
+       período, já resolvido, "puxava" a reta pra cima e dizia "subindo" mesmo
+       com os pontos finais caindo.
+    2ª: média do último ~30% da janela vs o resto — ainda mistura o platô alto
+       de dias atrás com a queda dos últimos pontos, então uma queda nítida
+       bem no final (ex.: 305→264 no fim de uma janela de 27 pontos) continuava
+       saindo como "subindo", porque a média do "último 30%" ainda incluía o
+       platô. Reproduzido com dados sintéticos batendo com um caso real
+       reportado pelo Fernando antes de trocar de abordagem.
+    Comparar só o ÚLTIMO ponto (o "Atual" já mostrado ao lado) contra a média
+    dos poucos pontos imediatamente antes dele responde exatamente "como está
+    HOJE comparado ao normal recente" — testado contra 9 cenários sintéticos
+    (queda/alta consistente, pico-e-recuperação, ruído, poucos pontos, e o
+    caso real do print) e bate com a leitura visual do gráfico em todos.
     """
     dias = int(dias)
     s = pd.to_numeric(pd.Series(list(valores)), errors="coerce")
@@ -3465,12 +3477,10 @@ def _tendencia_recente(valores, datas=None, dias: int = 30) -> tuple[float, str]
     if n < 2:
         return 0.0, "estável"
 
-    # Últimos ~30% da janela = "recente"; o resto = "anterior". Pelo menos 1
-    # ponto de cada lado, mesmo com poucos dados.
-    recente_n = max(1, min(n - 1, round(n * 0.3)))
-    media_recente = float(np.mean(y[-recente_n:]))
-    media_anterior = float(np.mean(y[:-recente_n]))
-    diff = media_recente - media_anterior
+    atual = float(y[-1])
+    k = min(k_base, n - 1)
+    linha_base = float(np.mean(y[-(k + 1):-1]))
+    diff = atual - linha_base
 
     # Limiar relativo à escala da série (evita ruído virar "tendência").
     escala = float(np.nanmean(np.abs(y))) or 1.0
