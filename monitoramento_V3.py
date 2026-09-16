@@ -4320,10 +4320,25 @@ def render_ranking_evolucao_cidades(dados: dict) -> None:
         "calculada para todas as cidades de uma vez."
     )
 
-    if not st.session_state.get("ranking_cidades_gerado"):
-        if st.button("📊 Gerar ranking", key="btn_gerar_ranking_cidades"):
-            st.session_state["ranking_cidades_gerado"] = True
-            st.rerun(scope="fragment")
+    # Nota: esta função é um st.fragment chamado de DENTRO de outro st.fragment
+    # (render_aba_cameras_cidade). st.rerun(scope="fragment") não recarrega esse
+    # fragmento aninhado de forma confiável (o clique "não fazia nada"). Por isso
+    # o padrão aqui é sempre deixar o clique cair no mesmo `run` — sem rerun
+    # explícito — igual ao "Ver câmeras..." da Evolução de cadastro.
+    if st.session_state.get("ranking_cidades_recalcular"):
+        montar_ranking_evolucao_cidades.clear()
+        st.session_state["ranking_cidades_recalcular"] = False
+
+    gerado = st.session_state.get("ranking_cidades_gerado", False)
+    if not gerado:
+        btn_placeholder = st.empty()
+        with btn_placeholder.container():
+            if st.button("📊 Gerar ranking", key="btn_gerar_ranking_cidades"):
+                st.session_state["ranking_cidades_gerado"] = True
+                gerado = True
+        if gerado:
+            btn_placeholder.empty()
+    if not gerado:
         st.info("Clique acima para calcular — evita varrer o histórico de snapshots à toa a cada troca de aba.")
         return
 
@@ -4358,8 +4373,7 @@ def render_ranking_evolucao_cidades(dados: dict) -> None:
     render_dataframe(df_tab_rank, height=min(500, (len(df_tab_rank) + 1) * 35 + 3))
 
     if st.button("🔄 Recalcular", key="btn_recalcular_ranking_cidades"):
-        montar_ranking_evolucao_cidades.clear()
-        st.rerun(scope="fragment")
+        st.session_state["ranking_cidades_recalcular"] = True
 
 
 @st.fragment
@@ -4430,10 +4444,12 @@ def render_evolucao_cadastro_cidade(dados: dict, cidades: list) -> None:
         render_dataframe(df_ver, height=min(400, (len(df_ver) + 1) * 35 + 3))
         if st.button("Fechar detalhe", key="evolucao_ver_fechar"):
             st.session_state["evolucao_cidade_ver_tipo"] = None
-            # Este bloco já foi renderizado nesta mesma execução (a tabela está
-            # acima); sem forçar um novo rerun aqui, ele só sumiria na próxima
-            # interação do usuário em outro widget.
-            st.rerun(scope="fragment")
+            # Esta função é um st.fragment chamado de DENTRO de outro st.fragment
+            # (render_aba_cameras_cidade) — st.rerun(scope="fragment") não recarrega
+            # um fragmento aninhado de forma confiável (o botão "não fazia nada").
+            # scope="app" (padrão) funciona sempre; o custo de um rerun completo
+            # nesse clique pontual é aceitável.
+            st.rerun()
         st.markdown("---")
 
     fig = go.Figure()
