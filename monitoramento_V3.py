@@ -518,52 +518,36 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
             df_comp_up["cliente"] = df_comp_up["wl_id"].map(clientes_map).fillna("ID " + df_comp_up["wl_id"].astype(str))
             df_comp_up["delta_off"] = df_comp_up["off_b"] - df_comp_up["off_a"]
 
-            df_top_piora_up = df_comp_up[df_comp_up["delta_off"] > 0].sort_values("delta_off", ascending=False).head(10)
-            df_top_melhora_up = df_comp_up[df_comp_up["delta_off"] < 0].sort_values("delta_off", ascending=True).head(10)
+            df_var_up = df_comp_up[df_comp_up["delta_off"] != 0].sort_values("delta_off", ascending=False).reset_index(drop=True)
 
-            st.markdown("##### Maiores variações de câmeras offline")
-            st.caption('Base atual (já publicada) vs. CSV novo — antes de clicar em "Atualizar base online".')
-            col_up1, col_up2 = st.columns(2)
-            with col_up1:
-                st.caption("🔴 Clientes que mais pioraram")
-                if df_top_piora_up.empty:
-                    st.info("Nenhum cliente piora neste CSV.")
-                else:
-                    fig_piora_up = go.Figure(go.Bar(
-                        y=df_top_piora_up["cliente"], x=df_top_piora_up["delta_off"], orientation="h",
-                        marker=dict(color="#dc2626"),
-                        text=[f"+{int(v)}" for v in df_top_piora_up["delta_off"]],
-                        textposition="outside",
-                        hovertemplate="%{y}<br>+%{x:.0f} câmeras offline<extra></extra>",
-                    ))
-                    fig_piora_up.update_layout(
-                        **pdefaults(), height=max(320, len(df_top_piora_up) * 34), showlegend=False,
-                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10), zeroline=False),
-                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A", size=10)),
-                        margin=dict(l=10, r=60, t=10, b=10),
-                    )
-                    st.plotly_chart(fig_piora_up, use_container_width=True, key="atualizar_base_top_piora")
-            with col_up2:
-                st.caption("🟢 Clientes que mais melhoraram")
-                if df_top_melhora_up.empty:
-                    st.info("Nenhum cliente melhora neste CSV.")
-                else:
-                    df_m_plot_up = df_top_melhora_up.copy()
-                    df_m_plot_up["melhora_abs"] = df_m_plot_up["delta_off"].abs()
-                    fig_melhora_up = go.Figure(go.Bar(
-                        y=df_m_plot_up["cliente"], x=df_m_plot_up["melhora_abs"], orientation="h",
-                        marker=dict(color="#059669"),
-                        text=[f"-{int(v)}" for v in df_m_plot_up["melhora_abs"]],
-                        textposition="outside",
-                        hovertemplate="%{y}<br>-%{x:.0f} câmeras offline<extra></extra>",
-                    ))
-                    fig_melhora_up.update_layout(
-                        **pdefaults(), height=max(320, len(df_m_plot_up) * 34), showlegend=False,
-                        xaxis=dict(gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10), zeroline=False),
-                        yaxis=dict(autorange="reversed", tickfont=dict(color="#6B5A7A", size=10)),
-                        margin=dict(l=10, r=60, t=10, b=10),
-                    )
-                    st.plotly_chart(fig_melhora_up, use_container_width=True, key="atualizar_base_top_melhora")
+            st.markdown("##### Variação de câmeras offline por cliente")
+            st.caption('Base atual (já publicada) vs. CSV novo — antes de clicar em "Atualizar base online". Todos os clientes com variação, do que mais piorou ao que mais melhorou.')
+            if df_var_up.empty:
+                st.info("Nenhuma variação de câmeras offline neste CSV.")
+            else:
+                y_piora = df_var_up["delta_off"].where(df_var_up["delta_off"] > 0)
+                y_melhora = df_var_up["delta_off"].where(df_var_up["delta_off"] < 0)
+                fig_var_up = go.Figure()
+                fig_var_up.add_trace(go.Scatter(
+                    x=df_var_up["cliente"], y=y_piora, mode="lines+markers", name="Piorou (+offline)",
+                    line=dict(color="#dc2626", width=2), marker=dict(size=5),
+                    fill="tozeroy", fillcolor="rgba(220,38,38,.18)", connectgaps=False,
+                    hovertemplate="%{x}<br>+%{y:.0f} câmeras offline<extra></extra>",
+                ))
+                fig_var_up.add_trace(go.Scatter(
+                    x=df_var_up["cliente"], y=y_melhora, mode="lines+markers", name="Melhorou (-offline)",
+                    line=dict(color="#059669", width=2), marker=dict(size=5),
+                    fill="tozeroy", fillcolor="rgba(5,150,105,.18)", connectgaps=False,
+                    hovertemplate="%{x}<br>%{y:.0f} câmeras offline<extra></extra>",
+                ))
+                fig_var_up.update_layout(
+                    **pdefaults(), height=max(380, 220 + len(df_var_up) * 8),
+                    xaxis=dict(tickangle=-45, tickfont=dict(color="#6B5A7A", size=9)),
+                    yaxis=dict(title="Variação de câmeras offline", gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10), zeroline=True, zerolinecolor="#D8CCE8"),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    margin=dict(l=10, r=10, t=10, b=140),
+                )
+                st.plotly_chart(fig_var_up, use_container_width=True, key="atualizar_base_todas_variacoes")
             st.markdown("")
 
         # Verificação dos campos novos — torna visível se o plano/datas vão preenchidos
