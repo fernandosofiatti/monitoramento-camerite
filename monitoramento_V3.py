@@ -4013,13 +4013,18 @@ def render_aba_cameras_cidade(dados: dict, df_origem: pd.DataFrame) -> None:
         st.warning("Nenhuma cidade cadastrada para os clientes do painel.")
         return
 
-    sub_lista, sub_evolucao = st.tabs(["📋 Lista de câmeras", "📈 Evolução de cadastro"])
+    sub_lista, sub_evolucao, sub_ranking = st.tabs(
+        ["📋 Lista de câmeras", "📈 Evolução de cadastro", "🏆 Ranking de cidades"]
+    )
 
     with sub_lista:
         _render_lista_cameras_cidade(df_cam, cidades)
 
     with sub_evolucao:
         render_evolucao_cadastro_cidade(dados, cidades)
+
+    with sub_ranking:
+        render_ranking_evolucao_cidades(dados)
 
 
 def _render_lista_cameras_cidade(df_cam: pd.DataFrame, cidades: list) -> None:
@@ -4225,6 +4230,136 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFra
         df_detalhe = df_detalhe[["Tipo", "Data", "Semana", "Cliente", "ID da Câmera", "Nome da Câmera"]]
 
     return tabela[["semana", "Rótulo", "Adicionadas", "Removidas", "Saldo"]], df_detalhe, info
+
+
+@st.cache_data(show_spinner=False)
+def montar_ranking_evolucao_cidades(dados: dict) -> pd.DataFrame:
+    """Saldo de câmeras adicionadas/removidas por CIDADE, somando todo o histórico
+    de snapshots — mesma lógica de `montar_evolucao_cameras_cidade`, mas calculada
+    uma única vez para todas as cidades juntas (busca cada snapshot uma vez só,
+    em vez de refazer a busca por cidade — bem mais barato que rodar a função de
+    cidade única 25 vezes).
+    """
+    if not dados:
+        return pd.DataFrame()
+
+    wl_ids_validos = {str(wl).strip() for wl in dados.keys()}
+    cidade_por_wl = {
+        str(wl).strip(): (v.get("cidade_estado") or v.get("cidade") or "")
+        for wl, v in dados.items()
+    }
+
+    df_snaps = listar_snapshots()
+    if df_snaps.empty or len(df_snaps) < 2:
+        return pd.DataFrame()
+
+    df_snaps = df_snaps.sort_values("id").reset_index(drop=True)
+    snap_ids = df_snaps["id"].astype(int).tolist()
+
+    dfs_por_snapshot: dict[int, pd.DataFrame] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(snap_ids))) as executor:
+        futuros = {
+            executor.submit(carregar_snapshot_cameras, sid, wl_ids_validos): sid
+            for sid in snap_ids
+        }
+        for futuro in concurrent.futures.as_completed(futuros):
+            sid = futuros[futuro]
+            df_cams = futuro.result()
+            if df_cams.empty:
+                dfs_por_snapshot[sid] = None
+                continue
+            df_cams = df_cams.copy()
+            df_cams["_chave"] = df_cams["wl_id"].astype(str).str.strip() + "||" + df_cams["id_camera"].astype(str).str.strip()
+            dfs_por_snapshot[sid] = df_cams.set_index("_chave")
+
+    contagem: dict[str, dict[str, int]] = {}
+
+    def _somar(wl_series, campo: str) -> None:
+        cidades = wl_series.astype(str).str.strip().map(cidade_por_wl).fillna("")
+        for cidade, qtd in cidades.value_counts().items():
+            if not cidade:
+                continue
+            contagem.setdefault(cidade, {"Adicionadas": 0, "Removidas": 0})[campo] += int(qtd)
+
+    df_prev = None
+    for sid in snap_ids:
+        df_atual = dfs_por_snapshot.get(sid)
+        if df_atual is None:
+            df_prev = None
+            continue
+        if df_prev is not None:
+            chaves_novas = df_atual.index.difference(df_prev.index)
+            chaves_removidas = df_prev.index.difference(df_atual.index)
+            if len(chaves_novas):
+                _somar(df_atual.loc[chaves_novas, "wl_id"], "Adicionadas")
+            if len(chaves_removidas):
+                _somar(df_prev.loc[chaves_removidas, "wl_id"], "Removidas")
+        df_prev = df_atual
+
+    if not contagem:
+        return pd.DataFrame()
+
+    linhas = [
+        {"Cidade": cidade, "Adicionadas": v["Adicionadas"], "Removidas": v["Removidas"], "Saldo": v["Adicionadas"] - v["Removidas"]}
+        for cidade, v in contagem.items()
+    ]
+    return pd.DataFrame(linhas).sort_values("Saldo", ascending=False).reset_index(drop=True)
+
+
+@st.fragment
+def render_ranking_evolucao_cidades(dados: dict) -> None:
+    """Sub-aba de ranking: top 10 cidades com maior movimentação de câmeras.
+
+    Só calcula depois de um clique explícito — a mesma varredura de snapshots
+    da Evolução de cadastro, só que pra todas as cidades de uma vez, então
+    ainda vale evitar rodar isso à toa a cada troca de aba.
+    """
+    st.caption(
+        "Ranking das cidades com maior movimentação de câmeras (adicionadas/removidas), "
+        "somando todo o histórico de snapshots salvos — mesma lógica da Evolução de cadastro, "
+        "calculada para todas as cidades de uma vez."
+    )
+
+    if not st.session_state.get("ranking_cidades_gerado"):
+        if st.button("📊 Gerar ranking", key="btn_gerar_ranking_cidades"):
+            st.session_state["ranking_cidades_gerado"] = True
+            st.rerun(scope="fragment")
+        st.info("Clique acima para calcular — evita varrer o histórico de snapshots à toa a cada troca de aba.")
+        return
+
+    df_rank = montar_ranking_evolucao_cidades(dados)
+    if df_rank.empty:
+        st.info(
+            "Sem snapshots suficientes com detalhe por câmera para montar o ranking. "
+            "Salve snapshots periodicamente (aba Auditoria) para essa visão ir se formando."
+        )
+        return
+
+    df_rank["_abs_saldo"] = df_rank["Saldo"].abs()
+    top10 = df_rank.sort_values("_abs_saldo", ascending=False).head(10).sort_values("Saldo", ascending=True)
+
+    fig_rank = go.Figure(go.Bar(
+        y=top10["Cidade"], x=top10["Saldo"], orientation="h",
+        marker=dict(color=["#059669" if v >= 0 else "#dc2626" for v in top10["Saldo"]]),
+        text=[f"{v:+d}" for v in top10["Saldo"]],
+        textposition="outside",
+        hovertemplate="%{y}<br>Saldo: %{x:+d} câmeras<extra></extra>",
+    ))
+    fig_rank.update_layout(
+        **pdefaults(), height=max(360, len(top10) * 38), showlegend=False,
+        xaxis=dict(title="Saldo (adicionadas − removidas)", gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10), zeroline=True, zerolinecolor="#D8CCE8"),
+        yaxis=dict(tickfont=dict(color="#6B5A7A", size=10)),
+        margin=dict(l=10, r=60, t=10, b=10),
+    )
+    st.plotly_chart(fig_rank, use_container_width=True, key="ranking_cidades_top10")
+
+    df_tab_rank = df_rank[["Cidade", "Adicionadas", "Removidas", "Saldo"]].reset_index(drop=True)
+    df_tab_rank.index += 1
+    render_dataframe(df_tab_rank, height=min(500, (len(df_tab_rank) + 1) * 35 + 3))
+
+    if st.button("🔄 Recalcular", key="btn_recalcular_ranking_cidades"):
+        montar_ranking_evolucao_cidades.clear()
+        st.rerun(scope="fragment")
 
 
 @st.fragment
