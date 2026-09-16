@@ -518,15 +518,21 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
             df_comp_up["cliente"] = df_comp_up["wl_id"].map(clientes_map).fillna("ID " + df_comp_up["wl_id"].astype(str))
             df_comp_up["delta_off"] = df_comp_up["off_b"] - df_comp_up["off_a"]
 
-            df_var_up = df_comp_up[df_comp_up["delta_off"] != 0].sort_values("delta_off", ascending=False).reset_index(drop=True)
+            df_var_up = df_comp_up.sort_values("delta_off", ascending=False).reset_index(drop=True)
+            n_sem_variacao = int((df_var_up["delta_off"] == 0).sum())
 
             st.markdown("##### Variação de câmeras offline por cliente")
-            st.caption('Base atual (já publicada) vs. CSV novo — antes de clicar em "Atualizar base online". Todos os clientes com variação, do que mais piorou ao que mais melhorou.')
+            st.caption(
+                f'Base atual (já publicada) vs. CSV novo — antes de clicar em "Atualizar base online". '
+                f'Todos os {len(df_var_up)} clientes, do que mais piorou ao que mais melhorou'
+                + (f" ({n_sem_variacao} sem variação)." if n_sem_variacao else ".")
+            )
             if df_var_up.empty:
-                st.info("Nenhuma variação de câmeras offline neste CSV.")
+                st.info("Nenhum cliente para comparar neste CSV.")
             else:
                 y_piora = df_var_up["delta_off"].where(df_var_up["delta_off"] > 0)
                 y_melhora = df_var_up["delta_off"].where(df_var_up["delta_off"] < 0)
+                y_neutro = df_var_up["delta_off"].where(df_var_up["delta_off"] == 0)
                 fig_var_up = go.Figure()
                 fig_var_up.add_trace(go.Scatter(
                     x=df_var_up["cliente"], y=y_piora, mode="lines+markers", name="Piorou (+offline)",
@@ -539,6 +545,11 @@ def render_aba_atualizar_base(df_origem: pd.DataFrame | None = None):
                     line=dict(color="#059669", width=2), marker=dict(size=5),
                     fill="tozeroy", fillcolor="rgba(5,150,105,.18)", connectgaps=False,
                     hovertemplate="%{x}<br>%{y:.0f} câmeras offline<extra></extra>",
+                ))
+                fig_var_up.add_trace(go.Scatter(
+                    x=df_var_up["cliente"], y=y_neutro, mode="markers", name="Sem variação",
+                    marker=dict(size=5, color="#B8A9CC"),
+                    hovertemplate="%{x}<br>sem variação<extra></extra>",
                 ))
                 fig_var_up.update_layout(
                     **pdefaults(), height=max(380, 220 + len(df_var_up) * 8),
