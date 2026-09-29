@@ -5441,7 +5441,7 @@ def main():
         else:
             st.info(mapa_msg)
 
-        st.markdown("**Participação de cada cidade no total de câmeras offline**")
+        st.markdown("**Pareto — cidades que mais concentram câmeras offline**")
         rows_share = []
         for v in dados.values():
             n_off = len(v["offline"])
@@ -5452,22 +5452,67 @@ def main():
         if df_share.empty:
             st.success("🎉 Nenhuma câmera offline no momento!")
         else:
-            fig_pie_share = go.Figure(go.Pie(
-                labels=df_share["Cidade"], values=df_share["Offline"],
-                hole=0.35, sort=False,
-                hovertemplate="<b>%{label}</b><br>%{value} câmeras offline<br>%{percent} do total offline<extra></extra>",
-                textinfo="percent",
-                textposition="inside",
+            total_off_share = int(df_share["Offline"].sum())
+            top10 = df_share.head(10).copy()
+            outras = df_share.iloc[10:]
+            top10["cum_pct"] = top10["Offline"].cumsum() / total_off_share * 100
+
+            fig_pareto = go.Figure()
+            fig_pareto.add_trace(go.Bar(
+                x=top10["Cidade"], y=top10["Offline"], name="Câmeras offline",
+                marker=dict(color="#dc2626"),
+                text=top10["Offline"], textposition="outside",
+                hovertemplate="<b>%{x}</b><br>%{y} câmeras offline<extra></extra>",
             ))
-            fig_pie_share.update_layout(
+            fig_pareto.add_trace(go.Scatter(
+                x=top10["Cidade"], y=top10["cum_pct"], name="% acumulado", yaxis="y2",
+                mode="lines+markers+text",
+                text=[f"{p:.1f}%" for p in top10["cum_pct"]], textposition="top center",
+                line=dict(color="#6D28D9", width=2), marker=dict(size=6, color="#6D28D9"),
+                hovertemplate="<b>%{x}</b><br>%{y:.1f}% acumulado<extra></extra>",
+            ))
+            fig_pareto.update_layout(
                 **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
-                paper_bgcolor="rgba(0,0,0,0)",
-                height=max(420, min(len(df_share) * 20, 640)),
-                legend=dict(font=dict(color="#6B5A7A", size=10)),
-                margin=dict(l=10, r=10, t=10, b=10),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                height=420,
+                xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-45),
+                yaxis=dict(title="Câmeras offline", gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10),
+                           range=[0, top10["Offline"].max() * 1.25]),
+                yaxis2=dict(title="% acumulado", overlaying="y", side="right", range=[0, 105],
+                            ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10), showgrid=False),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(l=10, r=10, t=40, b=110),
             )
-            st.plotly_chart(fig_pie_share, use_container_width=True, key="pie_participacao_offline_cidade")
-            st.caption(f"{total_offline} câmeras offline no total, distribuídas entre {len(df_share)} cidade(s).")
+            st.plotly_chart(fig_pareto, use_container_width=True, key="pareto_offline_cidade")
+
+            pct_top10 = top10["Offline"].sum() / total_off_share * 100
+            col_top10, col_outras = st.columns(2)
+            with col_top10:
+                st.markdown(f"""
+                    <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:14px 16px">
+                        <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Top {len(top10)} cidades</div>
+                        <div style="font-size:24px;color:#dc2626;font-family:'DM Mono',monospace;font-weight:800">{int(top10['Offline'].sum())} câmeras offline</div>
+                        <div style="font-size:12px;color:#7C6A91">{pct_top10:.1f}% do total offline</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            with col_outras:
+                if outras.empty:
+                    st.markdown("""
+                        <div style="background:#F1ECFA;border:1px solid #E9D5FF;border-radius:12px;padding:14px 16px">
+                            <div style="font-size:10px;color:#6D28D9;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Outras cidades</div>
+                            <div style="font-size:24px;color:#6D28D9;font-family:'DM Mono',monospace;font-weight:800">—</div>
+                            <div style="font-size:12px;color:#7C6A91">Não há mais nenhuma cidade com offline</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    pct_outras = outras["Offline"].sum() / total_off_share * 100
+                    st.markdown(f"""
+                        <div style="background:#F1ECFA;border:1px solid #E9D5FF;border-radius:12px;padding:14px 16px">
+                            <div style="font-size:10px;color:#6D28D9;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Outras {len(outras)} cidade(s)</div>
+                            <div style="font-size:24px;color:#6D28D9;font-family:'DM Mono',monospace;font-weight:800">{int(outras['Offline'].sum())} câmeras offline</div>
+                            <div style="font-size:12px;color:#7C6A91">{pct_outras:.1f}% do total offline</div>
+                        </div>
+                    """, unsafe_allow_html=True)
 
     # ════════════════════════════════════════════
     # ABA 1 — PAINEL DE CLIENTES
