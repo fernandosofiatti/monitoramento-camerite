@@ -5474,9 +5474,9 @@ def main():
                 x=top10["Cidade"], y=top10["cum_pct"], name="% acumulado", yaxis="y2",
                 mode="lines+markers+text",
                 text=[f"{p:.1f}%" for p in top10["cum_pct"]], textposition="top center",
-                textfont=dict(color="#4A3F5C", size=10),
-                line=dict(color="#1F2937", width=2, dash="dot"),
-                marker=dict(size=7, color="#1F2937", line=dict(width=1.5, color="#ffffff")),
+                textfont=dict(color="#B45309", size=10),
+                line=dict(color="#f59e0b", width=3),
+                marker=dict(size=8, color="#f59e0b", line=dict(width=1.5, color="#ffffff")),
                 hovertemplate="<b>%{x}</b><br>%{y:.1f}% acumulado<extra></extra>",
             ))
             fig_pareto.update_layout(
