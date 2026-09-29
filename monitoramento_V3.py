@@ -5441,7 +5441,12 @@ def main():
         else:
             st.info(mapa_msg)
 
-        st.markdown("**Pareto — cidades que mais concentram câmeras offline**")
+        st.markdown("""
+        <div class="audit-section-title">
+            <strong>Pareto — cidades que mais concentram câmeras offline</strong>
+            <span>Top 10 + o restante, com % acumulado</span>
+        </div>
+        """, unsafe_allow_html=True)
         rows_share = []
         for v in dados.values():
             n_off = len(v["offline"])
@@ -5482,8 +5487,9 @@ def main():
             fig_pareto.add_trace(go.Scatter(
                 x=plot_df["Cidade"], y=plot_df["cum_pct"], name="% acumulado", yaxis="y2",
                 mode="lines+markers",
-                line=dict(color="#f59e0b", width=3),
-                marker=dict(size=8, color="#f59e0b", line=dict(width=1.5, color="#ffffff")),
+                line=dict(color="#f59e0b", width=3, shape="spline", smoothing=0.4),
+                marker=dict(size=9, color="#f59e0b", line=dict(width=2, color="#ffffff")),
+                fill="tozeroy", fillcolor="rgba(245,158,11,.08)",
                 hovertemplate="<b>%{x}</b><br>%{y:.1f}% acumulado<extra></extra>",
             ))
             # Rótulo do % acumulado como "etiqueta" (fundo colorido + texto branco) em vez
@@ -5499,15 +5505,19 @@ def main():
             fig_pareto.update_layout(
                 **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                height=420,
-                xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-45),
-                yaxis=dict(title="Câmeras offline", gridcolor="#F1ECFA", tickfont=dict(color="#8B7AA3", size=10),
-                           range=[0, plot_df["Offline"].max() * 1.25]),
-                yaxis2=dict(title="% acumulado", overlaying="y", side="right", range=[0, 105],
-                            ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10), showgrid=False),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                height=430,
+                bargap=0.35,
+                xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-45, showline=False,
+                           showgrid=False, zeroline=False),
+                yaxis=dict(title="Câmeras offline", gridcolor="#F4EEFC", tickfont=dict(color="#8B7AA3", size=10),
+                           range=[0, plot_df["Offline"].max() * 1.25], zeroline=False, showline=False),
+                yaxis2=dict(title="% acumulado", overlaying="y", side="right", range=[0, 108],
+                            ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10), showgrid=False,
+                            zeroline=False, showline=False),
+                legend=dict(orientation="h", yanchor="bottom", y=1.03, xanchor="right", x=1,
                             font=dict(color="#6B5A7A", size=11)),
                 margin=dict(l=10, r=10, t=40, b=110),
+                hovermode="x unified",
             )
             st.plotly_chart(fig_pareto, use_container_width=True, key="pareto_offline_cidade")
 
