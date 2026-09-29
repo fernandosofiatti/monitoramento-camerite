@@ -5460,15 +5460,23 @@ def main():
             fig_pareto = go.Figure()
             fig_pareto.add_trace(go.Bar(
                 x=top10["Cidade"], y=top10["Offline"], name="Câmeras offline",
-                marker=dict(color="#dc2626"),
+                marker=dict(
+                    color=top10["Offline"],
+                    colorscale=[[0.0, "#fecaca"], [1.0, "#991b1b"]],
+                    cmin=top10["Offline"].min(), cmax=top10["Offline"].max(),
+                    line=dict(width=0),
+                ),
                 text=top10["Offline"], textposition="outside",
+                textfont=dict(color="#4A3F5C", size=11),
                 hovertemplate="<b>%{x}</b><br>%{y} câmeras offline<extra></extra>",
             ))
             fig_pareto.add_trace(go.Scatter(
                 x=top10["Cidade"], y=top10["cum_pct"], name="% acumulado", yaxis="y2",
                 mode="lines+markers+text",
                 text=[f"{p:.1f}%" for p in top10["cum_pct"]], textposition="top center",
-                line=dict(color="#6D28D9", width=2), marker=dict(size=6, color="#6D28D9"),
+                textfont=dict(color="#4A3F5C", size=10),
+                line=dict(color="#1F2937", width=2, dash="dot"),
+                marker=dict(size=7, color="#1F2937", line=dict(width=1.5, color="#ffffff")),
                 hovertemplate="<b>%{x}</b><br>%{y:.1f}% acumulado<extra></extra>",
             ))
             fig_pareto.update_layout(
@@ -5476,11 +5484,12 @@ def main():
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 height=420,
                 xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-45),
-                yaxis=dict(title="Câmeras offline", gridcolor="#E9D5FF", tickfont=dict(color="#8B7AA3", size=10),
+                yaxis=dict(title="Câmeras offline", gridcolor="#F1ECFA", tickfont=dict(color="#8B7AA3", size=10),
                            range=[0, top10["Offline"].max() * 1.25]),
                 yaxis2=dict(title="% acumulado", overlaying="y", side="right", range=[0, 105],
                             ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10), showgrid=False),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                            font=dict(color="#6B5A7A", size=11)),
                 margin=dict(l=10, r=10, t=40, b=110),
             )
             st.plotly_chart(fig_pareto, use_container_width=True, key="pareto_offline_cidade")
