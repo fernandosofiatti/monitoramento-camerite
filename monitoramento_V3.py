@@ -5433,14 +5433,6 @@ def main():
             render_top5_criticos(df_clientes_ops)
 
         st.markdown("<hr>", unsafe_allow_html=True)
-        st.markdown("**Mapa de calor — % offline por cliente**")
-        fig_map, mapa_msg = montar_mapa_cidades(df_origem)
-        if fig_map is not None:
-            st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
-            st.caption(mapa_msg)
-        else:
-            st.info(mapa_msg)
-
         st.markdown("""
         <div class="audit-section-title">
             <strong>Pareto — cidades que mais concentram câmeras offline</strong>
@@ -5549,6 +5541,15 @@ def main():
                             <div style="font-size:12px;color:#7C6A91">{pct_outras:.1f}% do total offline</div>
                         </div>
                     """, unsafe_allow_html=True)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown("**Mapa de calor — % offline por cliente**")
+        fig_map, mapa_msg = montar_mapa_cidades(df_origem)
+        if fig_map is not None:
+            st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
+            st.caption(mapa_msg)
+        else:
+            st.info(mapa_msg)
 
     # ════════════════════════════════════════════
     # ABA 1 — PAINEL DE CLIENTES
