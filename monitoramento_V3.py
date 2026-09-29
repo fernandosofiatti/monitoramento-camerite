@@ -5434,20 +5434,6 @@ def main():
 
         st.markdown("<hr>", unsafe_allow_html=True)
         st.markdown("**Mapa de calor — % offline por cliente**")
-        # Inclui todos os clientes cadastrados no nome_clientes.xlsx,
-        # mesmo aqueles sem câmeras no CSV (aparecem com 0%).
-        rows_heat = []
-        for v in dados.values():
-            rows_heat.append({
-                "Cliente": v["nome_cliente"],
-                "Pct": round(len(v["offline"]) / v["total"] * 100, 2) if v["total"] else 0,
-            })
-        clientes_no_csv = {v["nome_cliente"] for v in dados.values()}
-        for wl_id, nome in clientes_map.items():
-            if nome not in clientes_no_csv:
-                rows_heat.append({"Cliente": nome, "Pct": 0.0})
-        df_heat = pd.DataFrame(rows_heat).sort_values("Pct", ascending=False)
-
         fig_map, mapa_msg = montar_mapa_cidades(df_origem)
         if fig_map is not None:
             st.plotly_chart(fig_map, use_container_width=True, key="mapa_cidades_operacao_v1")
@@ -5455,36 +5441,33 @@ def main():
         else:
             st.info(mapa_msg)
 
-        fig_heat = go.Figure(go.Bar(
-            x=df_heat["Cliente"], y=df_heat["Pct"],
-            marker=dict(
-                color=df_heat["Pct"],
-                colorscale=[
-                    [0.0, "#dff8f3"],
-                    [0.10, "#14b8a6"],
-                    [0.12, "#fde047"],
-                    [0.15, "#f59e0b"],
-                    [0.40, "#ef4444"],
-                    [1.0, "#b91c1c"],
-                ],
-                cmin=0, cmax=100, line=dict(width=0),
-            ),
-            hovertemplate="<b>%{x}</b><br>%{y:.1f}% offline<extra></extra>",
-        ))
-        layout_defaults = {k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]}
-        _heat_height = max(300, min(len(df_heat) * 22, 600))
-        fig_heat.update_layout(
-            **layout_defaults,
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            height=_heat_height,
-            xaxis=dict(tickfont=dict(color="#8B7AA3",size=10), tickangle=-45),
-            yaxis=dict(ticksuffix="%", gridcolor="#E9D5FF",
-                       tickfont=dict(color="#8B7AA3",size=10),
-                       range=[0, max(df_heat["Pct"].max()*1.2, 10)]),
-            margin=dict(l=10,r=10,t=10,b=110),
-        )
-        st.plotly_chart(fig_heat, use_container_width=True, key="heatmap_clientes_operacao_v1")
+        st.markdown("**Participação de cada cidade no total de câmeras offline**")
+        rows_share = []
+        for v in dados.values():
+            n_off = len(v["offline"])
+            if n_off > 0:
+                rows_share.append({"Cidade": v["nome_cliente"], "Offline": n_off})
+        df_share = pd.DataFrame(rows_share).sort_values("Offline", ascending=False).reset_index(drop=True)
+
+        if df_share.empty:
+            st.success("🎉 Nenhuma câmera offline no momento!")
+        else:
+            fig_pie_share = go.Figure(go.Pie(
+                labels=df_share["Cidade"], values=df_share["Offline"],
+                hole=0.35, sort=False,
+                hovertemplate="<b>%{label}</b><br>%{value} câmeras offline<br>%{percent} do total offline<extra></extra>",
+                textinfo="percent",
+                textposition="inside",
+            ))
+            fig_pie_share.update_layout(
+                **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
+                paper_bgcolor="rgba(0,0,0,0)",
+                height=max(420, min(len(df_share) * 20, 640)),
+                legend=dict(font=dict(color="#6B5A7A", size=10)),
+                margin=dict(l=10, r=10, t=10, b=10),
+            )
+            st.plotly_chart(fig_pie_share, use_container_width=True, key="pie_participacao_offline_cidade")
+            st.caption(f"{total_offline} câmeras offline no total, distribuídas entre {len(df_share)} cidade(s).")
 
     # ════════════════════════════════════════════
     # ABA 1 — PAINEL DE CLIENTES
