@@ -5460,12 +5460,7 @@ def main():
             fig_pareto = go.Figure()
             fig_pareto.add_trace(go.Bar(
                 x=top10["Cidade"], y=top10["Offline"], name="Câmeras offline",
-                marker=dict(
-                    color=top10["Offline"],
-                    colorscale=[[0.0, "#fecaca"], [1.0, "#991b1b"]],
-                    cmin=top10["Offline"].min(), cmax=top10["Offline"].max(),
-                    line=dict(width=0),
-                ),
+                marker=dict(color="#0e7490", line=dict(width=0)),
                 text=top10["Offline"], textposition="outside",
                 textfont=dict(color="#4A3F5C", size=11),
                 hovertemplate="<b>%{x}</b><br>%{y} câmeras offline<extra></extra>",
@@ -5498,9 +5493,9 @@ def main():
             col_top10, col_outras = st.columns(2)
             with col_top10:
                 st.markdown(f"""
-                    <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;padding:14px 16px">
-                        <div style="font-size:10px;color:#b91c1c;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Top {len(top10)} cidades</div>
-                        <div style="font-size:24px;color:#dc2626;font-family:'DM Mono',monospace;font-weight:800">{int(top10['Offline'].sum())} câmeras offline</div>
+                    <div style="background:#ECFEFF;border:1px solid #A5F3FC;border-radius:12px;padding:14px 16px">
+                        <div style="font-size:10px;color:#0e7490;font-weight:800;text-transform:uppercase;letter-spacing:.5px">Top {len(top10)} cidades</div>
+                        <div style="font-size:24px;color:#0e7490;font-family:'DM Mono',monospace;font-weight:800">{int(top10['Offline'].sum())} câmeras offline</div>
                         <div style="font-size:12px;color:#7C6A91">{pct_top10:.1f}% do total offline</div>
                     </div>
                 """, unsafe_allow_html=True)
