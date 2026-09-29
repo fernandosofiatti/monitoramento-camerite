@@ -150,6 +150,27 @@ def preencher_cidade_estado_por_clientes(df: pd.DataFrame, clientes_prefeitura: 
 
     return df
 
+def _renomear_colunas_acentuadas(df: pd.DataFrame) -> pd.DataFrame:
+    """Renomeia colunas pro nome canônico (COL_*) quando batem ignorando
+    acento/maiúscula/underscore — ex.: "Ultima_Atualização" (com acento, comum
+    em exports do CSV) vs "Ultima_Atualizacao" (sem acento, esperado pelo
+    código). Sem isso a coluna "some" e vira em branco pra tudo — bug real
+    encontrado em produção (2831 registros marcados como data inválida que
+    tinham data certinha no CSV; ver também `_renomear_colunas_padrao` em
+    src/db/supabase.py, mesmo problema no caminho de importação pro Supabase).
+    """
+    alvo_cols = [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU, COL_OBS, COL_DATA_CAD, COL_PLANO, COL_DATA_INAT]
+    normalizados = {normalizar_coluna(c): c for c in df.columns}
+    rename_map = {}
+    for alvo in alvo_cols:
+        if alvo in df.columns:
+            continue
+        col_real = normalizados.get(normalizar_coluna(alvo))
+        if col_real and col_real not in rename_map:
+            rename_map[col_real] = alvo
+    return df.rename(columns=rename_map) if rename_map else df
+
+
 def ler_csv_gov(path: str) -> pd.DataFrame | None:
     melhor_candidato = None
     for enc in ("utf-8", "latin-1", "cp1252"):
@@ -162,6 +183,7 @@ def ler_csv_gov(path: str) -> pd.DataFrame | None:
                     quoting=0,              # respeita aspas normais
                 )
                 df.columns = [c.strip() for c in df.columns]
+                df = _renomear_colunas_acentuadas(df)
                 if {COL_STATUS, COL_WL}.issubset(df.columns):
                     return df
                 if melhor_candidato is None or len(df.columns) > len(melhor_candidato.columns):

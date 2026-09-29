@@ -21,6 +21,7 @@ from src.constants import (
 from src.utils import (
     agora_sao_paulo_str,
     encontrar_coluna_por_chaves,
+    normalizar_coluna,
     parse_ultima_atualizacao,
 )
 
@@ -70,12 +71,36 @@ def supabase_base_url() -> str:
     return supabase_table_url(SUPABASE_TABLE)
 
 
+def _renomear_colunas_padrao(df: pd.DataFrame, colunas_padrao: list[str]) -> pd.DataFrame:
+    """Renomeia colunas pro nome canônico (COL_*) quando batem ignorando
+    acento/maiúscula/underscore — ex.: CSV exportado com "Ultima_Atualização"
+    (com acento) enquanto o código espera "Ultima_Atualizacao" (sem acento).
+
+    Sem isso, o `if col not in df.columns: df[col] = ""` logo abaixo zerava
+    silenciosamente a coluna inteira pra TODAS as linhas (a variação de acento
+    fazia a coluna "sumir"), perdendo a Última Atualização real de milhares de
+    câmeras na importação pro Supabase — bug real encontrado em produção
+    (2831 registros marcados como "data inválida" que na verdade tinham data
+    certinha no CSV original).
+    """
+    normalizados_existentes = {normalizar_coluna(c): c for c in df.columns}
+    rename_map = {}
+    for alvo in colunas_padrao:
+        if alvo in df.columns:
+            continue
+        col_real = normalizados_existentes.get(normalizar_coluna(alvo))
+        if col_real and col_real not in rename_map:
+            rename_map[col_real] = alvo
+    return df.rename(columns=rename_map) if rename_map else df
+
+
 def preparar_df_para_supabase(df: pd.DataFrame) -> pd.DataFrame:
     """Normaliza o CSV para a tabela cameras_origem criada no Supabase."""
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
     colunas_padrao = [COL_WL, COL_EMPRESA, COL_ID_CAM, COL_NOME_CAM, COL_STATUS, COL_ULT_ATU, COL_OBS, COL_DATA_CAD, COL_PLANO, COL_DATA_INAT]
+    df = _renomear_colunas_padrao(df, colunas_padrao)
     for col in colunas_padrao:
         if col not in df.columns:
             df[col] = ""
