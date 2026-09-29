@@ -5457,16 +5457,30 @@ def main():
             outras = df_share.iloc[10:]
             top10["cum_pct"] = top10["Offline"].cumsum() / total_off_share * 100
 
+            # Barra extra agregando o resto das cidades, pra linha de % acumulado
+            # fechar em 100% (senão ela parava em 84,7% e dava a entender que sobrava
+            # uma fatia sem explicação nenhuma).
+            plot_df = top10.copy()
+            cores_barras = ["#0e7490"] * len(top10)
+            if not outras.empty:
+                linha_demais = pd.DataFrame([{
+                    "Cidade": "Demais Cidades",
+                    "Offline": int(outras["Offline"].sum()),
+                    "cum_pct": 100.0,
+                }])
+                plot_df = pd.concat([plot_df, linha_demais], ignore_index=True)
+                cores_barras.append("#9CA3AF")
+
             fig_pareto = go.Figure()
             fig_pareto.add_trace(go.Bar(
-                x=top10["Cidade"], y=top10["Offline"], name="Câmeras offline",
-                marker=dict(color="#0e7490", line=dict(width=0)),
-                text=top10["Offline"], textposition="outside",
+                x=plot_df["Cidade"], y=plot_df["Offline"], name="Câmeras offline",
+                marker=dict(color=cores_barras, line=dict(width=0)),
+                text=plot_df["Offline"], textposition="outside",
                 textfont=dict(color="#4A3F5C", size=11),
                 hovertemplate="<b>%{x}</b><br>%{y} câmeras offline<extra></extra>",
             ))
             fig_pareto.add_trace(go.Scatter(
-                x=top10["Cidade"], y=top10["cum_pct"], name="% acumulado", yaxis="y2",
+                x=plot_df["Cidade"], y=plot_df["cum_pct"], name="% acumulado", yaxis="y2",
                 mode="lines+markers",
                 line=dict(color="#f59e0b", width=3),
                 marker=dict(size=8, color="#f59e0b", line=dict(width=1.5, color="#ffffff")),
@@ -5475,7 +5489,7 @@ def main():
             # Rótulo do % acumulado como "etiqueta" (fundo colorido + texto branco) em vez
             # de texto solto: texto solto ficava ilegível quando caía sobre fundo claro
             # (branco) ou sobre as barras, dependendo da posição do ponto no gráfico.
-            for _, row in top10.iterrows():
+            for _, row in plot_df.iterrows():
                 fig_pareto.add_annotation(
                     x=row["Cidade"], y=row["cum_pct"], yref="y2",
                     text=f"{row['cum_pct']:.1f}%", showarrow=False, yshift=16,
@@ -5488,7 +5502,7 @@ def main():
                 height=420,
                 xaxis=dict(tickfont=dict(color="#8B7AA3", size=10), tickangle=-45),
                 yaxis=dict(title="Câmeras offline", gridcolor="#F1ECFA", tickfont=dict(color="#8B7AA3", size=10),
-                           range=[0, top10["Offline"].max() * 1.25]),
+                           range=[0, plot_df["Offline"].max() * 1.25]),
                 yaxis2=dict(title="% acumulado", overlaying="y", side="right", range=[0, 105],
                             ticksuffix="%", tickfont=dict(color="#8B7AA3", size=10), showgrid=False),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
