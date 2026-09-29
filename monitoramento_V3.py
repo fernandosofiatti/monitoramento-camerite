@@ -778,6 +778,7 @@ from src.data.loaders import (
     carregar_dados,
     calcular_saude_dataframe,
     calcular_saude_dados,
+    listar_registros_data_invalida,
 )
 
 _GEO_CACHE = None
@@ -5253,6 +5254,19 @@ def main():
             st.warning(f"{saude['datas_futuras']} registros têm data futura. Revise o formato de data da extração.")
         elif saude.get("datas_invalidas", 0):
             st.warning(f"{saude['datas_invalidas']} registros têm data inválida e foram marcados como N/D.")
+            df_datas_invalidas = listar_registros_data_invalida(PASTA)
+            if not df_datas_invalidas.empty:
+                with st.expander(f"Ver os {len(df_datas_invalidas)} registros com data inválida"):
+                    render_dataframe(df_datas_invalidas, height=min(500, (len(df_datas_invalidas) + 1) * 35 + 3))
+                    buf_datas_inv = io.BytesIO()
+                    df_datas_invalidas.to_excel(buf_datas_inv, index=False, engine="openpyxl")
+                    st.download_button(
+                        "⬇ Exportar registros com data inválida (.xlsx)",
+                        data=buf_datas_inv.getvalue(),
+                        file_name=f"datas_invalidas_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_datas_invalidas_v1",
+                    )
 
         st.markdown("""
         <div class="audit-section-title">

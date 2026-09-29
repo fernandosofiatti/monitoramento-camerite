@@ -495,19 +495,71 @@ def calcular_saude_dataframe(df: pd.DataFrame | None, clientes_map: dict, origem
     }
 
 @st.cache_data
-def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> dict:
-    clientes_map = carregar_clientes()
+def _carregar_df_saude_fonte(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> tuple[pd.DataFrame | None, str]:
+    """Mesma prioridade de fonte usada por `calcular_saude_dados`: Supabase, senão
+    o CSV local, senão os XLSX individuais. Extraído à parte para que o
+    detalhamento de registros com data inválida (`listar_registros_data_invalida`)
+    use exatamente a mesma base, sem duplicar a lógica de escolha de fonte.
+    """
     if supabase_configurado():
         df_supabase, erro_supabase = carregar_cameras_supabase()
         if df_supabase is not None and not df_supabase.empty:
-            return calcular_saude_dataframe(converter_supabase_para_df_gov(df_supabase), clientes_map, "Supabase / BD online")
+            return converter_supabase_para_df_gov(df_supabase), "Supabase / BD online"
     if os.path.exists(CSV_GOV):
-        return calcular_saude_dataframe(ler_csv_gov(CSV_GOV), clientes_map, "Arquivo local")
-
+        return ler_csv_gov(CSV_GOV), "Arquivo local"
     if os.path.exists(IMPORTACAO_INDIVIDUAL_DIR):
         df_xlsx, _ = carregar_xlsx_individuais(IMPORTACAO_INDIVIDUAL_DIR)
-        return calcular_saude_dataframe(df_xlsx, clientes_map, "Pasta importacao_individual")
+        return df_xlsx, "Pasta importacao_individual"
+    return None, "Arquivo local"
 
-    return calcular_saude_dataframe(None, clientes_map, "Arquivo local")
+
+@st.cache_data
+def calcular_saude_dados(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> dict:
+    clientes_map = carregar_clientes()
+    df, origem = _carregar_df_saude_fonte(pasta, parse_version)
+    return calcular_saude_dataframe(df, clientes_map, origem)
+
+
+def _filtrar_escopo_saude(df: pd.DataFrame, clientes_map: dict) -> pd.DataFrame:
+    df_meta = df.copy()
+    df_meta.columns = [c.strip() for c in df_meta.columns]
+    if clientes_map and COL_WL in df_meta.columns:
+        ids_validos = set(clientes_map.keys())
+        df_meta = df_meta[df_meta[COL_WL].astype(str).str.strip().isin(ids_validos)].copy()
+    return df_meta
+
+
+@st.cache_data
+def listar_registros_data_invalida(pasta: str, parse_version: str = DATA_PARSE_VERSION) -> pd.DataFrame:
+    """Linhas com `Ultima_Atualizacao` preenchida mas ilegível como data.
+
+    Mesmo critério usado em `calcular_saude_dataframe` para contar
+    `datas_invalidas` — aqui devolve as linhas em vez de só a contagem, pra dar
+    pra inspecionar quais câmeras/clientes têm o valor problemático.
+    """
+    colunas_saida = ["ID_Whitelabel", "Cliente", "ID_da_Camera", "Nome_da_Camera", "Valor_Bruto_da_Data"]
+    clientes_map = carregar_clientes()
+    df, _ = _carregar_df_saude_fonte(pasta, parse_version)
+    if df is None or df.empty:
+        return pd.DataFrame(columns=colunas_saida)
+
+    df_escopo = _filtrar_escopo_saude(df, clientes_map)
+    if COL_ULT_ATU not in df_escopo.columns:
+        return pd.DataFrame(columns=colunas_saida)
+
+    valores = df_escopo[COL_ULT_ATU].astype("string").str.strip()
+    parsed = parse_ultima_atualizacao(df_escopo[COL_ULT_ATU])
+    mask = parsed.isna() & valores.notna() & (valores != "")
+    if not mask.any():
+        return pd.DataFrame(columns=colunas_saida)
+
+    df_inv = df_escopo[mask].copy()
+    out = pd.DataFrame()
+    out["ID_Whitelabel"] = df_inv.get(COL_WL, "").astype(str).str.strip()
+    out["Cliente"] = out["ID_Whitelabel"].map(clientes_map).fillna("")
+    out["ID_da_Camera"] = df_inv.get(COL_ID_CAM, "")
+    out["Nome_da_Camera"] = df_inv.get(COL_NOME_CAM, "")
+    out["Valor_Bruto_da_Data"] = valores[mask].values
+    return out.reset_index(drop=True)
 
 
