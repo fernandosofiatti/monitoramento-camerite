@@ -5467,13 +5467,21 @@ def main():
             ))
             fig_pareto.add_trace(go.Scatter(
                 x=top10["Cidade"], y=top10["cum_pct"], name="% acumulado", yaxis="y2",
-                mode="lines+markers+text",
-                text=[f"{p:.1f}%" for p in top10["cum_pct"]], textposition="top center",
-                textfont=dict(color="#B45309", size=10),
+                mode="lines+markers",
                 line=dict(color="#f59e0b", width=3),
                 marker=dict(size=8, color="#f59e0b", line=dict(width=1.5, color="#ffffff")),
                 hovertemplate="<b>%{x}</b><br>%{y:.1f}% acumulado<extra></extra>",
             ))
+            # Rótulo do % acumulado como "etiqueta" (fundo colorido + texto branco) em vez
+            # de texto solto: texto solto ficava ilegível quando caía sobre fundo claro
+            # (branco) ou sobre as barras, dependendo da posição do ponto no gráfico.
+            for _, row in top10.iterrows():
+                fig_pareto.add_annotation(
+                    x=row["Cidade"], y=row["cum_pct"], yref="y2",
+                    text=f"{row['cum_pct']:.1f}%", showarrow=False, yshift=16,
+                    bgcolor="#f59e0b", bordercolor="#f59e0b", borderpad=3, borderwidth=0,
+                    font=dict(color="#ffffff", size=10),
+                )
             fig_pareto.update_layout(
                 **{k: v for k, v in pdefaults().items() if k not in ["paper_bgcolor", "plot_bgcolor"]},
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
