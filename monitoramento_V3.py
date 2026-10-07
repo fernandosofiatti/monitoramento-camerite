@@ -4234,15 +4234,20 @@ def montar_evolucao_cameras_cidade(dados: dict, cidade: str) -> tuple[pd.DataFra
 
 
 @st.cache_data(show_spinner=False)
-def montar_ranking_evolucao_cidades(dados: dict) -> pd.DataFrame:
+def montar_ranking_evolucao_cidades(dados: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Saldo de câmeras adicionadas/removidas por CIDADE, somando todo o histórico
     de snapshots — mesma lógica de `montar_evolucao_cameras_cidade`, mas calculada
     uma única vez para todas as cidades juntas (busca cada snapshot uma vez só,
     em vez de refazer a busca por cidade — bem mais barato que rodar a função de
     cidade única 25 vezes).
+
+    Retorna (ranking_por_cidade, detalhe_por_camera). O detalhe tem uma linha por
+    câmera nova/removida (com a janela de snapshots em que a mudança foi detectada)
+    e alimenta o relatório exportável.
     """
+    vazio = (pd.DataFrame(), pd.DataFrame())
     if not dados:
-        return pd.DataFrame()
+        return vazio
 
     wl_ids_validos = {str(wl).strip() for wl in dados.keys()}
     cidade_por_wl = {
@@ -4252,10 +4257,11 @@ def montar_ranking_evolucao_cidades(dados: dict) -> pd.DataFrame:
 
     df_snaps = listar_snapshots()
     if df_snaps.empty or len(df_snaps) < 2:
-        return pd.DataFrame()
+        return vazio
 
     df_snaps = df_snaps.sort_values("id").reset_index(drop=True)
     snap_ids = df_snaps["id"].astype(int).tolist()
+    datas_map = dict(zip(df_snaps["id"].astype(int), pd.to_datetime(df_snaps["gravado_em"], errors="coerce")))
 
     dfs_por_snapshot: dict[int, pd.DataFrame] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(snap_ids))) as executor:
@@ -4274,6 +4280,7 @@ def montar_ranking_evolucao_cidades(dados: dict) -> pd.DataFrame:
             dfs_por_snapshot[sid] = df_cams.set_index("_chave")
 
     contagem: dict[str, dict[str, int]] = {}
+    blocos_detalhe: list[pd.DataFrame] = []
 
     def _somar(wl_series, campo: str) -> None:
         cidades = wl_series.astype(str).str.strip().map(cidade_por_wl).fillna("")
@@ -4282,29 +4289,56 @@ def montar_ranking_evolucao_cidades(dados: dict) -> pd.DataFrame:
                 continue
             contagem.setdefault(cidade, {"Adicionadas": 0, "Removidas": 0})[campo] += int(qtd)
 
+    def _bloco_detalhe(df_origem_cams: pd.DataFrame, chaves, tipo: str, sid_atual: int, sid_ant: int) -> pd.DataFrame:
+        sub = df_origem_cams.loc[chaves]
+        wl = sub["wl_id"].astype(str).str.strip()
+        return pd.DataFrame({
+            "Tipo": tipo,
+            "Cidade": wl.map(cidade_por_wl).fillna("").values,
+            "Cliente": sub["nome_cliente"].values,
+            "ID da Câmera": sub["id_camera"].values,
+            "Nome da Câmera": sub["nome_camera"].values,
+            "Data de Cadastro": sub["data_cadastro"].values if "data_cadastro" in sub.columns else "",
+            "Snapshot anterior": datas_map.get(sid_ant),
+            "Detectada no snapshot": datas_map.get(sid_atual),
+        })
+
     df_prev = None
+    sid_prev = None
     for sid in snap_ids:
         df_atual = dfs_por_snapshot.get(sid)
         if df_atual is None:
             df_prev = None
+            sid_prev = None
             continue
         if df_prev is not None:
             chaves_novas = df_atual.index.difference(df_prev.index)
             chaves_removidas = df_prev.index.difference(df_atual.index)
             if len(chaves_novas):
                 _somar(df_atual.loc[chaves_novas, "wl_id"], "Adicionadas")
+                blocos_detalhe.append(_bloco_detalhe(df_atual, chaves_novas, "Nova", sid, sid_prev))
             if len(chaves_removidas):
                 _somar(df_prev.loc[chaves_removidas, "wl_id"], "Removidas")
+                blocos_detalhe.append(_bloco_detalhe(df_prev, chaves_removidas, "Removida", sid, sid_prev))
         df_prev = df_atual
+        sid_prev = sid
 
     if not contagem:
-        return pd.DataFrame()
+        return vazio
 
     linhas = [
         {"Cidade": cidade, "Adicionadas": v["Adicionadas"], "Removidas": v["Removidas"], "Saldo": v["Adicionadas"] - v["Removidas"]}
         for cidade, v in contagem.items()
     ]
-    return pd.DataFrame(linhas).sort_values("Saldo", ascending=False).reset_index(drop=True)
+    df_rank = pd.DataFrame(linhas).sort_values("Saldo", ascending=False).reset_index(drop=True)
+
+    df_detalhe = pd.concat(blocos_detalhe, ignore_index=True) if blocos_detalhe else pd.DataFrame()
+    if not df_detalhe.empty:
+        df_detalhe = df_detalhe[df_detalhe["Cidade"] != ""].copy()
+        df_detalhe = df_detalhe.sort_values(
+            ["Detectada no snapshot", "Cidade", "Tipo", "ID da Câmera"], ascending=[False, True, True, True]
+        ).reset_index(drop=True)
+    return df_rank, df_detalhe
 
 
 @st.fragment
@@ -4343,7 +4377,7 @@ def render_ranking_evolucao_cidades(dados: dict) -> None:
         st.info("Clique acima para calcular — evita varrer o histórico de snapshots à toa a cada troca de aba.")
         return
 
-    df_rank = montar_ranking_evolucao_cidades(dados)
+    df_rank, df_detalhe_rank = montar_ranking_evolucao_cidades(dados)
     if df_rank.empty:
         st.info(
             "Sem snapshots suficientes com detalhe por câmera para montar o ranking. "
@@ -4372,6 +4406,46 @@ def render_ranking_evolucao_cidades(dados: dict) -> None:
     df_tab_rank = df_rank[["Cidade", "Adicionadas", "Removidas", "Saldo"]].reset_index(drop=True)
     df_tab_rank.index += 1
     render_dataframe(df_tab_rank, height=min(500, (len(df_tab_rank) + 1) * 35 + 3))
+
+    if not df_detalhe_rank.empty:
+        df_det_exp = df_detalhe_rank.copy()
+        for col in ("Snapshot anterior", "Detectada no snapshot"):
+            df_det_exp[col] = pd.to_datetime(df_det_exp[col], errors="coerce").dt.strftime("%d/%m/%Y %H:%M").fillna("N/D")
+        df_det_exp["Data de Cadastro"] = df_det_exp["Data de Cadastro"].apply(formatar_data_hora_br)
+
+        df_novas_exp = df_det_exp[df_det_exp["Tipo"] == "Nova"].drop(columns=["Tipo"])
+        df_removidas_exp = df_det_exp[df_det_exp["Tipo"] == "Removida"].drop(columns=["Tipo", "Data de Cadastro"])
+
+        st.markdown("#### 📄 Relatório de câmeras novas e removidas")
+        st.caption(
+            f"{len(df_novas_exp)} câmeras novas e {len(df_removidas_exp)} removidas no histórico de snapshots. "
+            "\"Snapshot anterior\" → \"Detectada no snapshot\" é a janela em que a mudança apareceu."
+        )
+
+        buf_rank = io.BytesIO()
+        with pd.ExcelWriter(buf_rank, engine="openpyxl") as writer:
+            df_rank[["Cidade", "Adicionadas", "Removidas", "Saldo"]].to_excel(writer, index=False, sheet_name="Resumo por cidade")
+            df_novas_exp.to_excel(writer, index=False, sheet_name="Câmeras novas")
+            df_removidas_exp.to_excel(writer, index=False, sheet_name="Câmeras removidas")
+        st.download_button(
+            "⬇ Exportar relatório (.xlsx)",
+            data=buf_rank.getvalue(),
+            file_name=f"movimentacao_cameras_{agora_sao_paulo_str('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_ranking_cidades_relatorio_v1",
+        )
+
+        with st.expander("Ver detalhamento por câmera"):
+            st.markdown(f"**🟢 Novas ({len(df_novas_exp)})**")
+            if df_novas_exp.empty:
+                st.caption("Nenhuma câmera nova no período.")
+            else:
+                render_dataframe(df_novas_exp.reset_index(drop=True), height=min(400, (len(df_novas_exp) + 1) * 35 + 3))
+            st.markdown(f"**🔴 Removidas ({len(df_removidas_exp)})**")
+            if df_removidas_exp.empty:
+                st.caption("Nenhuma câmera removida no período.")
+            else:
+                render_dataframe(df_removidas_exp.reset_index(drop=True), height=min(400, (len(df_removidas_exp) + 1) * 35 + 3))
 
     if st.button("🔄 Recalcular", key="btn_recalcular_ranking_cidades"):
         st.session_state["ranking_cidades_recalcular"] = True
