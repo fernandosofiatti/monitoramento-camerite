@@ -3552,6 +3552,23 @@ def _sparkline_svg(vals, cor: str, w: int = 118, h: int = 32) -> str:
             f"<circle cx='{lastx}' cy='{lasty}' r='2.8' fill='{cor}'/></svg>")
 
 
+def _card_categoria_html(rotulo: str, valor: str, nota: str, cor_valor: str, faixa: str) -> str:
+    """Card compacto da Auditoria (contagem por faixa + crescimento da base).
+
+    Usa as classes `kpi-card`/`kpi-label`/`kpi-value`/`kpi-sub` (mesmo vocabulário dos cards
+    grandes) em vez de CSS inline: o inline `color:` nos textos era sobrescrito pela regra
+    `.kpi-card *:not(.kpi-value)` e os números ficavam todos cinza. Só `.kpi-value` é
+    poupado dessa regra, então a cor de status vai nele.
+    """
+    return (
+        f'<div class="kpi-card kpi-compact kpi-{faixa}">'
+        f'<div class="kpi-label">{rotulo}</div>'
+        f'<div class="kpi-value" style="color:{cor_valor}">{valor}</div>'
+        f'<div class="kpi-sub">{nota}</div>'
+        f'</div>'
+    )
+
+
 def _chip_delta(delta, good_is_up: bool, suf: str = "") -> str:
     if delta is None or pd.isna(delta):
         return ""
@@ -5316,48 +5333,33 @@ def main():
 
         col_a, col_b, col_c, col_d = st.columns(4)
         with col_a:
-            st.markdown(f"""
-                <div class="kpi-card kpi-ok" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes até 5% offline</div>
-                    <div style="font-size:24px;color:#14b8a6;font-family:'DM Mono',monospace;font-weight:700">{n_saudavel}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{n_saudavel} clientes · 0–5%</div>
-                </div>
-            """, unsafe_allow_html=True)
-            if st.button("Ver clientes", key="audit_saudavel"):
+            st.markdown(_card_categoria_html(
+                "Clientes até 5% offline", n_saudavel, f"{n_saudavel} clientes · 0–5%", "#14b8a6", "ok"
+            ), unsafe_allow_html=True)
+            if st.button("Ver clientes", key="audit_saudavel", use_container_width=True):
                 st.session_state["audit_categoria"] = "Saudável (0-5%)"
                 st.session_state["mostrar_base_delta"] = False
         with col_b:
-            st.markdown(f"""
-                <div class="kpi-card kpi-warn" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes em atenção (5 a 10% offline)</div>
-                    <div style="font-size:24px;color:#f59e0b;font-family:'DM Mono',monospace;font-weight:700">{n_atencao}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{n_atencao} clientes · 5–10%</div>
-                </div>
-            """, unsafe_allow_html=True)
-            if st.button("Ver clientes", key="audit_atencao"):
+            st.markdown(_card_categoria_html(
+                "Clientes em atenção (5 a 10% offline)", n_atencao, f"{n_atencao} clientes · 5–10%", "#f59e0b", "warn"
+            ), unsafe_allow_html=True)
+            if st.button("Ver clientes", key="audit_atencao", use_container_width=True):
                 st.session_state["audit_categoria"] = "Atenção (5-10%)"
                 st.session_state["mostrar_base_delta"] = False
         with col_c:
-            st.markdown(f"""
-                <div class="kpi-card kpi-neutral" style="background:#ffffff !important;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Clientes acima de 10% offline</div>
-                    <div style="font-size:24px;color:#ef4444;font-family:'DM Mono',monospace;font-weight:700">{n_critico}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{n_critico} clientes · &gt;10%</div>
-                </div>
-            """, unsafe_allow_html=True)
-            if st.button("Ver clientes", key="audit_critico"):
+            st.markdown(_card_categoria_html(
+                "Clientes acima de 10% offline", n_critico, f"{n_critico} clientes · &gt;10%", "#ef4444", "alert"
+            ), unsafe_allow_html=True)
+            if st.button("Ver clientes", key="audit_critico", use_container_width=True):
                 st.session_state["audit_categoria"] = "Crítico (>10%)"
                 st.session_state["mostrar_base_delta"] = False
         with col_d:
-            st.markdown(f"""
-                <div class="kpi-card kpi-neutral" style="background:#ffffff;border:1px solid #E9D5FF;border-radius:8px;padding:14px 16px">
-                    <div style="font-size:10px;color:#8B7AA3;font-weight:700;text-transform:uppercase;letter-spacing:.7px">Crescimento da Base</div>
-                    <div style="font-size:24px;color:{cor_delta_base};font-family:'DM Mono',monospace;font-weight:700">{texto_delta_base}</div>
-                    <div style="font-size:11px;color:#8B7AA3">{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}</div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            if st.button("Ver clientes", key="base_delta_ver_clientes"):
+            st.markdown(_card_categoria_html(
+                "Crescimento da Base", texto_delta_base,
+                f"{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}",
+                cor_delta_base, "neutral",
+            ), unsafe_allow_html=True)
+            if st.button("Ver clientes", key="base_delta_ver_clientes", use_container_width=True):
                 st.session_state["mostrar_base_delta"] = True
                 st.session_state["audit_categoria"] = None
 

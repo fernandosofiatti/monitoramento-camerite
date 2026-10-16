@@ -601,6 +601,20 @@ def injetar_css_global() -> None:
         box-shadow: 0 6px 20px rgba(23,17,38,.05) !important;
     }
     .audit-card { box-shadow: 0 4px 16px rgba(23,17,38,.05) !important; }
+
+    /* ── Card compacto (Auditoria: faixas de clientes + crescimento da base) ──
+       Altura mínima igual pros 4 cards e rodapé empurrado pra baixo: o botão
+       "Ver clientes" de cada um fica alinhado, mesmo com rótulos de 1 ou 2 linhas. */
+    .kpi-card.kpi-compact {
+        padding: 16px 18px 14px; min-height: 148px; margin-bottom: 8px;
+        display: flex; flex-direction: column; gap: 6px;
+    }
+    .kpi-card.kpi-compact .kpi-label {
+        font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px;
+        line-height: 1.3; min-height: 26px;
+    }
+    .kpi-card.kpi-compact .kpi-value { font-size: 32px !important; line-height: 1.1; }
+    .kpi-card.kpi-compact .kpi-sub { font-size: 11px; line-height: 1.35; margin-top: auto; }
     .kpi-card::after { border-radius: 20px 20px 0 0 !important; height: 4px !important; }
     .unit-card::before, .card-red::before, .card-yellow::before { border-radius: 20px 20px 0 0 !important; }
     
