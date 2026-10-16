@@ -357,6 +357,9 @@ from src.db.supabase import (
     enviar_df_supabase,
     sql_criacao_supabase,
     sql_criacao_clientes_painel,
+    SQL_CORRECAO_ACESSO_CLIENTES_PAINEL,
+    supabase_host_mascarado,
+    diagnosticar_tabelas_supabase,
     erro_supabase_amigavel,
 )
 
@@ -3671,13 +3674,44 @@ def render_config_cidades_clientes() -> None:
         )
         if st.button("🔄 Verificar novamente", key="cfg_clientes_reverificar_btn"):
             st.session_state["cfg_clientes_reverificar"] = True
-        with st.expander("SQL para criar a tabela `clientes_painel`", expanded=True):
-            st.code(sql_criacao_clientes_painel(), language="sql")
-        st.caption(
-            "Se você já rodou o SQL e o erro continua (o Supabase às vezes demora a enxergar a tabela nova), "
-            "rode só esta linha no SQL Editor e clique em **Verificar novamente**:"
+        st.markdown(
+            "**A tabela já existe no Supabase, mas o erro continua?** Isso quer dizer que o banco tem a "
+            "tabela e a *API* do Supabase (a que o painel usa) ainda não a enxerga — cache de schema "
+            "desatualizado ou tabela sem permissão para a API. Rode isto no **SQL Editor** e clique em "
+            "**Verificar novamente**:"
         )
-        st.code("notify pgrst, 'reload schema';", language="sql")
+        st.code(SQL_CORRECAO_ACESSO_CLIENTES_PAINEL, language="sql")
+
+        with st.expander("🔍 Diagnóstico — o que a API do Supabase enxerga"):
+            st.caption(
+                f"Projeto configurado neste painel: `{supabase_host_mascarado()}` — confira se é o mesmo "
+                "projeto onde você rodou o SQL (Supabase → Project Settings → API → Project URL)."
+            )
+            if st.button("Rodar diagnóstico", key="cfg_clientes_diagnostico_btn"):
+                st.session_state["cfg_clientes_diagnostico"] = diagnosticar_tabelas_supabase(
+                    ["clientes_painel", "cameras_origem", "usuarios_painel"]
+                )
+            resultado_diag = st.session_state.get("cfg_clientes_diagnostico")
+            if resultado_diag:
+                render_dataframe(pd.DataFrame(resultado_diag), height=min(220, (len(resultado_diag) + 1) * 35 + 3))
+                por_tabela = {l["Tabela"]: l for l in resultado_diag}
+                cp = por_tabela.get("clientes_painel", {})
+                outras_ok = any(l["HTTP"] in (200, 206) for t, l in por_tabela.items() if t != "clientes_painel")
+                if cp.get("HTTP") in (200, 206):
+                    st.success("A API já enxerga `clientes_painel` — clique em **Verificar novamente**.")
+                elif outras_ok:
+                    st.warning(
+                        "A API enxerga as outras tabelas mas **não** a `clientes_painel`: é cache de schema ou "
+                        "falta de permissão. Rode o SQL acima (grants + `notify pgrst`)."
+                    )
+                else:
+                    st.error(
+                        "A API não respondeu bem para nenhuma tabela: confira `SUPABASE_URL` e `SUPABASE_KEY` "
+                        "nos Secrets (projeto ou chave errados)."
+                    )
+
+        with st.expander("SQL completo para criar a tabela `clientes_painel` (caso ainda não exista)"):
+            st.code(sql_criacao_clientes_painel(), language="sql")
     else:
         st.warning(
             "Supabase não configurado: o que for salvo aqui fica só neste ambiente local "

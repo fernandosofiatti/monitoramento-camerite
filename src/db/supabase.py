@@ -632,7 +632,68 @@ drop policy if exists "clientes_painel_delete" on public.clientes_painel;
 create policy "clientes_painel_delete"
     on public.clientes_painel for delete
     using (true);
+
+-- Permissões para a API (PostgREST). Sem isso a tabela pode existir no banco e mesmo
+-- assim não aparecer na API (erro PGRST205) em projetos que não concedem acesso
+-- automático a tabelas novas.
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on public.clientes_painel to anon, authenticated, service_role;
+
+-- Pede para a API recarregar o cache de schema e enxergar a tabela nova agora.
+notify pgrst, 'reload schema';
 """.strip()
+
+
+SQL_CORRECAO_ACESSO_CLIENTES_PAINEL = """
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on public.clientes_painel to anon, authenticated, service_role;
+notify pgrst, 'reload schema';
+""".strip()
+
+
+def supabase_host_mascarado() -> str:
+    """Host do projeto com o meio escondido (ex.: abcd…wxyz.supabase.co) — dá pra
+    conferir se é o mesmo projeto do painel do Supabase sem expor a URL inteira."""
+    host = re.sub(r"^https?://", "", get_secret_value("SUPABASE_URL")).split("/")[0]
+    prefixo, _, resto = host.partition(".")
+    if len(prefixo) > 8:
+        prefixo = prefixo[:4] + "…" + prefixo[-4:]
+    return f"{prefixo}.{resto}" if resto else prefixo
+
+
+def diagnosticar_tabelas_supabase(tabelas: list[str]) -> list[dict]:
+    """Consulta 1 linha de cada tabela pela API e devolve o que a API respondeu.
+
+    Serve pra separar "a API não enxerga SÓ esta tabela" (cache de schema / permissão)
+    de "a API não enxerga nada" (projeto ou chave errados).
+    """
+    if not supabase_configurado():
+        return []
+    linhas = []
+    for tabela in tabelas:
+        try:
+            resp = requests.get(
+                supabase_table_url(tabela), headers=supabase_headers(),
+                params={"select": "*", "limit": "1"}, timeout=15,
+            )
+            codigo = ""
+            if resp.status_code not in (200, 206):
+                try:
+                    codigo = resp.json().get("code", "") or ""
+                except Exception:
+                    codigo = ""
+            if resp.status_code in (200, 206):
+                resumo = "visível na API"
+            elif codigo == "PGRST205":
+                resumo = "API NÃO encontra a tabela (cache de schema ou falta de permissão)"
+            elif resp.status_code in (401, 403):
+                resumo = "chave sem permissão para ler esta tabela"
+            else:
+                resumo = (resp.text or "")[:90]
+            linhas.append({"Tabela": tabela, "HTTP": resp.status_code, "Código": codigo or "—", "Resultado": resumo})
+        except Exception as e:
+            linhas.append({"Tabela": tabela, "HTTP": "—", "Código": "—", "Resultado": f"falha de conexão: {str(e)[:80]}"})
+    return linhas
 
 
 def erro_supabase_amigavel(resp) -> str:
