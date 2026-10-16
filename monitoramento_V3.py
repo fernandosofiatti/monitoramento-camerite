@@ -356,6 +356,7 @@ from src.db.supabase import (
     apagar_cameras_origem_por_whitelabel,
     enviar_df_supabase,
     sql_criacao_supabase,
+    sql_criacao_clientes_painel,
     erro_supabase_amigavel,
 )
 
@@ -770,6 +771,10 @@ from src.data.loaders import (
     carregar_clientes,
     carregar_clientes_prefeitura,
     carregar_clientes_franqueado,
+    carregar_clientes_painel_df,
+    status_clientes_painel,
+    limpar_cache_clientes_painel,
+    salvar_clientes_painel,
     parse_prefeitura_localidade,
     preencher_cidade_estado_por_clientes,
     ler_csv_gov,
@@ -3635,8 +3640,90 @@ def render_resumo_operacional(df_clientes_ops, total_cameras: int, total_offline
         _render_kpi_hist(sel)
 
 
+def render_config_cidades_clientes() -> None:
+    st.caption(
+        "Vínculo entre ID_Whitelabel e a cidade monitorada — substitui a edição manual da "
+        "planilha `nome_clientes.xlsx`. Para **adicionar**, use a linha em branco no rodapé da tabela; "
+        "para **remover**, clique na caixinha à esquerda da linha (seleciona a linha inteira) e aperte "
+        "**Delete** no teclado. Nada é gravado até clicar em **Salvar**."
+    )
+
+    origem_clientes, erro_clientes = status_clientes_painel()
+    if origem_clientes == "supabase":
+        st.success("Fonte: Supabase — as alterações ficam salvas de forma permanente.")
+    elif origem_clientes == "planilha_vazia":
+        st.info(
+            "A tabela `clientes_painel` já existe no Supabase, mas está vazia — por enquanto o painel usa a "
+            "planilha `nome_clientes.xlsx`. Clique em **Salvar** para gravar esta lista no Supabase; "
+            "a partir daí a planilha deixa de ser usada."
+        )
+    elif origem_clientes == "planilha_erro":
+        st.warning(
+            "O Supabase está configurado, mas a tabela `clientes_painel` ainda não foi criada (ou não respondeu): "
+            f"{erro_clientes or 'sem detalhe'}\n\n"
+            "Rode o SQL abaixo uma vez no **SQL Editor** do Supabase e recarregue. Até lá o painel segue "
+            "usando a planilha `nome_clientes.xlsx` e o botão Salvar não vai funcionar."
+        )
+        with st.expander("SQL para criar a tabela `clientes_painel`", expanded=True):
+            st.code(sql_criacao_clientes_painel(), language="sql")
+    else:
+        st.warning(
+            "Supabase não configurado: o que for salvo aqui fica só neste ambiente local "
+            "(arquivo `nome_clientes.xlsx`) e não sobrevive a um redeploy no Streamlit Cloud."
+        )
+
+    st.caption(
+        "ℹ️ **Adicionar** uma cidade só a coloca na lista do painel — as câmeras dela entram na próxima "
+        "importação de CSV (Atualizar Base). **Remover** apenas tira a cidade do painel e das próximas "
+        "importações; as câmeras já gravadas continuam na base e voltam se você readicionar o ID."
+    )
+
+    df_atual = carregar_clientes_painel_df().rename(
+        columns={"id_whitelabel": "ID_Whitelabel", "cidade": "Cidade", "uf": "UF", "franqueado": "Franqueado"}
+    )
+
+    df_editado = st.data_editor(
+        df_atual,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="cfg_clientes_editor",
+        column_config={
+            "ID_Whitelabel": st.column_config.NumberColumn("ID_Whitelabel", required=True, step=1, format="%d"),
+            "Cidade": st.column_config.TextColumn("Cidade", required=True),
+            "UF": st.column_config.TextColumn("UF"),
+            "Franqueado": st.column_config.TextColumn("Franqueado"),
+        },
+    )
+
+    if st.button("💾 Salvar cidades/clientes", type="primary", key="cfg_clientes_salvar"):
+        df_salvar = df_editado.rename(
+            columns={"ID_Whitelabel": "id_whitelabel", "Cidade": "cidade", "UF": "uf", "Franqueado": "franqueado"}
+        )
+        ok, erro = salvar_clientes_painel(df_salvar)
+        if ok:
+            limpar_cache_clientes_painel()
+            st.cache_data.clear()
+            st.success("Cidades/clientes salvos.")
+            st.rerun()
+        else:
+            st.error(f"Não foi possível salvar: {erro}")
+
+    st.caption(f"{len(df_atual)} cliente(s) cadastrado(s) atualmente.")
+
+
 def render_aba_configuracao() -> None:
     st.markdown("### ⚙️ Configuração")
+
+    sub_params, sub_cidades = st.tabs(["🎛️ Parâmetros", "🏙️ Cidades / Clientes"])
+
+    with sub_cidades:
+        render_config_cidades_clientes()
+
+    with sub_params:
+        _render_config_parametros()
+
+
+def _render_config_parametros() -> None:
     st.caption("Parâmetros do painel. As alterações são salvas em arquivo e aplicadas a todos os cálculos (SLA, faixas de status, score de criticidade).")
 
     cfg = _config_atual()
