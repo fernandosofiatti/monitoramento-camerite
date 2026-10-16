@@ -63,9 +63,16 @@ def _ler_clientes_xlsx_normalizado() -> pd.DataFrame:
         return pd.DataFrame(columns=colunas)
 
 
-@st.cache_data
+@st.cache_data(ttl=30)
 def _carregar_clientes_painel_com_status() -> tuple[pd.DataFrame, str, str]:
-    """(df, origem, erro). `origem` diz de onde o df veio de fato:
+    """(df, origem, erro). `origem` diz de onde o df veio de fato.
+
+    ttl=30s de propósito: sem prazo, um erro de "tabela não existe" ficava preso no
+    cache mesmo depois de a tabela ser criada (a tela continuava mostrando o erro
+    antigo até alguém limpar o cache). Edições feitas pela própria tela já limpam
+    este cache na hora (`limpar_cache_clientes_painel`).
+
+    Valores de `origem`:
 
     - "supabase"        tabela `clientes_painel` com dados (fonte durável)
     - "planilha_vazia"  Supabase configurado e a tabela existe, mas está VAZIA →

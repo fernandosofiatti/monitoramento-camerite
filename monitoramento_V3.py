@@ -3648,6 +3648,11 @@ def render_config_cidades_clientes() -> None:
         "**Delete** no teclado. Nada é gravado até clicar em **Salvar**."
     )
 
+    # O botão "Verificar novamente" só marca o pedido; a limpeza acontece aqui, ANTES de
+    # consultar o status, pra o resultado novo já aparecer neste mesmo ciclo.
+    if st.session_state.pop("cfg_clientes_reverificar", False):
+        limpar_cache_clientes_painel()
+
     origem_clientes, erro_clientes = status_clientes_painel()
     if origem_clientes == "supabase":
         st.success("Fonte: Supabase — as alterações ficam salvas de forma permanente.")
@@ -3661,11 +3666,18 @@ def render_config_cidades_clientes() -> None:
         st.warning(
             "O Supabase está configurado, mas a tabela `clientes_painel` ainda não foi criada (ou não respondeu): "
             f"{erro_clientes or 'sem detalhe'}\n\n"
-            "Rode o SQL abaixo uma vez no **SQL Editor** do Supabase e recarregue. Até lá o painel segue "
-            "usando a planilha `nome_clientes.xlsx` e o botão Salvar não vai funcionar."
+            "Rode o SQL abaixo uma vez no **SQL Editor** do Supabase e clique em **Verificar novamente**. "
+            "Até lá o painel segue usando a planilha `nome_clientes.xlsx` e o botão Salvar não vai funcionar."
         )
+        if st.button("🔄 Verificar novamente", key="cfg_clientes_reverificar_btn"):
+            st.session_state["cfg_clientes_reverificar"] = True
         with st.expander("SQL para criar a tabela `clientes_painel`", expanded=True):
             st.code(sql_criacao_clientes_painel(), language="sql")
+        st.caption(
+            "Se você já rodou o SQL e o erro continua (o Supabase às vezes demora a enxergar a tabela nova), "
+            "rode só esta linha no SQL Editor e clique em **Verificar novamente**:"
+        )
+        st.code("notify pgrst, 'reload schema';", language="sql")
     else:
         st.warning(
             "Supabase não configurado: o que for salvo aqui fica só neste ambiente local "
