@@ -606,7 +606,7 @@ def injetar_css_global() -> None:
        Altura mínima igual pros 4 cards e rodapé empurrado pra baixo: o botão
        "Ver clientes" de cada um fica alinhado, mesmo com rótulos de 1 ou 2 linhas. */
     .kpi-card.kpi-compact {
-        padding: 16px 18px 14px; min-height: 148px; margin-bottom: 8px;
+        padding: 16px 18px 14px; min-height: 196px; margin-bottom: 8px;
         display: flex; flex-direction: column; gap: 6px;
     }
     .kpi-card.kpi-compact .kpi-label {
@@ -615,6 +615,34 @@ def injetar_css_global() -> None:
     }
     .kpi-card.kpi-compact .kpi-value { font-size: 32px !important; line-height: 1.1; }
     .kpi-card.kpi-compact .kpi-sub { font-size: 11px; line-height: 1.35; margin-top: auto; }
+
+    /* Rodapé de comparativo com o snapshot (dentro do card compacto).
+       Os seletores têm especificidade maior que `.kpi-card *:not(...)` porque aquela regra
+       força cor cinza em todo texto interno. */
+    .kpi-card.kpi-compact .kpi-cmp {
+        display: flex; align-items: baseline; gap: 8px; margin-top: 6px; padding-top: 8px;
+        border-top: 1px dashed #E4DDF2; font-size: 11px;
+    }
+    .kpi-card.kpi-compact .kpi-cmp-vazio { color: #A39BB5; font-style: italic; }
+    .kpi-card.kpi-compact .kpi-cmp .kpi-cmp-ref { flex: 1; font-size: 10px; letter-spacing: .3px; }
+    .kpi-card.kpi-compact .kpi-cmp .kpi-cmp-base { font-weight: 700; }
+    /* O delta leva a classe `kpi-value` só pra escapar da regra `.kpi-card *:not(.kpi-value)`
+       (que força cinza em todo texto do card); por isso o tamanho/fonte de .kpi-value são
+       refeitos aqui, com especificidade maior. */
+    .kpi-card.kpi-compact .kpi-cmp span.kpi-cmp-delta {
+        font-size: 11px !important; font-weight: 800 !important; font-family: 'DM Sans', sans-serif !important;
+        line-height: 1.2;
+    }
+    .kpi-card.kpi-compact .kpi-cmp span.kpi-cmp-delta.cmp-bom   { color: #0f9f8f !important; -webkit-text-fill-color: #0f9f8f !important; }
+    .kpi-card.kpi-compact .kpi-cmp span.kpi-cmp-delta.cmp-ruim  { color: #e11d48 !important; -webkit-text-fill-color: #e11d48 !important; }
+    .kpi-card.kpi-compact .kpi-cmp span.kpi-cmp-delta.cmp-neutro{ color: #8B7AA3 !important; -webkit-text-fill-color: #8B7AA3 !important; }
+    .kpi-card.kpi-compact .kpi-cmp-lista {
+        margin-top: 6px; padding-top: 8px; border-top: 1px dashed #E4DDF2; font-size: 11px;
+        display: flex; flex-direction: column; gap: 3px;
+    }
+    .kpi-card.kpi-compact .kpi-cmp-lista > div { display: flex; justify-content: space-between; gap: 8px; }
+    .kpi-card.kpi-compact .kpi-cmp-lista .kpi-cmp-ref { font-size: 10px; letter-spacing: .3px; }
+    .kpi-card.kpi-compact .kpi-cmp-lista .kpi-cmp-base { font-weight: 700; }
     .kpi-card::after { border-radius: 20px 20px 0 0 !important; height: 4px !important; }
     .unit-card::before, .card-red::before, .card-yellow::before { border-radius: 20px 20px 0 0 !important; }
     

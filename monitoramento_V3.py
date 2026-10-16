@@ -3552,19 +3552,61 @@ def _sparkline_svg(vals, cor: str, w: int = 118, h: int = 32) -> str:
             f"<circle cx='{lastx}' cy='{lasty}' r='2.8' fill='{cor}'/></svg>")
 
 
-def _card_categoria_html(rotulo: str, valor: str, nota: str, cor_valor: str, faixa: str) -> str:
+def _faixas_clientes(pcts) -> tuple[int, int, int]:
+    """(saudável, atenção, crítico) a partir de % offline por cliente.
+
+    Mesmos cortes dos contadores ao vivo (<=5%, 5–10%, >10%), pra a contagem do snapshot
+    ser comparável com a de hoje.
+    """
+    pcts = [float(x) for x in pcts]
+    return (
+        sum(1 for x in pcts if x <= 5),
+        sum(1 for x in pcts if 5 < x <= 10),
+        sum(1 for x in pcts if x > 10),
+    )
+
+
+def _comparativo_card_html(atual: int, base, data_base: str, bom_se_subir: bool) -> str:
+    """Linha de comparativo dentro do card: `vs <data do snapshot> · <valor> · ▲ +N`.
+
+    `base=None` = não há snapshot pra comparar. A cor do delta depende de subir ser bom
+    (clientes saudáveis) ou ruim (em atenção / críticos).
+    """
+    if base is None:
+        return '<div class="kpi-cmp kpi-cmp-vazio">Sem snapshot para comparar</div>'
+    delta = int(atual) - int(base)
+    if delta == 0:
+        cls, seta, txt = "cmp-neutro", "＝", "igual"
+    else:
+        bom = (delta > 0) == bom_se_subir
+        cls = "cmp-bom" if bom else "cmp-ruim"
+        seta = "▲" if delta > 0 else "▼"
+        txt = f"{delta:+d}"
+    ref = f"vs {data_base}" if data_base else "vs snapshot base"
+    return (
+        f'<div class="kpi-cmp">'
+        f'<span class="kpi-cmp-ref">{ref}</span>'
+        f'<span class="kpi-cmp-base">{int(base)}</span>'
+        f'<span class="kpi-cmp-delta kpi-value {cls}">{seta} {txt}</span>'
+        f'</div>'
+    )
+
+
+def _card_categoria_html(rotulo: str, valor: str, nota: str, cor_valor: str, faixa: str, extra_html: str = "") -> str:
     """Card compacto da Auditoria (contagem por faixa + crescimento da base).
 
     Usa as classes `kpi-card`/`kpi-label`/`kpi-value`/`kpi-sub` (mesmo vocabulário dos cards
     grandes) em vez de CSS inline: o inline `color:` nos textos era sobrescrito pela regra
     `.kpi-card *:not(.kpi-value)` e os números ficavam todos cinza. Só `.kpi-value` é
-    poupado dessa regra, então a cor de status vai nele.
+    poupado dessa regra, então a cor de status vai nele. `extra_html` é o rodapé de
+    comparativo com o snapshot (ver `_comparativo_card_html`).
     """
     return (
         f'<div class="kpi-card kpi-compact kpi-{faixa}">'
         f'<div class="kpi-label">{rotulo}</div>'
         f'<div class="kpi-value" style="color:{cor_valor}">{valor}</div>'
         f'<div class="kpi-sub">{nota}</div>'
+        f'{extra_html}'
         f'</div>'
     )
 
@@ -5033,6 +5075,10 @@ def main():
     if len(snapshot_ids) != 2:
         snapshot_ids = carregar_ultimos_snapshots_ids(2)
     datas_comparativo_txt = st.session_state.get("comparativo_datas_txt", "Comparativo: snapshots insuficientes")
+    data_base_curta = ""
+    data_recente_curta = ""
+    faixas_base = None
+    clientes_sem_base = 0
     if len(snapshot_ids) == 2:
         try:
             df_datas_comp = obter_datas_snapshots(snapshot_ids)
@@ -5040,6 +5086,8 @@ def main():
             data_atual_comp = pd.to_datetime(data_map_comp.get(snapshot_ids[0], ""), errors="coerce").strftime("%d/%m/%Y %H:%M")
             data_ant_comp = pd.to_datetime(data_map_comp.get(snapshot_ids[1], ""), errors="coerce").strftime("%d/%m/%Y %H:%M")
             datas_comparativo_txt = f"Comparando {data_ant_comp} → {data_atual_comp}"
+            data_recente_curta = pd.to_datetime(data_map_comp.get(snapshot_ids[0], ""), errors="coerce").strftime("%d/%m %H:%M")
+            data_base_curta = pd.to_datetime(data_map_comp.get(snapshot_ids[1], ""), errors="coerce").strftime("%d/%m %H:%M")
         except Exception:
             datas_comparativo_txt = "Comparativo: não foi possível identificar as datas dos snapshots"
     if len(snapshot_ids) == 2:
@@ -5053,6 +5101,12 @@ def main():
 
         new_map = df_new.set_index("wl_id")[['offline','pct_offline','total']].to_dict(orient='index')
         old_map = df_old.set_index("wl_id")[['offline','pct_offline','total']].to_dict(orient='index')
+
+        # Contagem de clientes por faixa no snapshot BASE (mesma referência do card
+        # "Variação de Câmeras Offline": o número de hoje contra o snapshot mais antigo do par).
+        pcts_base = [old_map[wl]["pct_offline"] for wl in dados if wl in old_map]
+        faixas_base = _faixas_clientes(pcts_base) if pcts_base else None
+        clientes_sem_base = sum(1 for wl in dados if wl not in old_map)
 
         tendencias = {}
         delta_offs = {}
@@ -5332,37 +5386,55 @@ def main():
             st.session_state["audit_categoria"] = None
 
         col_a, col_b, col_c, col_d = st.columns(4)
+        base_s, base_a, base_c = faixas_base if faixas_base else (None, None, None)
         with col_a:
             st.markdown(_card_categoria_html(
-                "Clientes até 5% offline", n_saudavel, f"{n_saudavel} clientes · 0–5%", "#14b8a6", "ok"
+                "Clientes até 5% offline", n_saudavel, f"{n_saudavel} clientes · 0–5%", "#14b8a6", "ok",
+                _comparativo_card_html(n_saudavel, base_s, data_base_curta, bom_se_subir=True),
             ), unsafe_allow_html=True)
             if st.button("Ver clientes", key="audit_saudavel", use_container_width=True):
                 st.session_state["audit_categoria"] = "Saudável (0-5%)"
                 st.session_state["mostrar_base_delta"] = False
         with col_b:
             st.markdown(_card_categoria_html(
-                "Clientes em atenção (5 a 10% offline)", n_atencao, f"{n_atencao} clientes · 5–10%", "#f59e0b", "warn"
+                "Clientes em atenção (5 a 10% offline)", n_atencao, f"{n_atencao} clientes · 5–10%", "#f59e0b", "warn",
+                _comparativo_card_html(n_atencao, base_a, data_base_curta, bom_se_subir=False),
             ), unsafe_allow_html=True)
             if st.button("Ver clientes", key="audit_atencao", use_container_width=True):
                 st.session_state["audit_categoria"] = "Atenção (5-10%)"
                 st.session_state["mostrar_base_delta"] = False
         with col_c:
             st.markdown(_card_categoria_html(
-                "Clientes acima de 10% offline", n_critico, f"{n_critico} clientes · &gt;10%", "#ef4444", "alert"
+                "Clientes acima de 10% offline", n_critico, f"{n_critico} clientes · &gt;10%", "#ef4444", "alert",
+                _comparativo_card_html(n_critico, base_c, data_base_curta, bom_se_subir=False),
             ), unsafe_allow_html=True)
             if st.button("Ver clientes", key="audit_critico", use_container_width=True):
                 st.session_state["audit_categoria"] = "Crítico (>10%)"
                 st.session_state["mostrar_base_delta"] = False
         with col_d:
+            if len(snapshot_ids) == 2:
+                extra_base = (
+                    '<div class="kpi-cmp-lista">'
+                    f'<div><span class="kpi-cmp-ref">Base · {data_base_curta or "snapshot base"}</span>'
+                    f'<span class="kpi-cmp-base">{total_cameras_anterior} câm.</span></div>'
+                    f'<div><span class="kpi-cmp-ref">Recente · {data_recente_curta or "snapshot recente"}</span>'
+                    f'<span class="kpi-cmp-base">{total_cameras_recente_comparativo} câm.</span></div>'
+                    '</div>'
+                )
+            else:
+                extra_base = '<div class="kpi-cmp kpi-cmp-vazio">Sem snapshot para comparar</div>'
             st.markdown(_card_categoria_html(
-                "Crescimento da Base", texto_delta_base,
-                f"{detalhe_delta_base} · Recente: {total_cameras_recente_comparativo} · Base: {total_cameras_anterior}",
-                cor_delta_base, "neutral",
+                "Crescimento da Base", texto_delta_base, detalhe_delta_base, cor_delta_base, "neutral", extra_base,
             ), unsafe_allow_html=True)
             if st.button("Ver clientes", key="base_delta_ver_clientes", use_container_width=True):
                 st.session_state["mostrar_base_delta"] = True
                 st.session_state["audit_categoria"] = None
 
+        if clientes_sem_base:
+            st.caption(
+                f"ℹ️ {clientes_sem_base} cliente(s) não estavam no snapshot base — entram só na contagem de hoje, "
+                "por isso a diferença pode incluir clientes novos."
+            )
 
         if st.session_state.get("mostrar_base_delta", False):
             st.markdown("<hr>", unsafe_allow_html=True)
