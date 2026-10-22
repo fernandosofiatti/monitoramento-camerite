@@ -3507,14 +3507,23 @@ def _kpi_stats_row(s, suf: str = "", datas=None, dias: int = 30, good_up: bool =
         pior_label, pior_val, melhor_val = "Pior", s2.min(), s2.max()
     else:
         pior_label, pior_val, melhor_val = "Pico", s2.max(), s2.min()
-    _, tend = _tendencia_recente(s, datas=datas, dias=dias)
+    diff_tend, tend = _tendencia_recente(s, datas=datas, dias=dias)
     fmt = (lambda v: f"{v:.1f}{suf}") if suf == "%" else (lambda v: f"{v:.0f}")
+    delta_tend = None if tend == "estável" else f"{diff_tend:+.1f}{suf}" if suf == "%" else f"{diff_tend:+.0f}"
     c = st.columns(5)
     c[0].metric("Atual", fmt(atual))
     c[1].metric(f"Média {dias}d", fmt(media))
     c[2].metric(pior_label, fmt(pior_val))
     c[3].metric("Melhor", fmt(melhor_val))
-    c[4].metric(f"Tendência ({dias}d)", tend)
+    c[4].metric(
+        "Tendência recente", tend, delta=delta_tend,
+        delta_color="normal" if good_up else "inverse",
+        help=(
+            "Compara o valor ATUAL com a média dos 5 pontos imediatamente anteriores "
+            f"(dentro dos últimos {dias} dias). Não compara com a Média {dias}d: o atual pode "
+            "estar abaixo da média do período e mesmo assim subindo em relação aos últimos dias."
+        ),
+    )
 
 
 def _render_kpi_hist(sel: str) -> None:
