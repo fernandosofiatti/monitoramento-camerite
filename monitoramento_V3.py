@@ -3433,7 +3433,8 @@ def _area_kpi_fig(x_dt, y, cor: str, sufixo: str = "", nome: str = "") -> "go.Fi
 
 
 def _tendencia_recente(valores, datas=None, dias: int = 30, k_base: int = 5) -> tuple[float, str]:
-    """Tendência: valor ATUAL (último ponto) contra a média dos até `k_base`
+    """Janela > 7 dias: ATUAL contra a média da janela inteira (a "Média 30d" do card).
+    Janela de 7 dias: valor ATUAL (último ponto) contra a média dos até `k_base`
     pontos imediatamente anteriores a ele, na janela `dias` (a mesma do gráfico
     exibido). Retorna (diferença absoluta, rótulo).
 
@@ -3482,8 +3483,13 @@ def _tendencia_recente(valores, datas=None, dias: int = 30, k_base: int = 5) -> 
         return 0.0, "estável"
 
     atual = float(y[-1])
-    k = min(k_base, n - 1)
-    linha_base = float(np.mean(y[-(k + 1):-1]))
+    if dias > 7:
+        # Janela longa (30d): atual vs MÉDIA da janela — mesma "Média 30d" exibida ao lado,
+        # então atual abaixo da média = caindo, acima = subindo.
+        linha_base = float(np.mean(y))
+    else:
+        k = min(k_base, n - 1)
+        linha_base = float(np.mean(y[-(k + 1):-1]))
     diff = atual - linha_base
 
     # Limiar relativo à escala da série (evita ruído virar "tendência").
@@ -3516,12 +3522,12 @@ def _kpi_stats_row(s, suf: str = "", datas=None, dias: int = 30, good_up: bool =
     c[2].metric(pior_label, fmt(pior_val))
     c[3].metric("Melhor", fmt(melhor_val))
     c[4].metric(
-        "Tendência recente", tend, delta=delta_tend,
+        f"Tendência ({dias}d)", tend, delta=delta_tend,
         delta_color="normal" if good_up else "inverse",
         help=(
-            "Compara o valor ATUAL com a média dos 5 pontos imediatamente anteriores "
-            f"(dentro dos últimos {dias} dias). Não compara com a Média {dias}d: o atual pode "
-            "estar abaixo da média do período e mesmo assim subindo em relação aos últimos dias."
+            f"Atual comparado com a Média {dias}d: abaixo da média = caindo, acima = subindo."
+            if dias > 7 else
+            "Atual comparado com a média dos 5 pontos imediatamente anteriores (últimos 7 dias)."
         ),
     )
 
